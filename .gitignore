@@ -1,0 +1,47 @@
+# Node & JS
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env files (à ne pas commit)
+.env
+**/.env
+
+# Docker
+*.pid
+*.seed
+docker-compose.override.yml
+docker-compose-*.yml
+
+# Build artifacts
+dist/
+build/
+out/
+
+# Tests & coverage
+coverage/
+*.lcov
+
+# OS / IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Certificats / secrets
+certbot/*
+*.key
+*.crt
+*.pem
+
+# Temp
+tmp/
+temp/
+*.bak
+
+# Générés par script
+scripts/*.log
+scripts/*.tmp
