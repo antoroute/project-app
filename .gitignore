@@ -12,8 +12,6 @@ yarn-error.log*
 # Docker
 *.pid
 *.seed
-docker-compose.override.yml
-docker-compose-*.yml
 
 # Build artifacts
 dist/
