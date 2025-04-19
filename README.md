@@ -81,6 +81,7 @@ Fonctionnalités principales :
 
 ## 📁 Arborescence projet
 
+```plaintext
 project-app/
 ├── backend/
 │   ├── auth/
@@ -115,3 +116,4 @@ project-app/
 │   ├── deploy_app.sh
 │   └── teardown.sh
 └── README.md
+```
