@@ -39,7 +39,8 @@ services:
     depends_on:
       - auth
       - messaging
-    network_mode: "host"
+    networks:
+      - backend_net
 
   certbot:
     image: certbot/certbot
