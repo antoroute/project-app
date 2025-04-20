@@ -26,13 +26,13 @@ services:
       - db_net
 
   nginx:
-    image: nginx:latest
+    build:
+      context: ./nginx
     container_name: nginx
     ports:
       - "80:80"
       - "443:443"
     volumes:
-
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
     restart: always
