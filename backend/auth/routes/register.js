@@ -5,17 +5,17 @@ export function registerRoutes(fastify) {
     schema: {
       body: {
         type: 'object',
-        required: ['email', 'password'],
+        required: ['email', 'password', 'publicKey'],
         properties: {
-          email: { type: 'string', format: 'email' },
-          password: { type: 'string', minLength: 6 }
-        }
+            email: { type: 'string', format: 'email' },
+            password: { type: 'string', minLength: 6 },
+            publicKey: { type: 'string', minLength: 300 } // RSA 2048 = ~450-550 char base64
+          }
       }
     }
   }, async (req, reply) => {
-    const { email, password } = req.body;
+    const { email, password, publicKey } = req.body;
     const hashed = await bcrypt.hash(password, 10);
-    const publicKey = 'dummy_key'; // à remplacer par une clé RSA côté client
 
     try {
       await fastify.pg.query(
