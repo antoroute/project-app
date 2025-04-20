@@ -4,6 +4,7 @@ services:
   auth:
     build: ../backend/auth
     container_name: auth
+    restart: always
     env_file:
       - ../backend/auth/.env
     networks:
@@ -13,6 +14,7 @@ services:
   messaging:
     build: ../backend/messaging
     container_name: messaging
+    restart: always
     env_file:
       - ../backend/messaging/.env
     networks:
@@ -30,6 +32,7 @@ services:
       - ./nginx/site.conf:/etc/nginx/conf.d/site.conf
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
+    restart: always
     depends_on:
       - auth
       - messaging
