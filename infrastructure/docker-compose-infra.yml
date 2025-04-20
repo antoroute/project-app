@@ -10,7 +10,7 @@ services:
       POSTGRES_DB: messaging_db
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgres/initdb:/docker-entrypoint-initdb.d
       - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf
     networks:
       - db_net
