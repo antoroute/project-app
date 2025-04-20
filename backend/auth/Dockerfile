@@ -1,5 +1,10 @@
-FROM node:20
+FROM node:20-alpine
+
 WORKDIR /app
-COPY . .
+
+COPY package*.json ./
 RUN npm install
-CMD ["node", "index.js"]
+
+COPY . .
+
+CMD [ "npm", "start" ]
