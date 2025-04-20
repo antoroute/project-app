@@ -1,13 +1,13 @@
 import bcrypt from 'bcrypt';
 
 function isValidRSA4096(publicKey) {
-  return (
-    typeof publicKey === 'string' &&
-    publicKey.includes('-----BEGIN PUBLIC KEY-----') &&
-    publicKey.includes('-----END PUBLIC KEY-----') &&
-    publicKey.length >= 800 // RSA 4096 = ~800 à 900 caractères base64 encodé
-  );
-}
+    const pemRegex = /-----BEGIN PUBLIC KEY-----\\n([A-Za-z0-9+/=\\n]+)-----END PUBLIC KEY-----/;
+    return (
+      typeof publicKey === 'string' &&
+      publicKey.match(pemRegex) &&
+      publicKey.length >= 800 // RSA 4096 = ~850-900 chars
+    );
+}  
 
 export function registerRoutes(fastify) {
   fastify.post('/register', {
