@@ -26,6 +26,10 @@ loginRoutes(fastify);
 
 fastify.get('/api/health', async () => 'Auth OK');
 
+fastify.get('/me', { preHandler: verifyJWT(fastify) }, async (req, reply) => {
+  return { user: req.user };
+});
+
 try {
   await fastify.listen({ port: process.env.PORT || 3000, host: '0.0.0.0' });
 } catch (err) {
