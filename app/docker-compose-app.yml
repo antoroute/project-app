@@ -35,7 +35,6 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
-    restart: always
     depends_on:
       - auth
       - messaging
