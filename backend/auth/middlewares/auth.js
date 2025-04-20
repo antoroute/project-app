@@ -3,7 +3,7 @@ export function verifyJWT(fastify) {
       try {
         await req.jwtVerify();
       } catch (err) {
-        reply.send(err);
+        reply.code(401).send({ error: 'Unauthorized' });
       }
     };
-  }  
+}
