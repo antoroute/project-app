@@ -5,8 +5,10 @@ services:
     build: ../backend/auth
     container_name: auth
     restart: always
-    env_file:
-      - ../backend/auth/.env
+    environment:
+      - PORT=3000
+      - JWT_SECRET=${AUTH_JWT_SECRET}
+      - DATABASE_URL=${AUTH_DB}
     networks:
       - backend_net
       - db_net
@@ -15,8 +17,10 @@ services:
     build: ../backend/messaging
     container_name: messaging
     restart: always
-    env_file:
-      - ../backend/messaging/.env
+    environment:
+      - PORT=3001
+      - JWT_SECRET=${AUTH_JWT_SECRET}
+      - DATABASE_URL=${AUTH_DB}
     networks:
       - backend_net
       - db_net
