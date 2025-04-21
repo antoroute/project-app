@@ -35,6 +35,9 @@ await connectDB(fastify);
 groupRoutes(fastify);
 // conversationRoutes(fastify);
 
+// Route santé
+fastify.get('/health', async () => 'Messaging OK');
+
 // Important : s'assurer que Fastify est prêt avant de créer le serveur
 await fastify.ready();
 
@@ -75,9 +78,6 @@ io.on('connection', (socket) => {
     }
   });
 });
-
-// Route santé
-fastify.get('/health', async () => 'Messaging OK');
 
 // Lancement du serveur HTTP + WebSocket
 server.listen({ port: process.env.PORT || 3001, host: '0.0.0.0' }, () => {
