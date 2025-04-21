@@ -14,15 +14,31 @@ export function loginRoutes(fastify) {
     }
   }, async (req, reply) => {
     const { email, password } = req.body;
-    const result = await fastify.pg.query('SELECT * FROM users WHERE email = $1', [email]);
 
-    if (result.rowCount === 0) return reply.code(401).send({ error: 'Invalid credentials' });
+    try {
+      const result = await fastify.pg.query('SELECT * FROM users WHERE email = $1', [email]);
 
-    const user = result.rows[0];
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return reply.code(401).send({ error: 'Invalid credentials' });
+      if (result.rowCount === 0) {
+        return reply.code(401).send({ error: 'Invalid credentials' });
+      }
 
-    const token = fastify.jwt.sign({ id: user.id, email: user.email });
-    return reply.send({ token });
+      const user = result.rows[0];
+      const valid = await bcrypt.compare(password, user.password);
+
+      if (!valid) {
+        return reply.code(401).send({ error: 'Invalid credentials' });
+      }
+
+      const token = fastify.jwt.sign({
+        id: user.id,
+        email: user.email
+      });
+
+      return reply.send({ token });
+
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(500).send({ error: 'Server error during login' });
+    }
   });
 }
