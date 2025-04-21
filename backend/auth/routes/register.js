@@ -29,7 +29,7 @@ export function registerRoutes(fastify) {
         properties: {
           email: { type: 'string', format: 'email' },
           password: { type: 'string', minLength: 6 },
-          publicKey: { type: 'string', minLength: 600 }
+          publicKey: { type: 'string', minLength: 700 }
         }
       }
     }
