@@ -6,7 +6,7 @@ import { Server } from 'socket.io';
 import { createServer } from 'http';
 import { socketAuthMiddleware } from './middlewares/socketAuth.js';
 import { groupRoutes } from './routes/groups.js';
-import { conversationRoutes } from './routes/conversations.js';
+"import { conversationRoutes } from './routes/conversations.js';
 import { connectDB } from './plugins/db.js';
 
 const fastify = Fastify({ logger: true });
