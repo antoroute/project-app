@@ -1,13 +1,24 @@
 import bcrypt from 'bcrypt';
 
 function isValidRSA4096(publicKey) {
-    const pemRegex = /-----BEGIN PUBLIC KEY-----\\n([A-Za-z0-9+/=\\n]+)-----END PUBLIC KEY-----/;
-    return (
-      typeof publicKey === 'string' &&
-      publicKey.match(pemRegex) &&
-      publicKey.length >= 800 // RSA 4096 = ~850-900 chars
-    );
-}  
+  if (typeof publicKey !== 'string') return false;
+
+  // Vérifie les entêtes/délimiteurs
+  const isValidPEM =
+    publicKey.startsWith('-----BEGIN PUBLIC KEY-----') &&
+    publicKey.endsWith('-----END PUBLIC KEY-----');
+
+  if (!isValidPEM) return false;
+
+  // Nettoie les sauts de ligne pour mesurer la taille utile
+  const base64Body = publicKey
+    .replace('-----BEGIN PUBLIC KEY-----', '')
+    .replace('-----END PUBLIC KEY-----', '')
+    .replace(/[\n\r]/g, '')
+    .trim();
+
+  return base64Body.length >= 700; 
+}
 
 export function registerRoutes(fastify) {
   fastify.post('/register', {
