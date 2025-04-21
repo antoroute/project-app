@@ -1,16 +1,27 @@
-// /app/backend/messaging/index.js
-
-import express from 'express';
-import http from 'http';
+import Fastify from 'fastify';
+import fastifyJWT from '@fastify/jwt';
+import fastifyCors from '@fastify/cors';
+import helmet from '@fastify/helmet';
 import { Server } from 'socket.io';
+import { createServer } from 'http';
 import { socketAuthMiddleware } from './middlewares/socketAuth.js';
 import { groupRoutes } from './routes/groups.js';
 import { conversationRoutes } from './routes/conversations.js';
+import { connectDB } from './plugins/db.js';
 
-const app = express();
-app.use(express.json());
+const fastify = Fastify({ logger: true });
 
-const server = http.createServer(app);
+await fastify.register(fastifyCors, { origin: '*' });
+await fastify.register(helmet);
+await fastify.register(fastifyJWT, {
+  secret: process.env.JWT_SECRET
+});
+await connectDB(fastify);
+
+groupRoutes(fastify);
+conversationRoutes(fastify);
+
+const server = createServer((req, res) => fastify.server.emit('request', req, res));
 const io = new Server(server, {
   cors: {
     origin: '*',
@@ -18,24 +29,17 @@ const io = new Server(server, {
   }
 });
 
-socketAuthMiddleware(io);
-
-groupRoutes(app);         
-conversationRoutes(app);  
+socketAuthMiddleware(io, fastify);
 
 io.on('connection', (socket) => {
   console.log('Authenticated user connected:', socket.user.id);
 
   socket.on('message:send', async (payload) => {
-    // Validate and save message payload (AES encrypted message + keys)
-    // payload = { conversationId, encryptedMessage, encryptedKeys }
-    // encryptedKeys = { user_id1: rsa(AES_key), user_id2: rsa(AES_key), ... }
-
     const { conversationId, encryptedMessage, encryptedKeys } = payload;
     const senderId = socket.user.id;
 
     try {
-      await app.pg.query(
+      await fastify.pg.query(
         'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
         [conversationId, senderId, encryptedMessage, encryptedKeys]
       );
@@ -47,8 +51,8 @@ io.on('connection', (socket) => {
   });
 });
 
-app.get('/health', (req, res) => res.send('Messaging OK'));
+fastify.get('/health', async () => 'Messaging OK');
 
-server.listen(process.env.PORT || 3001, () => {
-  console.log(`Messaging listening on port ${process.env.PORT || 3001}`);
+server.listen({ port: process.env.PORT || 3001, host: '0.0.0.0' }, () => {
+  console.log(`Messaging service listening on port ${process.env.PORT || 3001}`);
 });
