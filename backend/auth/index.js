@@ -1,6 +1,3 @@
-/// Structure finale du service auth basé sur Fastify ///
-
-// Fichier: /app/backend/auth/index.js
 import Fastify from 'fastify';
 import fastifyJWT from '@fastify/jwt';
 import fastifyCors from '@fastify/cors';
@@ -26,14 +23,9 @@ loginRoutes(fastify);
 
 fastify.get('/api/health', async () => 'Auth OK');
 
-fastify.get('/me', { preHandler: verifyJWT(fastify) }, async (req, reply) => {
-  return { user: req.user };
-});
-
 try {
   await fastify.listen({ port: process.env.PORT || 3000, host: '0.0.0.0' });
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
+} catch (err) {
+  fastify.log.error(err);
+  process.exit(1);
 }
