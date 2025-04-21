@@ -10,7 +10,7 @@ export function groupRoutes(fastify) {
         required: ['name', 'publicKeyGroup'],
         properties: {
           name: { type: 'string' },
-          publicKeyGroup: { type: 'string', minLength: 800 }
+          publicKeyGroup: { type: 'string', minLength: 700 }
         }
       }
     },
