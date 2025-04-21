@@ -45,7 +45,7 @@ export function groupRoutes(fastify) {
         type: 'object',
         required: ['publicKeyGroup'],
         properties: {
-          publicKeyGroup: { type: 'string', minLength: 800 }
+          publicKeyGroup: { type: 'string', minLength: 700 }
         }
       }
     },
