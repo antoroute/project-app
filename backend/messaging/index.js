@@ -51,11 +51,7 @@ io.on('connection', (socket) => {
   });
 });
 
-fastify.get('/health', {
-  handler: async (request, reply) => {
-    return 'Messaging OK';
-  }
-});
+fastify.get('/health', async () => 'Messaging OK');
 
 server.listen({ port: process.env.PORT || 3001, host: '0.0.0.0' }, () => {
   console.log(`Messaging service listening on port ${process.env.PORT || 3001}`);
