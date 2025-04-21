@@ -18,9 +18,9 @@ await fastify.register(fastifyJWT, {
 });
 fastify.decorate("authenticate", async function (request, reply) {
   try {
-    await request.jwtVerify();
+    await request.jwtVerify(); // injecte `request.user`
   } catch (err) {
-    reply.code(401).send({ error: "Unauthorized" });
+    reply.code(401).send({ error: 'Invalid or expired token' });
   }
 });
 await connectDB(fastify);
