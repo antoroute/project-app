@@ -98,7 +98,7 @@ export function groupRoutes(fastify) {
 
       try {
         const members = await pool.query(`
-          SELECT u.id AS "userId", u.email, ug.public_key_group AS "publicKeyGroup"
+          SELECT u.id AS "userId", u.email, u.username, ug.public_key_group AS "publicKeyGroup"
           FROM user_groups ug
           JOIN users u ON u.id = ug.user_id
           WHERE ug.group_id = $1

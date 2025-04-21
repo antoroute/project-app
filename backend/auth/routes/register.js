@@ -5,28 +5,33 @@ export function registerRoutes(fastify) {
     schema: {
       body: {
         type: 'object',
-        required: ['email', 'password'],
+        required: ['email', 'password', 'username'],
         properties: {
           email: { type: 'string', format: 'email' },
-          password: { type: 'string', minLength: 6 }
+          password: { type: 'string', minLength: 6 },
+          username: { type: 'string', minLength: 3, maxLength: 30 }
         }
       }
     }
   }, async (req, reply) => {
-    const { email, password } = req.body;
+    const { email, password, username } = req.body;
 
     try {
-      // Vérifie que l'utilisateur n'existe pas déjà
-      const existing = await fastify.pg.query('SELECT 1 FROM users WHERE email = $1', [email]);
-      if (existing.rowCount > 0) {
+      const existingEmail = await fastify.pg.query('SELECT 1 FROM users WHERE email = $1', [email]);
+      if (existingEmail.rowCount > 0) {
         return reply.code(409).send({ error: 'Email already registered' });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 12); // Sel intégré + cost élevé
+      const existingUsername = await fastify.pg.query('SELECT 1 FROM users WHERE username = $1', [username]);
+      if (existingUsername.rowCount > 0) {
+        return reply.code(409).send({ error: 'Username already taken' });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 12);
 
       await fastify.pg.query(
-        'INSERT INTO users (email, password) VALUES ($1, $2)',
-        [email, hashedPassword]
+        'INSERT INTO users (email, username, password) VALUES ($1, $2, $3)',
+        [email, username, hashedPassword]
       );
 
       return reply.code(201).send({ message: 'User registered' });

@@ -55,7 +55,7 @@ socketAuthMiddleware(io, fastify);
 
 // Logique temps réel
 io.on('connection', (socket) => {
-  console.log('✅ Authenticated user connected:', socket.user.id);
+  console.log('Authenticated user connected:', socket.user.id);
 
   socket.on('message:send', async (payload) => {
     const { conversationId, encryptedMessage, encryptedKeys } = payload;
