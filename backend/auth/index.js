@@ -21,7 +21,7 @@ await connectDB(fastify); // connect fastify.pg to db
 registerRoutes(fastify);
 loginRoutes(fastify);
 
-fastify.get('/api/health', async () => 'Auth OK');
+fastify.get('/health', async () => 'Auth OK');
 
 fastify.get('/me', { preHandler: verifyJWT(fastify) }, async (req, reply) => {
   return { user: req.user };
