@@ -37,6 +37,40 @@ export function groupRoutes(fastify) {
     }
   });
 
+  // Voir les détails d’un groupe (nom)
+  fastify.get('/groups/:id', {
+    preHandler: fastify.authenticate,
+    handler: async (request, reply) => {
+      const groupId = request.params.id;
+      const userId = request.user.id;
+
+      const isMember = await pool.query(
+        'SELECT 1 FROM user_groups WHERE user_id = $1 AND group_id = $2',
+        [userId, groupId]
+      );
+
+      if (isMember.rowCount === 0) {
+        return reply.code(403).send({ error: 'Forbidden: not a group member' });
+      }
+
+      try {
+        const result = await pool.query(
+          'SELECT id, name FROM groups WHERE id = $1',
+          [groupId]
+        );
+
+        if (result.rowCount === 0) {
+          return reply.code(404).send({ error: 'Group not found' });
+        }
+
+        return reply.send(result.rows[0]);
+      } catch (err) {
+        request.log.error(err);
+        return reply.code(500).send({ error: 'Failed to fetch group' });
+      }
+    }
+  });
+
   // Rejoindre un groupe existant
   fastify.post('/groups/:id/join', {
     preHandler: fastify.authenticate,
