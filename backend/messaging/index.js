@@ -1,11 +1,11 @@
-// /app/backend/messaging/index.js
-
 import Fastify from 'fastify';
 import fastifyJWT from '@fastify/jwt';
 import fastifyCors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { Server } from 'socket.io';
 import { createServer } from 'http';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { createClient } from 'redis';
 import { socketAuthMiddleware } from './middlewares/socketAuth.js';
 import { groupRoutes } from './routes/groups.js';
 import { conversationRoutes } from './routes/conversations.js';
@@ -19,7 +19,6 @@ await fastify.register(fastifyJWT, {
   secret: process.env.JWT_SECRET
 });
 
-// Middleware JWT pour les routes REST
 fastify.decorate("authenticate", async function (request, reply) {
   try {
     await request.jwtVerify();
@@ -28,20 +27,15 @@ fastify.decorate("authenticate", async function (request, reply) {
   }
 });
 
-// Connexion à PostgreSQL
 await connectDB(fastify);
 
-// Routes REST
 groupRoutes(fastify);
 conversationRoutes(fastify);
 
-// Route santé
 fastify.get('/health', async () => 'Messaging OK');
 
-// Important : s'assurer que Fastify est prêt avant de créer le serveur
 await fastify.ready();
 
-// Serveur HTTP manuellement créé pour intégrer Socket.IO
 const server = createServer((req, res) => fastify.server.emit('request', req, res));
 const io = new Server(server, {
   cors: {
@@ -50,18 +44,41 @@ const io = new Server(server, {
   }
 });
 
-// Authentification WebSocket via JWT
+// Redis adapter pour Socket.IO
+try {
+  const pubClient = createClient({ url: 'redis://redis:6379' });
+  const subClient = pubClient.duplicate();
+  await pubClient.connect();
+  await subClient.connect();
+  io.adapter(createAdapter(pubClient, subClient));
+  console.log('Redis adapter for Socket.IO is ready');
+} catch (err) {
+  console.error('Redis adapter connection failed:', err);
+}
+
 socketAuthMiddleware(io, fastify);
 
-// Logique temps réel
 io.on('connection', (socket) => {
   console.log('Authenticated user connected:', socket.user.id);
+
+  socket.on('conversation:subscribe', (conversationId) => {
+    socket.join(conversationId);
+  });
 
   socket.on('message:send', async (payload) => {
     const { conversationId, encryptedMessage, encryptedKeys } = payload;
     const senderId = socket.user.id;
 
     try {
+      const isInConversation = await fastify.pg.query(
+        'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
+        [conversationId, senderId]
+      );
+
+      if (isInConversation.rowCount === 0) {
+        return socket.emit('error', 'You are not a member of this conversation');
+      }
+
       await fastify.pg.query(
         'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
         [conversationId, senderId, encryptedMessage, encryptedKeys]
@@ -69,17 +86,21 @@ io.on('connection', (socket) => {
 
       io.to(conversationId).emit('message:new', {
         senderId,
+        conversationId,
         encryptedMessage,
         encryptedKeys
       });
     } catch (err) {
-      console.error('[message:send]', err);
-      socket.emit('error', 'Message could not be stored');
+      console.error('[Socket message:send]', err);
+      socket.emit('error', 'Internal error while sending message');
     }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.user.id);
   });
 });
 
-// Lancement du serveur HTTP + WebSocket
 server.listen({ port: process.env.PORT || 3001, host: '0.0.0.0' }, () => {
   console.log(`Messaging service listening on port ${process.env.PORT || 3001}`);
 });

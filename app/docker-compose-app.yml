@@ -21,6 +21,7 @@ services:
       - PORT=3001
       - JWT_SECRET=${AUTH_JWT_SECRET}
       - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
     networks:
       - backend_net
       - db_net
