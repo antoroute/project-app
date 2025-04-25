@@ -43,3 +43,80 @@ temp/
 # Générés par script
 scripts/*.log
 scripts/*.tmp
+
+# Fichiers générés par Flutter
+.dart_tool/
+.packages
+.pub/
+frontend-mobile/flutter_message_app/build/
+flutter_*.png
+
+# Fichiers et dossiers spécifiques Android
+frontend-mobile/flutter_message_app/android/.gradle
+frontend-mobile/flutter_message_app/android/.idea
+frontend-mobile/flutter_message_app/android/build
+frontend-mobile/flutter_message_app/android/app/build
+frontend-mobile/flutter_message_app/android/key.properties  # Contient souvent des clés de déploiement Android sensibles
+*.jks                   # Clé de signature Android sensible
+*.keystore              # Clé de signature Android sensible
+
+# Fichiers et dossiers spécifiques iOS
+frontend-mobile/flutter_message_app/ios/.generated/
+frontend-mobile/flutter_message_app/ios/.symlinks/
+frontend-mobile/flutter_message_app/ios/Pods/
+frontend-mobile/flutter_message_app/ios/Flutter/App.framework
+frontend-mobile/flutter_message_app/ios/Flutter/Flutter.framework
+frontend-mobile/flutter_message_app/ios/Flutter/flutter_assets/
+frontend-mobile/flutter_message_app/ios/ServiceDefinitions.json
+frontend-mobile/flutter_message_app/ios/Runner.xcworkspace/xcuserdata/
+frontend-mobile/flutter_message_app/ios/Runner.xcodeproj/project.xcworkspace/
+frontend-mobile/flutter_message_app/ios/Runner.xcodeproj/xcuserdata/
+
+# Fichiers macOS
+.DS_Store
+
+# Fichiers Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Fichiers IntelliJ IDEA
+.idea/
+
+# Fichiers Android Studio
+*.iml
+
+# Logs
+*.log
+
+# Configuration et clés sensibles
+.env
+.env.*
+secrets.json
+frontend-mobile/flutter_message_app/lib/config/secrets.dart
+frontend-mobile/flutter_message_app/lib/config/*.g.dart
+
+# Fichiers de build Flutter Web
+web-build/
+
+# Fichiers de couverture de test
+coverage/
+
+# Fichiers temporaires et inutiles
+*.tmp
+*.swp
+*~
+
+# Certificats et clés RSA (sécurité)
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+*.cer
+
+# Données personnelles utilisateur
+*.sqlite
+*.db
+
+# Fichier de configuration spécifique au développement
+config.dev.json
