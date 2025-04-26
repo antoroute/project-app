@@ -12,15 +12,13 @@ import { groupRoutes } from './routes/groups.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { connectDB } from './plugins/db.js';
 
-dotenv.config(); 
+dotenv.config();
 
 const fastify = Fastify({ logger: true });
 
 await fastify.register(fastifyCors, { origin: '*' });
 await fastify.register(helmet);
-await fastify.register(fastifyJWT, {
-  secret: process.env.JWT_SECRET
-});
+await fastify.register(fastifyJWT, { secret: process.env.JWT_SECRET });
 
 fastify.decorate("authenticate", async function (request, reply) {
   try {
@@ -47,7 +45,6 @@ const io = new Server(server, {
   }
 });
 
-// Redis adapter pour Socket.IO
 try {
   const pubClient = createClient({ url: process.env.REDIS_URL });
   const subClient = pubClient.duplicate();
@@ -68,13 +65,13 @@ io.on('connection', (socket) => {
     try {
       await socket.join(conversationId);
       console.log(`➡️ Socket ${socket.id} joined conversation ${conversationId}`);
-      if (ack) ack({ success: true }); // pour confirmer au client si besoin
+      if (ack) ack({ success: true });
     } catch (err) {
       console.error('❌ Failed to join conversation:', err);
       if (ack) ack({ success: false, error: err.message });
     }
-  });  
-  
+  });
+
   socket.on('conversation:unsubscribe', async (conversationId) => {
     try {
       await socket.leave(conversationId);
@@ -87,36 +84,33 @@ io.on('connection', (socket) => {
   socket.on('message:send', async (payload) => {
     const { conversationId, encryptedMessage, encryptedKeys } = payload;
     const senderId = socket.user.id;
-  
+
     try {
       const isInConversation = await fastify.pg.query(
         'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
         [conversationId, senderId]
       );
-  
+
       if (isInConversation.rowCount === 0) {
         return socket.emit('error', 'You are not a member of this conversation');
       }
-  
+
       await fastify.pg.query(
         'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
         [conversationId, senderId, encryptedMessage, encryptedKeys]
       );
-  
-      console.log(`📨 Emitting message:new to conversation ${conversationId}`, {
-        senderId,
-        encryptedMessage
-      });
-  
+
+      console.log(`📨 Emitting message:new to conversation ${conversationId}`, { senderId, encryptedMessage });
+
       const newMessage = { senderId, conversationId, encryptedMessage, encryptedKeys };
       io.to(conversationId).emit('message:new', newMessage);
-  
+
     } catch (err) {
       console.error('❌ [Socket message:send]', err);
       socket.emit('error', 'Internal error while sending message');
     }
   });
-  
+
   socket.on('disconnect', () => {
     console.log('❌ User disconnected:', socket.user.id);
   });
