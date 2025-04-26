@@ -48,7 +48,6 @@ const io = new Server(server, {
 });
 
 // Redis adapter pour Socket.IO
-// Redis adapter pour Socket.IO
 try {
   const pubClient = createClient({ url: process.env.REDIS_URL });
   const subClient = pubClient.duplicate();
@@ -73,37 +72,36 @@ io.on('connection', (socket) => {
   socket.on('message:send', async (payload) => {
     const { conversationId, encryptedMessage, encryptedKeys } = payload;
     const senderId = socket.user.id;
-
+  
     try {
       const isInConversation = await fastify.pg.query(
         'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
         [conversationId, senderId]
       );
-
+  
       if (isInConversation.rowCount === 0) {
         return socket.emit('error', 'You are not a member of this conversation');
       }
-
+  
       await fastify.pg.query(
         'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
         [conversationId, senderId, encryptedMessage, encryptedKeys]
       );
-
+  
       console.log(`📨 Emitting message:new to conversation ${conversationId}`, {
         senderId,
         encryptedMessage
       });
-
-      const payload = { senderId, conversationId, encryptedMessage, encryptedKeys };
-      socket.to(conversationId).emit('message:new', payload);
-      socket.emit('message:new', payload);
-
+  
+      const newMessage = { senderId, conversationId, encryptedMessage, encryptedKeys };
+      io.to(conversationId).emit('message:new', newMessage);
+  
     } catch (err) {
       console.error('❌ [Socket message:send]', err);
       socket.emit('error', 'Internal error while sending message');
     }
   });
-
+  
   socket.on('disconnect', () => {
     console.log('❌ User disconnected:', socket.user.id);
   });
