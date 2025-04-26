@@ -93,12 +93,10 @@ io.on('connection', (socket) => {
         encryptedMessage
       });
 
-      io.to(conversationId).emit('message:new', { 
-        senderId, 
-        conversationId, 
-        encryptedMessage, 
-        encryptedKeys 
-      });
+      const payload = { senderId, conversationId, encryptedMessage, encryptedKeys };
+      socket.to(conversationId).emit('message:new', payload);
+      socket.emit('message:new', payload);
+
     } catch (err) {
       console.error('❌ [Socket message:send]', err);
       socket.emit('error', 'Internal error while sending message');
