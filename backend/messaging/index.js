@@ -83,12 +83,13 @@ io.on('connection', (socket) => {
         'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
         [conversationId, senderId, encryptedMessage, encryptedKeys]
       );
-
-      io.to(conversationId).emit('message:new', {
-        senderId,
-        conversationId,
-        encryptedMessage,
-        encryptedKeys
+      console.log('Message sent:', { conversationId, senderId, encryptedMessage, encryptedKeys });
+      // Emit the message to all users in the conversation
+      io.in(conversationId).emit('message:new', { 
+        senderId, 
+        conversationId, 
+        encryptedMessage, 
+        encryptedKeys 
       });
     } catch (err) {
       console.error('[Socket message:send]', err);
