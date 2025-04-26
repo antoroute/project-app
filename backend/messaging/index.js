@@ -48,11 +48,9 @@ const io = new Server(server, {
 });
 
 // Redis adapter pour Socket.IO
+// Redis adapter pour Socket.IO
 try {
-  const pubClient = createClient({
-    url: process.env.REDIS_URL,
-    password: process.env.REDIS_PASSWORD
-  });
+  const pubClient = createClient({ url: process.env.REDIS_URL });
   const subClient = pubClient.duplicate();
   await pubClient.connect();
   await subClient.connect();
