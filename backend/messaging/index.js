@@ -12,7 +12,7 @@ import { groupRoutes } from './routes/groups.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { connectDB } from './plugins/db.js';
 
-dotenv.config(); // 🆕 Ajouté pour lire .env si jamais ce n'était pas encore fait
+dotenv.config(); 
 
 const fastify = Fastify({ logger: true });
 
@@ -49,7 +49,10 @@ const io = new Server(server, {
 
 // Redis adapter pour Socket.IO
 try {
-  const pubClient = createClient({ url: process.env.REDIS_URL });
+  const pubClient = createClient({
+    url: process.env.REDIS_URL,
+    password: process.env.REDIS_PASSWORD
+  });
   const subClient = pubClient.duplicate();
   await pubClient.connect();
   await subClient.connect();
