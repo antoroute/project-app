@@ -89,7 +89,7 @@ io.on('connection', (socket) => {
         encryptedMessage
       });
       // Emit the message to all users in the conversation
-      io.in(conversationId).emit('message:new', { 
+      io.to(conversationId).emit('message:new', { 
         senderId, 
         conversationId, 
         encryptedMessage, 
