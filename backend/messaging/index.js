@@ -63,6 +63,7 @@ io.on('connection', (socket) => {
 
   socket.on('conversation:subscribe', (conversationId) => {
     socket.join(conversationId);
+    console.log(`Socket ${socket.id} joined conversation ${conversationId}`);
   });
 
   socket.on('message:send', async (payload) => {
