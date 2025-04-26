@@ -6,10 +6,13 @@ import { Server } from 'socket.io';
 import { createServer } from 'http';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
+import dotenv from 'dotenv';
 import { socketAuthMiddleware } from './middlewares/socketAuth.js';
 import { groupRoutes } from './routes/groups.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { connectDB } from './plugins/db.js';
+
+dotenv.config(); // 🆕 Ajouté pour lire .env si jamais ce n'était pas encore fait
 
 const fastify = Fastify({ logger: true });
 
@@ -46,24 +49,24 @@ const io = new Server(server, {
 
 // Redis adapter pour Socket.IO
 try {
-  const pubClient = createClient({ url: 'redis://redis:6379' });
+  const pubClient = createClient({ url: process.env.REDIS_URL });
   const subClient = pubClient.duplicate();
   await pubClient.connect();
   await subClient.connect();
   io.adapter(createAdapter(pubClient, subClient));
-  console.log('Redis adapter for Socket.IO is ready');
+  console.log('✅ Redis adapter for Socket.IO is ready');
 } catch (err) {
-  console.error('Redis adapter connection failed:', err);
+  console.error('❌ Redis adapter connection failed:', err);
 }
 
 socketAuthMiddleware(io, fastify);
 
 io.on('connection', (socket) => {
-  console.log('Authenticated user connected:', socket.user.id);
+  console.log('✅ Authenticated user connected:', socket.user.id);
 
   socket.on('conversation:subscribe', (conversationId) => {
     socket.join(conversationId);
-    console.log(`Socket ${socket.id} joined conversation ${conversationId}`);
+    console.log(`➡️ Socket ${socket.id} joined conversation ${conversationId}`);
   });
 
   socket.on('message:send', async (payload) => {
@@ -84,11 +87,12 @@ io.on('connection', (socket) => {
         'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
         [conversationId, senderId, encryptedMessage, encryptedKeys]
       );
-      console.log(`Emitting message:new to conversation ${conversationId}`, {
+
+      console.log(`📨 Emitting message:new to conversation ${conversationId}`, {
         senderId,
         encryptedMessage
       });
-      // Emit the message to all users in the conversation
+
       io.to(conversationId).emit('message:new', { 
         senderId, 
         conversationId, 
@@ -96,16 +100,16 @@ io.on('connection', (socket) => {
         encryptedKeys 
       });
     } catch (err) {
-      console.error('[Socket message:send]', err);
+      console.error('❌ [Socket message:send]', err);
       socket.emit('error', 'Internal error while sending message');
     }
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.user.id);
+    console.log('❌ User disconnected:', socket.user.id);
   });
 });
 
 server.listen({ port: process.env.PORT || 3001, host: '0.0.0.0' }, () => {
-  console.log(`Messaging service listening on port ${process.env.PORT || 3001}`);
+  console.log(`🚀 Messaging service listening on port ${process.env.PORT || 3001}`);
 });
