@@ -64,9 +64,32 @@ socketAuthMiddleware(io, fastify);
 io.on('connection', (socket) => {
   console.log('✅ Authenticated user connected:', socket.user.id);
 
-  socket.on('conversation:subscribe', (conversationId) => {
-    socket.join(conversationId);
-    console.log(`➡️ Socket ${socket.id} joined conversation ${conversationId}`);
+  socket.on('conversation:subscribe', async (conversationId, ack) => {
+    try {
+      await socket.join(conversationId);
+      console.log(`➡️ Socket ${socket.id} joined conversation ${conversationId}`);
+      if (ack) ack({ success: true }); // pour confirmer au client si besoin
+    } catch (err) {
+      console.error('❌ Failed to join conversation:', err);
+      if (ack) ack({ success: false, error: err.message });
+    }
+  });  
+
+  socket.emit('conversation:subscribe', conversationId, (response) => {
+    if (response?.success) {
+      console.log(`✅ ${username} a bien rejoint la conversation`);
+    } else {
+      console.error(`❌ ${username} a échoué à rejoindre:`, response?.error);
+    }
+  });
+
+  socket.on('conversation:unsubscribe', async (conversationId) => {
+    try {
+      await socket.leave(conversationId);
+      console.log(`⬅️ Socket ${socket.id} left conversation ${conversationId}`);
+    } catch (err) {
+      console.error('❌ Failed to leave conversation:', err);
+    }
   });
 
   socket.on('message:send', async (payload) => {
