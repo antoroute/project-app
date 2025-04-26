@@ -74,15 +74,7 @@ io.on('connection', (socket) => {
       if (ack) ack({ success: false, error: err.message });
     }
   });  
-
-  socket.emit('conversation:subscribe', conversationId, (response) => {
-    if (response?.success) {
-      console.log(`✅ ${username} a bien rejoint la conversation`);
-    } else {
-      console.error(`❌ ${username} a échoué à rejoindre:`, response?.error);
-    }
-  });
-
+  
   socket.on('conversation:unsubscribe', async (conversationId) => {
     try {
       await socket.leave(conversationId);
