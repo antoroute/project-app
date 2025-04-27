@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../core/crypto/encryption_utils.dart';
+import '../../core/services/websocket_service.dart';
 
 class ConversationScreen extends StatefulWidget {
   final String conversationId;
@@ -22,9 +23,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   Map<String, String> _decryptedMessages = {};
   Map<String, bool> _verifiedSignatures = {};
   bool _loading = true;
+  bool _sending = false;
   String? _currentUserId;
   final int _initialDecryptCount = 20;
-  Map<String, String> _groupPublicKeys = {};
 
   Future<void> _loadMessages() async {
     final token = await _storage.read(key: 'jwt');
@@ -86,62 +87,82 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   Future<void> _sendMessage() async {
+    if (_sending) return; 
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
+
+    setState(() => _sending = true);
     _messageController.clear();
 
-    final token = await _storage.read(key: 'jwt');
+    try {
+      final token = await _storage.read(key: 'jwt');
 
-    final resMembers = await http.get(
-      Uri.parse('https://api.kavalek.fr/api/groups/${widget.groupId}/members'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
-
-    if (resMembers.statusCode != 200) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur récupération clés: ${resMembers.body}')),
+      final resMembers = await http.get(
+        Uri.parse('https://api.kavalek.fr/api/groups/${widget.groupId}/members'),
+        headers: {'Authorization': 'Bearer $token'},
       );
-      return;
-    }
 
-    final members = List<Map<String, dynamic>>.from(jsonDecode(resMembers.body));
-    final publicKeys = <String, String>{
-      for (var m in members)
-        m['userId'].toString(): m['publicKeyGroup'].toString()
-    };
+      if (resMembers.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur récupération clés: ${resMembers.body}')),
+        );
+        return;
+      }
 
-    final payload = await EncryptionUtils.encryptMessageForUsers(
-      groupId: widget.groupId,
-      plaintext: text,
-      publicKeysByUserId: publicKeys,
-    );
+      final members = List<Map<String, dynamic>>.from(jsonDecode(resMembers.body));
+      final publicKeys = <String, String>{
+        for (var m in members)
+          m['userId'].toString(): m['publicKeyGroup'].toString()
+      };
 
-    final res = await http.post(
-      Uri.parse('https://api.kavalek.fr/api/conversations/${widget.conversationId}/messages'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode(payload),
-    );
-
-    if (res.statusCode == 200 || res.statusCode == 201) {
-      await _loadMessages();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur envoi: ${res.body}')),
+      final payload = await EncryptionUtils.encryptMessageForUsers(
+        groupId: widget.groupId,
+        plaintext: text,
+        publicKeysByUserId: publicKeys,
       );
+
+      WebSocketService().sendMessage({
+        "conversationId": widget.conversationId,
+        "encrypted": payload['encrypted'],
+        "iv": payload['iv'],
+        "keys": payload['keys'],
+        "signature": payload['signature'],
+        "senderPublicKey": payload['senderPublicKey'] ?? '',
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur envoi: $e')),
+      );
+    } finally {
+      setState(() => _sending = false);
     }
   }
 
   @override
   void initState() {
     super.initState();
-    _loadMessages();
+    _initializeConversation();
     _scrollController.addListener(() async {
       if (_scrollController.position.pixels == _scrollController.position.maxScrollExtent) {
         await _decryptVisibleMessages();
       }
+    });
+  }
+
+  Future<void> _initializeConversation() async {
+    await _loadMessages();
+
+    final token = await _storage.read(key: 'jwt');
+    WebSocketService().connect(token!);
+    WebSocketService().subscribeConversation(widget.conversationId);
+    WebSocketService().onNewMessage((message) async {
+      setState(() => _rawMessages.insert(0, message));
+      await _decryptVisibleMessages();
+    });
+    WebSocketService().onError((errorMessage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur WebSocket: $errorMessage')),
+      );
     });
   }
 
@@ -186,9 +207,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: _sendMessage,
-                )
+                  icon: _sending
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.send),
+                  onPressed: _sending ? null : _sendMessage,
+                ),
               ],
             ),
           )

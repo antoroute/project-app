@@ -39,6 +39,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   crypto: ^3.0.3
   encrypt: ^5.0.1
+  socket_io_client: ^2.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
