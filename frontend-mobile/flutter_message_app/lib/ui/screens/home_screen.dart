@@ -69,10 +69,16 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const GroupScreen()),
-        ),
+        onPressed: () async {
+          final refreshed = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const GroupScreen()),
+          );
+          if (refreshed == true) {
+            await Provider.of<GroupProvider>(context, listen: false).fetchUserGroups();
+            setState(() {}); 
+          }
+        },
         child: const Icon(Icons.group_add),
         tooltip: 'Créer / Rejoindre un groupe',
       ),

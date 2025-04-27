@@ -24,12 +24,17 @@ class _GroupScreenState extends State<GroupScreen> {
     setState(() => _loading = true);
     final auth = Provider.of<AuthProvider>(context, listen: false);
 
-    // Génère et stocke une paire RSA pour ce groupe
-    final groupId = UniqueKey().toString();
-    await KeyManager().generateKeyPairForGroup(groupId);
-    final pair = await KeyManager().getKeyPairForGroup(groupId);
-    final pubPem = encodePublicKeyToPem(pair!.publicKey as pc.RSAPublicKey);
+    // 1. Générer une paire RSA temporaire
+    final keyGen = pc.RSAKeyGenerator()
+      ..init(pc.ParametersWithRandom(
+        pc.RSAKeyGeneratorParameters(BigInt.parse('65537'), 4096, 64),
+        pc.SecureRandom("Fortuna")
+          ..seed(pc.KeyParameter(Uint8List.fromList(List.generate(32, (_) => 42))))
+      ));
+    final pair = keyGen.generateKeyPair();
+    final publicPem = encodePublicKeyToPem(pair.publicKey as pc.RSAPublicKey);
 
+    // 2. Envoyer la clé publique pour créer le groupe
     final res = await http.post(
       Uri.parse("https://api.kavalek.fr/api/groups"),
       headers: {
@@ -38,14 +43,21 @@ class _GroupScreenState extends State<GroupScreen> {
       },
       body: jsonEncode({
         'name': _groupNameController.text.trim(),
-        'publicKeyGroup': pubPem,
+        'publicKeyGroup': publicPem,
       }),
     );
 
     if (res.statusCode == 200 || res.statusCode == 201) {
+      final groupData = jsonDecode(res.body);
+      final realGroupId = groupData['groupId'];
+
+      await KeyManager().storeKeyPairForGroup(realGroupId, pair);
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Groupe créé avec succès !")),
       );
+
+      Navigator.pop(context, true);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Erreur création groupe: ${res.body}")),
@@ -60,10 +72,14 @@ class _GroupScreenState extends State<GroupScreen> {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final groupId = _groupIdController.text.trim();
 
-    // Génère et stocke une paire RSA pour le groupe
-    await KeyManager().generateKeyPairForGroup(groupId);
-    final pair = await KeyManager().getKeyPairForGroup(groupId);
-    final pubPem = encodePublicKeyToPem(pair!.publicKey as pc.RSAPublicKey);
+    final keyGen = pc.RSAKeyGenerator()
+      ..init(pc.ParametersWithRandom(
+        pc.RSAKeyGeneratorParameters(BigInt.parse('65537'), 4096, 64),
+        pc.SecureRandom("Fortuna")
+          ..seed(pc.KeyParameter(Uint8List.fromList(List.generate(32, (_) => 42))))
+      ));
+    final pair = keyGen.generateKeyPair();
+    final publicPem = encodePublicKeyToPem(pair.publicKey as pc.RSAPublicKey);
 
     final res = await http.post(
       Uri.parse("https://api.kavalek.fr/api/groups/$groupId/join"),
@@ -72,14 +88,18 @@ class _GroupScreenState extends State<GroupScreen> {
         'Authorization': 'Bearer ${auth.token}'
       },
       body: jsonEncode({
-        'publicKeyGroup': pubPem,
+        'publicKeyGroup': publicPem,
       }),
     );
 
     if (res.statusCode == 200 || res.statusCode == 201) {
+      await KeyManager().storeKeyPairForGroup(groupId, pair);
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Rejoint avec succès !")),
       );
+
+      Navigator.pop(context, true); // 👈 retourne au HomeScreen en signalant succès
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Erreur join: ${res.body}")),

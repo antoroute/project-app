@@ -1,8 +1,11 @@
+// 📁 lib/core/crypto/key_manager.dart
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:asn1lib/asn1lib.dart';
+import 'package:flutter_message_app/core/crypto/crypto_tasks.dart';
 
 class KeyManager {
   static final _instance = KeyManager._internal();
@@ -12,16 +15,13 @@ class KeyManager {
   KeyManager._internal();
 
   Future<void> generateKeyPairForGroup(String groupId) async {
-    final keyGen = pc.RSAKeyGenerator()
-      ..init(pc.ParametersWithRandom(
-        pc.RSAKeyGeneratorParameters(BigInt.parse('65537'), 4096, 64),
-        pc.SecureRandom("Fortuna")
-          ..seed(pc.KeyParameter(Uint8List.fromList(List.generate(32, (_) => 42)))),
-      ));
+    final pair = await compute(generateRsaKeyPairTask, null);
+    await storeKeyPairForGroup(groupId, pair);
+  }
 
-    final pair = keyGen.generateKeyPair();
-    final publicPem = _encodePublicKeyToPem(pair.publicKey as pc.RSAPublicKey);
-    final privatePem = _encodePrivateKeyToPem(pair.privateKey as pc.RSAPrivateKey);
+  Future<void> storeKeyPairForGroup(String groupId, pc.AsymmetricKeyPair keyPair) async {
+    final publicPem = _encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
+    final privatePem = _encodePrivateKeyToPem(keyPair.privateKey as pc.RSAPrivateKey);
 
     await _storage.write(
       key: "rsa_keypair_$groupId",
@@ -98,7 +98,6 @@ class KeyManager {
     final q = seq.elements![5] as ASN1Integer;
     return pc.RSAPrivateKey(modulus.valueAsBigInteger!, privateExp.valueAsBigInteger!, p.valueAsBigInteger!, q.valueAsBigInteger!);
   }
-
 }
 
 pc.RSAPublicKey parsePublicKeyFromPem(String pem) {
