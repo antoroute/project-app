@@ -82,7 +82,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('message:send', async (payload) => {
-    const { conversationId, encryptedMessage, encryptedKeys } = payload;
+    const {
+      conversationId,
+      encrypted,         // 🔥 contenu chiffré AES
+      iv,                // 🔥 vecteur d'initialisation AES
+      keys,              // 🔥 map { userId: clé AES chiffrée RSA }
+      signature,         // 🔥 signature RSA
+      senderPublicKey    // 🔥 clé publique de l'envoyeur
+    } = payload;
     const senderId = socket.user.id;
 
     try {
@@ -95,16 +102,33 @@ io.on('connection', (socket) => {
         return socket.emit('error', 'You are not a member of this conversation');
       }
 
+      const encryptedMessageData = JSON.stringify({
+        encrypted,
+        iv,
+        signature,
+        senderPublicKey
+      });
+      
       await fastify.pg.query(
-        'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
-        [conversationId, senderId, encryptedMessage, encryptedKeys]
-      );
+        `INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys)
+         VALUES ($1, $2, $3, $4)`,
+        [conversationId, senderId, encryptedMessageData, keys]
+      );      
 
       console.log(`📨 Emitting message:new to conversation ${conversationId}`, { senderId, encryptedMessage });
 
-      const newMessage = { senderId, conversationId, encryptedMessage, encryptedKeys };
+      const newMessage = {
+        senderId,
+        conversationId,
+        encrypted,
+        iv,
+        keys,
+        signature,
+        senderPublicKey
+      };
+      
       io.to(conversationId).emit('message:new', newMessage);
-
+      
     } catch (err) {
       console.error('❌ [Socket message:send]', err);
       socket.emit('error', 'Internal error while sending message');
