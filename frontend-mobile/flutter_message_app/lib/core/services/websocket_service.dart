@@ -6,14 +6,13 @@ class WebSocketService {
 
   late IO.Socket _socket;
   bool _isConnected = false;
+  String _lastToken = '';
 
   WebSocketService._internal();
 
-  String _lastToken = '';
-
   void connect(String token) {
-    if (_isConnected) return; 
-    _lastToken = token; 
+    if (_isConnected) return;
+    _lastToken = token;
 
     _socket = IO.io('https://api.kavalek.fr', {
       'path': '/socket.io',
@@ -22,35 +21,43 @@ class WebSocketService {
     });
 
     _socket.onConnect((_) {
-      print('✅ Connected to WebSocket server');
+      print('✅ WebSocket connecté');
       _isConnected = true;
     });
 
     _socket.onDisconnect((_) {
-      print('❌ Disconnected from WebSocket server');
+      print('❌ WebSocket déconnecté');
       _isConnected = false;
-
-      Future.delayed(const Duration(seconds: 3), () {
-        print('🔄 Tentative de reconnexion...');
-        connect(_lastToken); 
-      });
+      Future.delayed(const Duration(seconds: 3), () => reconnect());
     });
 
     _socket.onError((data) {
-      print('❌ WebSocket Error: $data');
+      print('❌ WebSocket erreur: $data');
     });
   }
 
+  void reconnect() {
+    if (_lastToken.isNotEmpty) {
+      connect(_lastToken);
+    }
+  }
+
   void subscribeConversation(String conversationId) {
-    _socket.emit('conversation:subscribe', conversationId);
+    if (_isConnected) {
+      _socket.emit('conversation:subscribe', conversationId);
+    }
   }
 
   void unsubscribeConversation(String conversationId) {
-    _socket.emit('conversation:unsubscribe', conversationId);
+    if (_isConnected) {
+      _socket.emit('conversation:unsubscribe', conversationId);
+    }
   }
 
   void sendMessage(Map<String, dynamic> messagePayload) {
-    _socket.emit('message:send', messagePayload);
+    if (_isConnected) {
+      _socket.emit('message:send', messagePayload);
+    }
   }
 
   void onNewMessage(Function(Map<String, dynamic>) callback) {

@@ -7,6 +7,7 @@ import { createServer } from 'http';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import dotenv from 'dotenv';
+import { createVerify } from 'crypto';
 import { socketAuthMiddleware } from './middlewares/socketAuth.js';
 import { groupRoutes } from './routes/groups.js';
 import { conversationRoutes } from './routes/conversations.js';
@@ -82,40 +83,53 @@ io.on('connection', (socket) => {
   });
 
   socket.on('message:send', async (payload) => {
-    const {
-      conversationId,
-      encrypted,         // 🔥 contenu chiffré AES
-      iv,                // 🔥 vecteur d'initialisation AES
-      keys,              // 🔥 map { userId: clé AES chiffrée RSA }
-      signature,         // 🔥 signature RSA
-      senderPublicKey    // 🔥 clé publique de l'envoyeur
-    } = payload;
-    const senderId = socket.user.id;
-
     try {
+      const {
+        conversationId,
+        encrypted,
+        iv,
+        keys = {},
+        signature,
+        senderPublicKey
+      } = payload || {};
+
+      const senderId = socket.user.id;
+
+      if (!conversationId || !encrypted || !iv || !signature || !senderPublicKey) {
+        console.error('❌ Invalid payload:', payload);
+        return socket.emit('error', { error: 'Invalid payload' });
+      }
+
       const isInConversation = await fastify.pg.query(
         'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
         [conversationId, senderId]
       );
 
       if (isInConversation.rowCount === 0) {
-        return socket.emit('error', 'You are not a member of this conversation');
+        return socket.emit('error', { error: 'You are not a member of this conversation' });
       }
 
-      const encryptedMessageData = JSON.stringify({
-        encrypted,
-        iv,
-        signature,
-        senderPublicKey
-      });
-      
+      // Vérification de la signature
+      const verify = createVerify('SHA256');
+      verify.update(Buffer.from(JSON.stringify({ encrypted, iv })));
+      verify.end();
+
+      const isSignatureValid = verify.verify(senderPublicKey, Buffer.from(signature, 'base64'));
+
+      if (!isSignatureValid) {
+        console.error('❌ Invalid signature from user:', senderId);
+        return socket.emit('error', { error: 'Invalid message signature' });
+      }
+
+      const encryptedMessageData = JSON.stringify({ encrypted, iv, signature, senderPublicKey });
+
       await fastify.pg.query(
         `INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys)
          VALUES ($1, $2, $3, $4)`,
         [conversationId, senderId, encryptedMessageData, keys]
-      );      
+      );
 
-      console.log(`📨 Emitting message:new to conversation ${conversationId}`, { senderId, encryptedMessage });
+      console.log(`📨 Emitting message:new to conversation ${conversationId}`, { senderId });
 
       const newMessage = {
         senderId,
@@ -126,12 +140,11 @@ io.on('connection', (socket) => {
         signature,
         senderPublicKey
       };
-      
+
       io.to(conversationId).emit('message:new', newMessage);
-      
     } catch (err) {
       console.error('❌ [Socket message:send]', err);
-      socket.emit('error', 'Internal error while sending message');
+      socket.emit('error', { error: 'Internal error while sending message' });
     }
   });
 

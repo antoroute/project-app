@@ -1,3 +1,5 @@
+import { createVerify } from 'crypto';
+
 export function conversationRoutes(fastify) {
     const db = fastify.pg;
 
@@ -7,22 +9,23 @@ export function conversationRoutes(fastify) {
       schema: {
         body: {
           type: 'object',
-          required: ['groupId', 'userIds'],
+          required: ['groupId', 'userIds', 'encryptedSecrets', 'creatorSignature'],
           properties: {
             groupId: { type: 'string', format: 'uuid' },
             userIds: {
               type: 'array',
               items: { type: 'string', format: 'uuid' },
               minItems: 1
-            }
+            },
+            encryptedSecrets: { type: 'object' },
+            creatorSignature: { type: 'string' }
           }
         }
       },
       handler: async (request, reply) => {
-        const { groupId, userIds } = request.body;
+        const { groupId, userIds, encryptedSecrets, creatorSignature } = request.body;
         const creatorId = request.user.id;
   
-        // Vérifie que l'utilisateur courant appartient au groupe
         const isInGroup = await db.query(
           'SELECT 1 FROM user_groups WHERE user_id = $1 AND group_id = $2',
           [creatorId, groupId]
@@ -31,7 +34,6 @@ export function conversationRoutes(fastify) {
           return reply.code(403).send({ error: 'You are not in this group' });
         }
   
-        // Vérifie que TOUS les destinataires sont aussi dans le même groupe
         const result = await db.query(
           'SELECT user_id FROM user_groups WHERE group_id = $1 AND user_id = ANY($2)',
           [groupId, userIds]
@@ -42,15 +44,35 @@ export function conversationRoutes(fastify) {
         }
   
         try {
+          const userGroup = await db.query(
+            'SELECT public_key_group FROM user_groups WHERE user_id = $1 AND group_id = $2',
+            [creatorId, groupId]
+          );
+  
+          if (userGroup.rowCount === 0 || !userGroup.rows[0].public_key_group) {
+            return reply.code(400).send({ error: 'Missing public key for creator in group' });
+          }
+  
+          const publicKey = userGroup.rows[0].public_key_group;
+  
+          const verify = createVerify('SHA256');
+          verify.update(Buffer.from(JSON.stringify(encryptedSecrets)));
+          verify.end();
+  
+          const isValidSignature = verify.verify(publicKey, Buffer.from(creatorSignature, 'base64'));
+  
+          if (!isValidSignature) {
+            return reply.code(400).send({ error: 'Invalid creatorSignature' });
+          }
+  
           const type = userIds.length === 1 ? 'private' : 'subset';
   
           const convo = await db.query(
-            'INSERT INTO conversations (group_id, type, creator_id) VALUES ($1, $2, $3) RETURNING id',
-            [groupId, type, creatorId]
+            'INSERT INTO conversations (group_id, type, creator_id, encrypted_secrets) VALUES ($1, $2, $3, $4) RETURNING id',
+            [groupId, type, creatorId, encryptedSecrets]
           );
           const convoId = convo.rows[0].id;
   
-          // Insertion des participants + creator
           const allUserIds = [...new Set([...userIds, creatorId])];
           const values = allUserIds.map((uid, i) => `($1, $${i + 2})`).join(',');
           await db.query(
@@ -79,13 +101,46 @@ export function conversationRoutes(fastify) {
             WHERE cu.user_id = $1
             ORDER BY c.created_at DESC
             `, [userId]);
-
             return reply.send(result.rows);
         } catch (err) {
             request.log.error(err);
             return reply.code(500).send({ error: 'Failed to load conversations' });
         }
         }
+    });
+
+    // Récupérer les détails d'une conversation
+    fastify.get('/conversations/:id', {
+      preHandler: fastify.authenticate,
+      handler: async (request, reply) => {
+        const conversationId = request.params.id;
+        const userId = request.user.id;
+    
+        const isInConversation = await db.query(
+          'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
+          [conversationId, userId]
+        );
+    
+        if (isInConversation.rowCount === 0) {
+          return reply.code(403).send({ error: 'Access denied to this conversation' });
+        }
+    
+        try {
+          const convo = await db.query(
+            'SELECT id, group_id, type, creator_id, encrypted_secrets FROM conversations WHERE id = $1',
+            [conversationId]
+          );
+    
+          if (convo.rowCount === 0) {
+            return reply.code(404).send({ error: 'Conversation not found' });
+          }
+    
+          return reply.send(convo.rows[0]);
+        } catch (err) {
+          request.log.error(err);
+          return reply.code(500).send({ error: 'Failed to fetch conversation' });
+        }
+      }
     });
 
     // Voir les messages d'une conversation

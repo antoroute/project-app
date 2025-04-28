@@ -1,9 +1,13 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:pointycastle/export.dart' as pc;
+import 'package:provider/provider.dart';
+import '../../core/providers/auth_provider.dart';
+import '../../core/crypto/key_manager.dart';
 import '../../core/providers/conversation_provider.dart';
+import '../../core/crypto/encryption_utils.dart';
 import 'conversation_screen.dart';
 
 class GroupDetailScreen extends StatefulWidget {
@@ -17,16 +21,16 @@ class GroupDetailScreen extends StatefulWidget {
 }
 
 class _GroupDetailScreenState extends State<GroupDetailScreen> {
-  final _storage = const FlutterSecureStorage();
   List<Map<String, dynamic>> _members = [];
   final Set<String> _selectedUserIds = {};
   bool _loading = true;
   String? _currentUserId;
 
   Future<void> _fetchGroupMembers() async {
-    final token = await _storage.read(key: 'jwt');
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final token = auth.token;
+    if (token == null) throw Exception('Token JWT manquant');
 
-    // Fetch user info
     final resUser = await http.get(
       Uri.parse('https://auth.kavalek.fr/auth/me'),
       headers: {'Authorization': 'Bearer $token'},
@@ -36,7 +40,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       _currentUserId = data['user']['id'];
     }
 
-    // Fetch group members
     final res = await http.get(
       Uri.parse('https://api.kavalek.fr/api/groups/${widget.groupId}/members'),
       headers: {'Authorization': 'Bearer $token'},
@@ -59,7 +62,34 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   }
 
   Future<void> _createConversation() async {
-    final token = await _storage.read(key: 'jwt');
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final token = auth.token;
+    if (token == null) throw Exception('Token JWT manquant');
+
+    final Map<String, String> encryptedSecrets = {};
+
+    for (final userId in _selectedUserIds) {
+      final member = _members.firstWhere((m) => m['userId'] == userId);
+      final publicKeyPem = member['publicKeyGroup'];
+
+      final aesKey = EncryptionUtils.generateRandomAESKey();
+
+      final encrypted = EncryptionUtils.encryptAESKeyWithRSAOAEP(publicKeyPem, aesKey);
+      encryptedSecrets[userId] = base64.encode(encrypted);
+    }
+
+    // Signature de encryptedSecrets
+    final aesSecretJson = jsonEncode(encryptedSecrets);
+
+    final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
+    if (keyPair == null) throw Exception('Clé privée RSA manquante');
+
+    final signer = pc.Signer('SHA-256/RSA')
+      ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(keyPair.privateKey as pc.RSAPrivateKey));
+
+    final signature = signer.generateSignature(utf8.encode(aesSecretJson) as Uint8List) as pc.RSASignature;
+    final creatorSignature = base64.encode(signature.bytes);
+
     final res = await http.post(
       Uri.parse("https://api.kavalek.fr/api/conversations"),
       headers: {
@@ -69,6 +99,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       body: jsonEncode({
         'groupId': widget.groupId,
         'userIds': _selectedUserIds.toList(),
+        'encryptedSecrets': encryptedSecrets,
+        'creatorSignature': creatorSignature,
       }),
     );
 
@@ -76,7 +108,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Conversation créée !")),
       );
-      await Provider.of<ConversationProvider>(context, listen: false).fetchConversations();
+      await Provider.of<ConversationProvider>(context, listen: false).fetchConversations(context);
       setState(() => _selectedUserIds.clear());
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -109,9 +141,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                         child: Text('Conversations', style: TextStyle(fontSize: 18)),
                       ),
                       ...conversations.map((c) => ListTile(
-                              title: Text(
-                              c['type'] == 'subset' ? 'Conversation de groupe' : 'Conversation privée',
-                            ),
+                            title: Text(c['type'] == 'subset' ? 'Conversation de groupe' : 'Conversation privée'),
                             subtitle: Text('ID: ${c['conversationId']}'),
                             onTap: () => Navigator.push(
                               context,

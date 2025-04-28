@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
-import '../crypto/key_manager.dart';
+import 'package:flutter_message_app/core/crypto/key_manager.dart';
 
 class AuthProvider extends ChangeNotifier {
   final _storage = const FlutterSecureStorage();
@@ -13,41 +13,30 @@ class AuthProvider extends ChangeNotifier {
   String? get token => _token;
 
   Future<void> login(String email, String password) async {
-    final url = Uri.parse('https://auth.kavalek.fr/auth/login');
-    final res = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'email': email,
-        'password': password
-      }),
-    );
+    try {
+      final url = Uri.parse('https://auth.kavalek.fr/auth/login');
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password
+        }),
+      );
 
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
-      _token = data['token'];
-      await _storage.write(key: 'jwt', value: _token);
-      await KeyManager().generateKeyPairForGroup("user_rsa");
-      notifyListeners();
-    } else {
-      throw Exception('Failed to login');
-    }
-  }
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        _token = data['token'];
+        await _storage.write(key: 'jwt', value: _token);
 
-  Future<void> register(String email, String password, String username) async {
-    final url = Uri.parse('https://auth.kavalek.fr/auth/register');
-    final res = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'email': email,
-        'password': password,
-        'username': username
-      }),
-    );
+        await KeyManager().generateUserKeyIfAbsent();
 
-    if (res.statusCode != 200) {
-      throw Exception('Failed to register');
+        notifyListeners();
+      } else {
+        throw Exception('Erreur login: ${res.body}');
+      }
+    } catch (e) {
+      rethrow;
     }
   }
 
@@ -55,8 +44,31 @@ class AuthProvider extends ChangeNotifier {
     final storedToken = await _storage.read(key: 'jwt');
     if (storedToken != null && !JwtDecoder.isExpired(storedToken)) {
       _token = storedToken;
-      await KeyManager().generateKeyPairForGroup("user_rsa");
+      await KeyManager().generateUserKeyIfAbsent();
       notifyListeners();
+    }
+  }
+
+  Future<void> register(String email, String password, String username) async {
+    try {
+      final url = Uri.parse('https://auth.kavalek.fr/auth/register');
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+          'username': username,
+        }),
+      );
+
+      if (res.statusCode != 200) {
+        throw Exception('Erreur d\'inscription : ${res.body}');
+      }
+    } catch (e, stacktrace) {
+      debugPrint('❌ Register failed: $e');
+      debugPrintStack(stackTrace: stacktrace);
+      rethrow;
     }
   }
 

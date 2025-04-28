@@ -21,8 +21,8 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        await Provider.of<GroupProvider>(context, listen: false).fetchUserGroups();
-        await Provider.of<ConversationProvider>(context, listen: false).fetchConversations();
+        await Provider.of<GroupProvider>(context, listen: false).fetchUserGroups(context);
+        await Provider.of<ConversationProvider>(context, listen: false).fetchConversations(context);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Erreur chargement : $e')),
@@ -75,7 +75,7 @@ class _HomeScreenState extends State<HomeScreen> {
             MaterialPageRoute(builder: (_) => const GroupScreen()),
           );
           if (refreshed == true) {
-            await Provider.of<GroupProvider>(context, listen: false).fetchUserGroups();
+            await Provider.of<GroupProvider>(context, listen: false).fetchUserGroups(context);
             setState(() {}); 
           }
         },

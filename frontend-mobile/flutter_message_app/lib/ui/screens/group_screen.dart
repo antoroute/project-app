@@ -23,7 +23,6 @@ class _GroupScreenState extends State<GroupScreen> {
     setState(() => _loading = true);
     final auth = Provider.of<AuthProvider>(context, listen: false);
 
-    // 1. Générer une paire RSA temporaire
     final keyGen = pc.RSAKeyGenerator()
       ..init(pc.ParametersWithRandom(
         pc.RSAKeyGeneratorParameters(BigInt.parse('65537'), 4096, 64),
@@ -33,7 +32,6 @@ class _GroupScreenState extends State<GroupScreen> {
     final pair = keyGen.generateKeyPair();
     final publicPem = encodePublicKeyToPem(pair.publicKey as pc.RSAPublicKey);
 
-    // 2. Envoyer la clé publique pour créer le groupe
     final res = await http.post(
       Uri.parse("https://api.kavalek.fr/api/groups"),
       headers: {
@@ -50,7 +48,12 @@ class _GroupScreenState extends State<GroupScreen> {
       final groupData = jsonDecode(res.body);
       final realGroupId = groupData['groupId'];
 
-      await KeyManager().storeKeyPairForGroup(realGroupId, pair);
+      final existingKey = await KeyManager().getKeyPairForGroup(realGroupId);
+      if (existingKey != null) {
+        print('🔵 Clé déjà existante pour ce groupe, pas de régénération.');
+      } else {
+        await KeyManager().storeKeyPairForGroup(realGroupId, pair);
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Groupe créé avec succès !")),
@@ -70,6 +73,16 @@ class _GroupScreenState extends State<GroupScreen> {
     setState(() => _loading = true);
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final groupId = _groupIdController.text.trim();
+
+    final existingKey = await KeyManager().getKeyPairForGroup(groupId);
+    if (existingKey != null) {
+      print('🔵 Clé déjà existante pour ce groupe, pas de régénération.');
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Déjà membre de ce groupe !")),
+      );
+      return;
+    }
 
     final keyGen = pc.RSAKeyGenerator()
       ..init(pc.ParametersWithRandom(
@@ -98,7 +111,7 @@ class _GroupScreenState extends State<GroupScreen> {
         const SnackBar(content: Text("Rejoint avec succès !")),
       );
 
-      Navigator.pop(context, true); // 👈 retourne au HomeScreen en signalant succès
+      Navigator.pop(context, true);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Erreur join: ${res.body}")),

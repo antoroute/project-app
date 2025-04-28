@@ -1,24 +1,19 @@
-// 📁 lib/core/crypto/crypto_tasks.dart
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:crypto/crypto.dart';
 import 'package:flutter_message_app/core/crypto/key_manager.dart';
 
-/// --- Génération RSA en Isolate ---
 Future<pc.AsymmetricKeyPair<pc.PublicKey, pc.PrivateKey>> generateRsaKeyPairTask(dynamic _) async {
   final keyGen = pc.RSAKeyGenerator()
     ..init(pc.ParametersWithRandom(
       pc.RSAKeyGeneratorParameters(BigInt.parse('65537'), 4096, 64),
-      pc.SecureRandom("Fortuna")
-        ..seed(pc.KeyParameter(Uint8List.fromList(List.generate(32, (_) => 42))))
+      pc.SecureRandom("Fortuna")..seed(pc.KeyParameter(Uint8List.fromList(List.generate(32, (_) => 42))))
     ));
   return keyGen.generateKeyPair();
 }
 
-/// --- Chiffrement AES + RSA en Isolate ---
 Future<Map<String, dynamic>> encryptMessageTask(Map<String, dynamic> params) async {
   final plaintext = params['plaintext'] as String;
   final Map<String, String> publicKeysByUserId = Map<String, String>.from(params['publicKeysByUserId']);
@@ -28,7 +23,7 @@ Future<Map<String, dynamic>> encryptMessageTask(Map<String, dynamic> params) asy
   final encrypter = encrypt.Encrypter(encrypt.AES(encrypt.Key(aesKey), mode: encrypt.AESMode.cbc));
   final encryptedText = encrypter.encrypt(plaintext, iv: iv);
 
-  final Map<String, String> encryptedKeys = {};
+  final encryptedKeys = <String, String>{};
   for (final entry in publicKeysByUserId.entries) {
     final key = parsePublicKeyFromPem(entry.value);
     final cipher = pc.OAEPEncoding(pc.RSAEngine())
@@ -44,26 +39,23 @@ Future<Map<String, dynamic>> encryptMessageTask(Map<String, dynamic> params) asy
   };
 }
 
-/// --- Déchiffrement AES en Isolate ---
 Future<String> decryptMessageTask(Map<String, dynamic> params) async {
   final encrypted = params['encrypted'] as String;
   final iv = params['iv'] as String;
   final aesKeyBytes = base64.decode(params['aesKey'] as String);
 
   final encrypter = encrypt.Encrypter(encrypt.AES(encrypt.Key(aesKeyBytes), mode: encrypt.AESMode.cbc));
-
   return encrypter.decrypt(
     encrypt.Encrypted(base64.decode(encrypted)),
     iv: encrypt.IV(base64.decode(iv)),
   );
 }
 
-/// --- Signature RSA en Isolate ---
 Future<String> signPayloadTask(Map<String, dynamic> payload) async {
-  final userKey = await KeyManager().getKeyPairForGroup("user_rsa");
-  if (userKey == null) throw Exception("Pas de clé RSA personnelle");
+  final userKey = await KeyManager().getKeyPairForGroup('user_rsa');
+  if (userKey == null) throw Exception("Pas de clé RSA utilisateur");
 
-  final dataToSign = utf8.encode(payload["encrypted"] + payload["iv"]);
+  final dataToSign = utf8.encode(payload['encrypted'] + payload['iv']);
   final hash = sha256.convert(dataToSign).bytes;
 
   final signer = pc.Signer("SHA-256/RSA")
@@ -72,7 +64,6 @@ Future<String> signPayloadTask(Map<String, dynamic> payload) async {
   return base64.encode((sig as pc.RSASignature).bytes);
 }
 
-/// --- Vérification signature RSA en Isolate ---
 Future<bool> verifySignatureTask(Map<String, dynamic> params) async {
   try {
     final payload = Map<String, dynamic>.from(params['payload']);
@@ -80,7 +71,7 @@ Future<bool> verifySignatureTask(Map<String, dynamic> params) async {
     final senderPublicKeyPem = params['senderPublicKeyPem'] as String;
 
     final key = parsePublicKeyFromPem(senderPublicKeyPem);
-    final data = utf8.encode(payload["encrypted"] + payload["iv"]);
+    final data = utf8.encode(payload['encrypted'] + payload['iv']);
     final hash = sha256.convert(data).bytes;
 
     final verifier = pc.Signer("SHA-256/RSA")
