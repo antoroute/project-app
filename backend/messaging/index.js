@@ -111,7 +111,10 @@ io.on('connection', (socket) => {
 
       // Vérification de la signature
       const verify = createVerify('SHA256');
-      verify.update(Buffer.from(JSON.stringify({ encrypted, iv })));
+      const canonicalPayload = JSON.stringify(Object.fromEntries(
+        Object.entries({ encrypted, iv }).sort(([a], [b]) => a.localeCompare(b))
+      ));
+      verify.update(Buffer.from(canonicalPayload));
       verify.end();
 
       const isSignatureValid = verify.verify(senderPublicKey, Buffer.from(signature, 'base64'));

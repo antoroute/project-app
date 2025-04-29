@@ -202,42 +202,67 @@ export function conversationRoutes(fastify) {
 
     // ✅ Envoyer un message via fallback REST
     fastify.post('/messages', {
-        preHandler: fastify.authenticate,
-        schema: {
+      preHandler: fastify.authenticate,
+      schema: {
         body: {
-            type: 'object',
-            required: ['conversationId', 'encryptedMessage', 'encryptedKeys'],
-            properties: {
+          type: 'object',
+          required: ['conversationId', 'encryptedMessage', 'encryptedKeys', 'signature', 'senderPublicKey'],
+          properties: {
             conversationId: { type: 'string', format: 'uuid' },
             encryptedMessage: { type: 'string', minLength: 10 },
-            encryptedKeys: { type: 'object' } // user_id => encrypted AES key
-            }
+            encryptedKeys: { type: 'object' }, // user_id => encrypted AES key
+            signature: { type: 'string' },
+            senderPublicKey: { type: 'string' }
+          }
         }
-        },
-        handler: async (request, reply) => {
+      },
+      handler: async (request, reply) => {
         const userId = request.user.id;
-        const { conversationId, encryptedMessage, encryptedKeys } = request.body;
-
+        const {
+          conversationId,
+          encryptedMessage,
+          encryptedKeys,
+          signature,
+          senderPublicKey
+        } = request.body;
+    
         const isInConversation = await db.query(
-            'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
-            [conversationId, userId]
+          'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
+          [conversationId, userId]
         );
-
+    
         if (isInConversation.rowCount === 0) {
-            return reply.code(403).send({ error: 'You are not in this conversation' });
+          return reply.code(403).send({ error: 'You are not in this conversation' });
         }
-
+    
         try {
-            await db.query(
+          // 🔐 Vérification de la signature
+          const parsedMessage = JSON.parse(encryptedMessage);
+          const canonicalPayload = JSON.stringify({
+            encrypted: parsedMessage.encrypted,
+            iv: parsedMessage.iv
+          });
+    
+          const verify = createVerify('SHA256');
+          verify.update(Buffer.from(canonicalPayload));
+          verify.end();
+    
+          const isValid = verify.verify(senderPublicKey, Buffer.from(signature, 'base64'));
+    
+          if (!isValid) {
+            return reply.code(400).send({ error: 'Invalid message signature' });
+          }
+    
+          await db.query(
             'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
             [conversationId, userId, encryptedMessage, encryptedKeys]
-            );
-
-            return reply.code(201).send({ status: 'Message stored' });
+          );
+    
+          return reply.code(201).send({ status: 'Message stored' });
         } catch (err) {
-            request.log.error(err);
-            return reply.code(500).send({ error: 'Message not stored' });
+          request.log.error(err);
+          return reply.code(500).send({ error: 'Message not stored' });
         }
-        }
-    });
+      }
+    });    
 }
