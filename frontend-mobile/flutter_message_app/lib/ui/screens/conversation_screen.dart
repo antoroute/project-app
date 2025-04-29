@@ -50,10 +50,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
     super.dispose();
   }
 
+  String _generateMessageId(Map<String, dynamic> msg, int index) {
+    return msg['id'] ?? '${msg['senderId']}_${msg['timestamp'] ?? index}_${msg['encrypted'] ?? ''}_${msg['iv'] ?? ''}';
+  }
+
   Future<void> _initializeConversation() async {
     await _loadCurrentUserId();
-    await _loadMessages();
     await _loadConversationSecret();
+    await _loadMessages();
 
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final token = auth.token;
@@ -61,15 +65,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
       _showError('Token JWT manquant');
       return;
     }
-    WebSocketService().connect(token);
+    WebSocketService().connect(token, conversationId: widget.conversationId);
     WebSocketService().subscribeConversation(widget.conversationId);
     WebSocketService().onNewMessage((message) async {
-      setState(() => _rawMessages.insert(0, message));
+      print('🧾 Nouveau message reçu via WebSocket: $message');
+      _rawMessages.insert(0, message);
       await _decryptVisibleMessages();
+      if (mounted) setState(() {});
     });
     WebSocketService().onError((errorMessage) {
       _showError('Erreur WebSocket: $errorMessage');
-      _attemptReconnect(); // <--- C'est ici qu'on déclenche la reconnexion
+      _attemptReconnect();
     });
   }
 
@@ -102,33 +108,38 @@ class _ConversationScreenState extends State<ConversationScreen> {
       return;
     }
 
-    final res = await http.get(
-      Uri.parse('https://api.kavalek.fr/api/conversations/${widget.conversationId}'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
+    try {
+      final res = await http.get(
+        Uri.parse('https://api.kavalek.fr/api/conversations/${widget.conversationId}'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
 
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
-      final encryptedSecretBase64 = data['encryptedSecrets'][_currentUserId];
-      if (encryptedSecretBase64 == null) {
-        _showError('Secret AES non disponible pour cet utilisateur.');
-        return;
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final secrets = data['encrypted_secrets'];
+        final encryptedSecretBase64 = secrets[_currentUserId];
+        if (encryptedSecretBase64 == null) {
+          _showError('Secret AES non disponible pour cet utilisateur.');
+          return;
+        }
+
+        final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
+        if (keyPair == null) {
+          _showError('Clé RSA utilisateur absente');
+          return;
+        }
+
+        final privateKey = keyPair.privateKey as pc.RSAPrivateKey;
+        final cipher = pc.OAEPEncoding(pc.RSAEngine())
+          ..init(false, pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey));
+
+        _aesConversationKey = cipher.process(base64.decode(encryptedSecretBase64));
+        print('🧬 _aesConversationKey = ${base64.encode(_aesConversationKey!)}');
+      } else {
+        _showError('Erreur chargement secret: ${res.body}');
       }
-
-      final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
-      if (keyPair == null) {
-        _showError('Clé RSA utilisateur absente');
-        return;
-      }
-
-      final privateKey = keyPair.privateKey as pc.RSAPrivateKey;
-      final cipher = pc.OAEPEncoding(pc.RSAEngine())
-        ..init(false, pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey));
-
-      _aesConversationKey = cipher.process(base64.decode(encryptedSecretBase64));
-      print('✅ Clé AES conversation chargée.');
-    } else {
-      _showError('Erreur chargement secret: ${res.body}');
+    } catch (e) {
+      _showError('Erreur parsing secret: $e');
     }
   }
 
@@ -145,11 +156,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
         Uri.parse('https://api.kavalek.fr/api/conversations/${widget.conversationId}/messages'),
         headers: {'Authorization': 'Bearer $token'},
       );
-
+      print('📥 Réponse brute des messages: ${res.body}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        print('📬 JSON décodé: $data');
         final messages = List<Map<String, dynamic>>.from(data);
         setState(() => _rawMessages = messages.reversed.toList());
+
         await _decryptVisibleMessages();
       } else {
         _showError('Erreur chargement messages: ${res.body}');
@@ -162,16 +175,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   Future<void> _decryptVisibleMessages() async {
+    print('🔐 AES ready = ${_aesConversationKey != null}, Messages à décrypter = ${_rawMessages.length}');
     if (_aesConversationKey == null) return;
 
     for (int i = 0; i < _rawMessages.length && i < _initialDecryptCount; i++) {
       final m = _rawMessages[i];
-      if (_decryptedMessages.containsKey(m['id'])) continue;
-
-      if (m['encrypted'] == null || m['iv'] == null) {
-        _decryptedMessages[m['id']] = '[Message corrompu]';
-        continue;
-      }
+      final messageId = _generateMessageId(m, i);
+      if (_decryptedMessages.containsKey(messageId)) continue;
 
       try {
         final decrypted = await EncryptionUtils.decryptMessageTaskSimple({
@@ -179,25 +189,47 @@ class _ConversationScreenState extends State<ConversationScreen> {
           'iv': m['iv'],
           'aesKey': base64.encode(_aesConversationKey!),
         });
-        _decryptedMessages[m['id']] = decrypted;
+        _decryptedMessages[messageId] = decrypted;
 
-        if (m['signature'] != null && m['senderPublicKey'] != null) {
-          final valid = await EncryptionUtils.verifySignature(
-            payload: m,
-            signature: m['signature'],
-            senderPublicKeyPem: m['senderPublicKey'],
-          );
-          _verifiedSignatures[m['id']] = valid;
-        }
-      } catch (_) {
-        _decryptedMessages[m['id']] = '[Déchiffrement impossible]';
+        final signedPayload = json.encode({
+          'encrypted': m['encrypted'],
+          'iv': m['iv'],
+        });
+
+        print('🧪 Préparation vérification signature pour messageId=$messageId');
+        print('📦 encrypted: ${m['encrypted']}, iv: ${m['iv']}, signature: ${m['signature']}, publicKey: ${m['senderPublicKey']}');
+
+        final valid = await EncryptionUtils.verifySignature(
+          payload: json.decode(signedPayload),
+          signature: m['signature'],
+          senderPublicKeyPem: m['senderPublicKey'],
+        );
+        _verifiedSignatures[messageId] = valid;
+      } catch (e) {
+        _decryptedMessages[messageId] = '[Déchiffrement impossible]';
       }
     }
     setState(() {});
   }
 
+  String canonicalJson(Map<String, dynamic> map) {
+    final sorted = Map.fromEntries(
+      map.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+    );
+    final buffer = StringBuffer('{');
+    bool first = true;
+    for (var entry in sorted.entries) {
+      if (!first) buffer.write(',');
+      buffer.write('"${entry.key}":"${entry.value}"');
+      first = false;
+    }
+    buffer.write('}');
+    return buffer.toString();
+  }
+
   Future<void> _sendMessage() async {
     if (_sending || _aesConversationKey == null) return;
+
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
@@ -205,15 +237,43 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _messageController.clear();
 
     try {
-      final encrypted = await EncryptionUtils.encryptMessageTaskSimple({
-        'plaintext': text,
-        'aesKey': base64.encode(_aesConversationKey!),
+      final encrypted = await EncryptionUtils.encryptWithAESKey(
+        plaintext: text,
+        aesKey: _aesConversationKey!,
+      );
+
+      final payloadToSign = canonicalJson({
+        'encrypted': encrypted['encrypted'],
+        'iv': encrypted['iv'],
       });
+
+      final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
+      if (keyPair == null) {
+        _showError('Clé privée RSA manquante pour signer le message');
+        return;
+      }
+
+      final signer = pc.Signer('SHA-256/RSA')
+        ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(
+          keyPair.privateKey as pc.RSAPrivateKey,
+        ));
+
+      final signature = signer.generateSignature(
+        Uint8List.fromList(utf8.encode(payloadToSign)),
+      ) as pc.RSASignature;
+
+      final signatureBase64 = base64.encode(signature.bytes);
+      final publicKeyPem = encodePublicKeyToPem(
+        keyPair.publicKey as pc.RSAPublicKey,
+      );
 
       WebSocketService().sendMessage({
         'conversationId': widget.conversationId,
         'encrypted': encrypted['encrypted'],
         'iv': encrypted['iv'],
+        'keys': {},
+        'signature': signatureBase64,
+        'senderPublicKey': publicKeyPem,
       });
     } catch (e) {
       _showError('Erreur envoi message: $e');
@@ -234,6 +294,27 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
+  void _attemptReconnect() async {
+    if (!mounted) return;
+
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final token = auth.token;
+    if (token != null) {
+      WebSocketService().connect(token);
+      WebSocketService().subscribeConversation(widget.conversationId);
+      WebSocketService().onNewMessage((message) async {
+        setState(() => _rawMessages.insert(0, message));
+        await _decryptVisibleMessages();
+      });
+      WebSocketService().onError((errorMessage) {
+        _showError('Erreur WebSocket: $errorMessage');
+        _attemptReconnect();
+      });
+    } else {
+      _showError('Impossible de se reconnecter : token manquant');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -249,8 +330,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     itemCount: _rawMessages.length,
                     itemBuilder: (context, index) {
                       final msg = _rawMessages[index];
-                      final decrypted = _decryptedMessages[msg['id']] ?? '[En attente de déchiffrement]';
-                      final verified = _verifiedSignatures[msg['id']];
+                      final messageId = _generateMessageId(msg, index);
+                      final decrypted = _decryptedMessages[messageId] ?? '[En attente de déchiffrement]';
+                      final verified = _verifiedSignatures[messageId];
                       final icon = verified == null
                           ? null
                           : verified
@@ -286,44 +368,5 @@ class _ConversationScreenState extends State<ConversationScreen> {
         ],
       ),
     );
-  }
-
-  void _attemptReconnect() async {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Reconnexion en cours...'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 3),
-      ),
-    );
-
-    await Future.delayed(const Duration(seconds: 3));
-
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token;
-    if (token != null) {
-      WebSocketService().connect(token);
-      WebSocketService().subscribeConversation(widget.conversationId);
-      WebSocketService().onNewMessage((message) async {
-        setState(() => _rawMessages.insert(0, message));
-        await _decryptVisibleMessages();
-      });
-      WebSocketService().onError((errorMessage) {
-        _showError('Erreur WebSocket: $errorMessage');
-        _attemptReconnect(); 
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Reconnecté au serveur.'),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 3),
-        ),
-      );
-    } else {
-      _showError('Impossible de se reconnecter : token manquant');
-    }
   }
 }

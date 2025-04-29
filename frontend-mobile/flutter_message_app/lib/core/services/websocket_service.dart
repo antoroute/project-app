@@ -10,7 +10,7 @@ class WebSocketService {
 
   WebSocketService._internal();
 
-  void connect(String token) {
+  void connect(String token, {String? conversationId}) {
     if (_isConnected) return;
     _lastToken = token;
 
@@ -23,6 +23,10 @@ class WebSocketService {
     _socket.onConnect((_) {
       print('✅ WebSocket connecté');
       _isConnected = true;
+
+      if (conversationId != null) {
+        subscribeConversation(conversationId);
+      }
     });
 
     _socket.onDisconnect((_) {

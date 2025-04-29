@@ -122,15 +122,25 @@ class KeyManager {
   }
 
   pc.RSAPublicKey _parsePublicKeyFromPem(String pem) {
-    final lines = pem.split('\n');
-    final base64Str = lines.where((l) => !l.startsWith('---')).join();
-    final bytes = base64.decode(base64Str);
+    final cleanPem = pem.replaceAll(RegExp(r'-----.*?-----|\s'), '');
+    final bytes = base64.decode(cleanPem);
 
     final parser = ASN1Parser(bytes);
     final topLevelSeq = parser.nextObject() as ASN1Sequence;
+
+    if (topLevelSeq.elements == null || topLevelSeq.elements!.length != 2) {
+      throw FormatException('Clé publique invalide, structure ASN.1 inattendue (topLevel)');
+    }
+
+    final algoSeq = topLevelSeq.elements![0] as ASN1Sequence;
+    final oid = algoSeq.elements![0] as ASN1ObjectIdentifier;
+    if (oid.identifier != '1.2.840.113549.1.1.1') {
+      throw FormatException('OID inattendu : algorithme non RSA');
+    }
+
     final publicKeyBitString = topLevelSeq.elements![1] as ASN1BitString;
 
-    final publicKeyParser = ASN1Parser(publicKeyBitString.valueBytes());
+    final publicKeyParser = ASN1Parser(publicKeyBitString.contentBytes()!);
     final publicKeySeq = publicKeyParser.nextObject() as ASN1Sequence;
 
     final modulus = publicKeySeq.elements![0] as ASN1Integer;

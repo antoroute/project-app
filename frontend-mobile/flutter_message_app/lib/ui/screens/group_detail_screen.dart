@@ -26,6 +26,17 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   bool _loading = true;
   String? _currentUserId;
 
+  // ➔ Variables pour cacher l'AES, signature et encryptedSecrets
+  Uint8List? _cachedAESKey;
+  String? _cachedSignature;
+  Map<String, String>? _cachedEncryptedSecrets;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchGroupMembers();
+  }
+
   Future<void> _fetchGroupMembers() async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final token = auth.token;
@@ -66,29 +77,39 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     final token = auth.token;
     if (token == null) throw Exception('Token JWT manquant');
 
-    final Map<String, String> encryptedSecrets = {};
-
-    for (final userId in _selectedUserIds) {
-      final member = _members.firstWhere((m) => m['userId'] == userId);
-      final publicKeyPem = member['publicKeyGroup'];
-
-      final aesKey = EncryptionUtils.generateRandomAESKey();
-
-      final encrypted = EncryptionUtils.encryptAESKeyWithRSAOAEP(publicKeyPem, aesKey);
-      encryptedSecrets[userId] = base64.encode(encrypted);
+    final Set<String> participantIds = {..._selectedUserIds};
+    if (_currentUserId != null) {
+      participantIds.add(_currentUserId!);
     }
 
-    // Signature de encryptedSecrets
-    final aesSecretJson = jsonEncode(encryptedSecrets);
+    // ➔ Si pas encore généré, on génère AES, encryptedSecrets et signature
+    if (_cachedAESKey == null || _cachedEncryptedSecrets == null) {
+      _cachedAESKey = EncryptionUtils.generateRandomAESKey();
+      final Map<String, String> encryptedSecrets = {};
 
-    final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
-    if (keyPair == null) throw Exception('Clé privée RSA manquante');
+      for (final userId in participantIds) {
+        final member = _members.firstWhere((m) => m['userId'] == userId, orElse: () => {});
+        final publicKeyPem = member['publicKeyGroup'];
 
-    final signer = pc.Signer('SHA-256/RSA')
-      ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(keyPair.privateKey as pc.RSAPrivateKey));
+        if (publicKeyPem == null) {
+          throw Exception('❌ Clé publique absente pour userId $userId');
+        }
 
-    final signature = signer.generateSignature(utf8.encode(aesSecretJson) as Uint8List) as pc.RSASignature;
-    final creatorSignature = base64.encode(signature.bytes);
+        final encrypted = EncryptionUtils.encryptAESKeyWithRSAOAEP(publicKeyPem, _cachedAESKey!);
+        encryptedSecrets[userId] = base64.encode(encrypted);
+      }
+
+      _cachedEncryptedSecrets = encryptedSecrets;
+
+      final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
+      if (keyPair == null) throw Exception('Clé privée RSA manquante');
+
+      final signer = pc.Signer('SHA-256/RSA')
+        ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(keyPair.privateKey as pc.RSAPrivateKey));
+
+      final signature = signer.generateSignature(Uint8List.fromList(utf8.encode(jsonEncode(encryptedSecrets)))) as pc.RSASignature;
+      _cachedSignature = base64.encode(signature.bytes);
+    }
 
     final res = await http.post(
       Uri.parse("https://api.kavalek.fr/api/conversations"),
@@ -99,8 +120,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       body: jsonEncode({
         'groupId': widget.groupId,
         'userIds': _selectedUserIds.toList(),
-        'encryptedSecrets': encryptedSecrets,
-        'creatorSignature': creatorSignature,
+        'encryptedSecrets': _cachedEncryptedSecrets,
+        'creatorSignature': _cachedSignature,
       }),
     );
 
@@ -109,18 +130,17 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
         const SnackBar(content: Text("Conversation créée !")),
       );
       await Provider.of<ConversationProvider>(context, listen: false).fetchConversations(context);
-      setState(() => _selectedUserIds.clear());
+      setState(() {
+        _selectedUserIds.clear();
+        _cachedAESKey = null;
+        _cachedEncryptedSecrets = null;
+        _cachedSignature = null;
+      });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Erreur création: ${res.body}")),
       );
     }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchGroupMembers();
   }
 
   @override
@@ -177,14 +197,13 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                                 },
                         );
                       }),
-                      if (_selectedUserIds.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: ElevatedButton(
-                            onPressed: _createConversation,
-                            child: const Text('Créer la conversation'),
-                          ),
+                      Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: ElevatedButton(
+                          onPressed: _selectedUserIds.isNotEmpty ? _createConversation : null,
+                          child: const Text('Créer la conversation'),
                         ),
+                      ),
                     ],
                   ),
                 ),
