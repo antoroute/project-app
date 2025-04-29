@@ -65,6 +65,10 @@ export function conversationRoutes(fastify) {
             return reply.code(400).send({ error: 'Invalid creatorSignature' });
           }
   
+          if (!encryptedSecrets.hasOwnProperty(creatorId)) {
+            return reply.code(400).send({ error: 'Creator must include their own encrypted secret' });
+          }
+
           const type = userIds.length === 1 ? 'private' : 'subset';
   
           const convo = await db.query(
