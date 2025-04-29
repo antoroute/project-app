@@ -149,32 +149,55 @@ export function conversationRoutes(fastify) {
 
     // Voir les messages d'une conversation
     fastify.get('/conversations/:id/messages', {
-        preHandler: fastify.authenticate,
-        handler: async (request, reply) => {
+      preHandler: fastify.authenticate,
+      handler: async (request, reply) => {
         const conversationId = request.params.id;
         const userId = request.user.id;
-
+    
         const isInConversation = await db.query(
-            'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
-            [conversationId, userId]
+          'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
+          [conversationId, userId]
         );
-
+    
         if (isInConversation.rowCount === 0) {
-            return reply.code(403).send({ error: 'Access denied to this conversation' });
+          return reply.code(403).send({ error: 'Access denied to this conversation' });
         }
-
+    
         try {
-            const messages = await db.query(
-            'SELECT id, sender_id AS "senderId", encrypted_message AS "encryptedMessage", encrypted_keys AS "encryptedKeys", created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+          const res = await db.query(
+            `SELECT id, sender_id AS "senderId", encrypted_message, encrypted_keys, created_at
+             FROM messages
+             WHERE conversation_id = $1
+             ORDER BY created_at ASC`,
             [conversationId]
-            );
-
-            return reply.send(messages.rows);
+          );
+    
+          const messages = res.rows.map(msg => {
+            let parsed;
+            try {
+              parsed = JSON.parse(msg.encrypted_message);
+            } catch (err) {
+              request.log.warn(`⚠️ Failed to parse encrypted_message for message ${msg.id}`);
+              parsed = {}; // fallback to avoid crash
+            }
+    
+            return {
+              id: msg.id,
+              senderId: msg.senderId,
+              encrypted: parsed.encrypted ?? null,
+              iv: parsed.iv ?? null,
+              signature: parsed.signature ?? null,
+              senderPublicKey: parsed.senderPublicKey ?? null,
+              timestamp: Math.floor(new Date(msg.created_at).getTime() / 1000),
+            };
+          });
+    
+          return reply.send(messages);
         } catch (err) {
-            request.log.error(err);
-            return reply.code(500).send({ error: 'Failed to fetch messages' });
+          request.log.error(err);
+          return reply.code(500).send({ error: 'Failed to fetch messages' });
         }
-        }
+      }
     });
 
     // ✅ Envoyer un message via fallback REST
