@@ -264,5 +264,38 @@ export function conversationRoutes(fastify) {
           return reply.code(500).send({ error: 'Message not stored' });
         }
       }
-    });    
+    });
+
+    // Récupérer les membres d'une conversation
+    fastify.get('/conversations/:id/members', {
+      preHandler: fastify.authenticate,
+      handler: async (request, reply) => {
+        const conversationId = request.params.id;
+        const userId = request.user.id;
+
+        // Vérifie que l'utilisateur est bien membre de la conversation
+        const isInConversation = await db.query(
+          'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
+          [conversationId, userId]
+        );
+
+        if (isInConversation.rowCount === 0) {
+          return reply.code(403).send({ error: 'Access denied to this conversation' });
+        }
+
+        try {
+          const members = await db.query(`
+            SELECT u.id AS "userId", u.username
+            FROM conversation_users cu
+            JOIN users u ON u.id = cu.user_id
+            WHERE cu.conversation_id = $1
+          `, [conversationId]);
+
+          return reply.send(members.rows);
+        } catch (err) {
+          request.log.error(err);
+          return reply.code(500).send({ error: 'Failed to fetch conversation members' });
+        }
+      }
+    });
 }
