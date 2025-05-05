@@ -4,6 +4,7 @@ import '../../core/providers/auth_provider.dart';
 import '../../core/services/snackbar_service.dart';
 import '../../core/crypto/key_manager.dart';
 import 'login_screen.dart';
+import 'home_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -32,15 +33,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
       await KeyManager().generateKeyPairForGroup('user_rsa');
       debugPrint('🔐 Clé RSA utilisateur générée après inscription.');
 
-      // 🎯 Puis naviguer vers la page de connexion
+      // 🎯 Auto-login après inscription
+      await authProvider.login(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+      );
+
+      // 🎯 Naviguer vers la page d'accueil
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
         );
+        SnackbarService.showSuccess(context, 'Compte créé et connecté avec succès.');
       }
-
-      SnackbarService.showSuccess(context, 'Compte créé avec succès.');
     } catch (e, stacktrace) {
       debugPrint('❌ Register error: $e');
       debugPrintStack(stackTrace: stacktrace);

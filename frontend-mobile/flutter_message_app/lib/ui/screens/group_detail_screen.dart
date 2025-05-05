@@ -8,6 +8,8 @@ import '../../core/providers/auth_provider.dart';
 import '../../core/crypto/key_manager.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/crypto/encryption_utils.dart';
+import '../../core/crypto/aes_utils.dart';
+import '../../core/crypto/rsa_key_utils.dart';
 import 'conversation_screen.dart';
 
 class GroupDetailScreen extends StatefulWidget {
@@ -84,7 +86,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
 
     // ➔ Si pas encore généré, on génère AES, encryptedSecrets et signature
     if (_cachedAESKey == null || _cachedEncryptedSecrets == null) {
-      _cachedAESKey = EncryptionUtils.generateRandomAESKey();
+      _cachedAESKey = AesUtils.generateRandomAESKey();
       final Map<String, String> encryptedSecrets = {};
 
       for (final userId in participantIds) {
@@ -95,7 +97,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           throw Exception('❌ Clé publique absente pour userId $userId');
         }
 
-        final encrypted = EncryptionUtils.encryptAESKeyWithRSAOAEP(publicKeyPem, _cachedAESKey!);
+        final encrypted = RsaKeyUtils.encryptAESKeyWithRSAOAEP(publicKeyPem, _cachedAESKey!);
         encryptedSecrets[userId] = base64.encode(encrypted);
       }
 

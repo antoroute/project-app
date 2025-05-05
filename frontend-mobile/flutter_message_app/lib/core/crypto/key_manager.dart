@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:asn1lib/asn1lib.dart';
 import 'crypto_tasks.dart';
+import 'package:flutter_message_app/core/crypto/rsa_key_utils.dart';
 
 class KeyManager {
   static final KeyManager _instance = KeyManager._internal();
@@ -45,8 +46,8 @@ class KeyManager {
   }
 
   Future<void> storeKeyPairForGroup(String groupId, pc.AsymmetricKeyPair keyPair) async {
-    final publicPem = _encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
-    final privatePem = _encodePrivateKeyToPem(keyPair.privateKey as pc.RSAPrivateKey);
+    final publicPem = RsaKeyUtils.encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
+    final privatePem = RsaKeyUtils.encodePrivateKeyToPem(keyPair.privateKey as pc.RSAPrivateKey);
 
     await _saveSplitted("rsa_keypair_${groupId}_public", publicPem);
     await _saveSplitted("rsa_keypair_${groupId}_private", privatePem);
@@ -65,8 +66,8 @@ class KeyManager {
       }
 
       _log('📜 Lecture clé "$groupId" réussie, parsing ASN1...');
-      final pub = _parsePublicKeyFromPem(publicPem);
-      final priv = _parsePrivateKeyFromPem(privatePem);
+      final pub = RsaKeyUtils.parsePublicKeyFromPem(publicPem);
+      final priv = RsaKeyUtils.parsePrivateKeyFromPem(privatePem);
 
       return pc.AsymmetricKeyPair(pub, priv);
     } catch (e) {
@@ -121,90 +122,6 @@ class KeyManager {
     await _storage.delete(key: "$baseKey-meta");
   }
 
-  pc.RSAPublicKey _parsePublicKeyFromPem(String pem) {
-    final cleanPem = pem.replaceAll(RegExp(r'-----.*?-----|\s'), '');
-    final bytes = base64.decode(cleanPem);
-
-    final parser = ASN1Parser(bytes);
-    final topLevelSeq = parser.nextObject() as ASN1Sequence;
-
-    if (topLevelSeq.elements == null || topLevelSeq.elements!.length != 2) {
-      throw FormatException('Clé publique invalide, structure ASN.1 inattendue (topLevel)');
-    }
-
-    final algoSeq = topLevelSeq.elements![0] as ASN1Sequence;
-    final oid = algoSeq.elements![0] as ASN1ObjectIdentifier;
-    if (oid.identifier != '1.2.840.113549.1.1.1') {
-      throw FormatException('OID inattendu : algorithme non RSA');
-    }
-
-    final publicKeyBitString = topLevelSeq.elements![1] as ASN1BitString;
-
-    final publicKeyParser = ASN1Parser(publicKeyBitString.contentBytes()!);
-    final publicKeySeq = publicKeyParser.nextObject() as ASN1Sequence;
-
-    final modulus = publicKeySeq.elements![0] as ASN1Integer;
-    final exponent = publicKeySeq.elements![1] as ASN1Integer;
-
-    return pc.RSAPublicKey(modulus.valueAsBigInteger!, exponent.valueAsBigInteger!);
-  }
-
-  pc.RSAPrivateKey _parsePrivateKeyFromPem(String pem) {
-    final lines = pem.split('\n');
-    final base64Str = lines.where((l) => !l.startsWith('---')).join();
-    final bytes = base64.decode(base64Str);
-
-    final parser = ASN1Parser(bytes);
-    final topLevelSeq = parser.nextObject() as ASN1Sequence;
-
-    final modulus = (topLevelSeq.elements![1] as ASN1Integer).valueAsBigInteger!;
-    final publicExponent = (topLevelSeq.elements![2] as ASN1Integer).valueAsBigInteger!;
-    final privateExponent = (topLevelSeq.elements![3] as ASN1Integer).valueAsBigInteger!;
-    final p = (topLevelSeq.elements![4] as ASN1Integer).valueAsBigInteger!;
-    final q = (topLevelSeq.elements![5] as ASN1Integer).valueAsBigInteger!;
-
-    return pc.RSAPrivateKey(modulus, privateExponent, p, q);
-  }
-
-  String _encodePublicKeyToPem(pc.RSAPublicKey publicKey) {
-    final publicKeySeq = ASN1Sequence()
-      ..add(ASN1Integer(publicKey.modulus!))
-      ..add(ASN1Integer(publicKey.exponent!));
-
-    final publicKeyBitString = ASN1BitString(Uint8List.fromList(publicKeySeq.encodedBytes));
-
-    final algorithmSeq = ASN1Sequence()
-      ..add(ASN1ObjectIdentifier.fromComponents([1, 2, 840, 113549, 1, 1, 1]))
-      ..add(ASN1Null());
-
-    final topLevelSeq = ASN1Sequence()
-      ..add(algorithmSeq)
-      ..add(publicKeyBitString);
-
-    final base64Str = base64.encode(topLevelSeq.encodedBytes);
-    final formatted = base64Str.replaceAllMapped(RegExp('.{1,64}'), (match) => '${match.group(0)}\n');
-
-    return '-----BEGIN PUBLIC KEY-----\n$formatted-----END PUBLIC KEY-----';
-  }
-
-  String _encodePrivateKeyToPem(pc.RSAPrivateKey privateKey) {
-    final topLevelSeq = ASN1Sequence()
-      ..add(ASN1Integer(BigInt.zero))
-      ..add(ASN1Integer(privateKey.n!))
-      ..add(ASN1Integer(privateKey.publicExponent!))
-      ..add(ASN1Integer(privateKey.exponent!))
-      ..add(ASN1Integer(privateKey.p!))
-      ..add(ASN1Integer(privateKey.q!))
-      ..add(ASN1Integer(privateKey.exponent! % (privateKey.p! - BigInt.one)))
-      ..add(ASN1Integer(privateKey.exponent! % (privateKey.q! - BigInt.one)))
-      ..add(ASN1Integer(privateKey.q!.modInverse(privateKey.p!)));
-
-    final base64Str = base64.encode(topLevelSeq.encodedBytes);
-    final formatted = base64Str.replaceAllMapped(RegExp('.{1,64}'), (match) => '${match.group(0)}\n');
-
-    return '-----BEGIN RSA PRIVATE KEY-----\n$formatted-----END RSA PRIVATE KEY-----';
-  }
-
   void _log(String message) {
     if (kDebugMode) {
       debugPrint('[KeyManager] $message');
@@ -214,8 +131,7 @@ class KeyManager {
 
 // --- Export public helpers ---
 
-String encodePublicKeyToPem(pc.RSAPublicKey publicKey) => KeyManager()._encodePublicKeyToPem(publicKey);
-pc.RSAPublicKey parsePublicKeyFromPem(String pem) => KeyManager()._parsePublicKeyFromPem(pem);
-
-String encodePrivateKeyToPem(pc.RSAPrivateKey privateKey) => KeyManager()._encodePrivateKeyToPem(privateKey);
-pc.RSAPrivateKey parsePrivateKeyFromPem(String pem) => KeyManager()._parsePrivateKeyFromPem(pem);
+String encodePublicKeyToPem(pc.RSAPublicKey publicKey) => RsaKeyUtils.encodePublicKeyToPem(publicKey);
+pc.RSAPublicKey parsePublicKeyFromPem(String pem) => RsaKeyUtils.parsePublicKeyFromPem(pem);
+String encodePrivateKeyToPem(pc.RSAPrivateKey privateKey) => RsaKeyUtils.encodePrivateKeyToPem(privateKey);
+pc.RSAPrivateKey parsePrivateKeyFromPem(String pem) => RsaKeyUtils.parsePrivateKeyFromPem(pem);

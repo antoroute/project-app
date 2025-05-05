@@ -4,6 +4,9 @@ import 'package:pointycastle/export.dart' as pc;
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:crypto/crypto.dart';
 import 'package:flutter_message_app/core/crypto/key_manager.dart';
+import 'package:flutter_message_app/core/crypto/rsa_key_utils.dart';
+import 'package:flutter_message_app/core/crypto/aes_utils.dart';
+import 'package:flutter_message_app/core/crypto/signature_utils.dart';
 
 Future<pc.AsymmetricKeyPair<pc.PublicKey, pc.PrivateKey>> generateRsaKeyPairTask(dynamic _) async {
   final keyGen = pc.RSAKeyGenerator()
@@ -18,14 +21,14 @@ Future<Map<String, dynamic>> encryptMessageTask(Map<String, dynamic> params) asy
   final plaintext = params['plaintext'] as String;
   final Map<String, String> publicKeysByUserId = Map<String, String>.from(params['publicKeysByUserId']);
 
-  final aesKey = Uint8List(32)..setAll(0, List.generate(32, (_) => 42));
+  final aesKey = AesUtils.generateRandomAESKey();
   final iv = encrypt.IV.fromLength(16);
   final encrypter = encrypt.Encrypter(encrypt.AES(encrypt.Key(aesKey), mode: encrypt.AESMode.cbc));
   final encryptedText = encrypter.encrypt(plaintext, iv: iv);
 
   final encryptedKeys = <String, String>{};
   for (final entry in publicKeysByUserId.entries) {
-    final key = parsePublicKeyFromPem(entry.value);
+    final key = RsaKeyUtils.parsePublicKeyFromPem(entry.value);
     final cipher = pc.OAEPEncoding(pc.RSAEngine())
       ..init(true, pc.PublicKeyParameter<pc.RSAPublicKey>(key));
     final encKey = cipher.process(aesKey);
@@ -70,7 +73,7 @@ Future<bool> verifySignatureTask(Map<String, dynamic> params) async {
     final signature = params['signature'] as String;
     final senderPublicKeyPem = params['senderPublicKeyPem'] as String;
 
-    final key = parsePublicKeyFromPem(senderPublicKeyPem);
+    final key = RsaKeyUtils.parsePublicKeyFromPem(senderPublicKeyPem);
     final data = utf8.encode(payload['encrypted'] + payload['iv']);
     final hash = sha256.convert(data).bytes;
 

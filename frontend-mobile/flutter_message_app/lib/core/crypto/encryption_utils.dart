@@ -1,11 +1,13 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:math';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_message_app/core/crypto/crypto_tasks.dart';
 import 'package:flutter_message_app/core/crypto/key_manager.dart';
 import 'package:pointycastle/export.dart' as pc;
+import 'package:flutter_message_app/core/crypto/rsa_key_utils.dart';
+import 'package:flutter_message_app/core/crypto/aes_utils.dart';
+import 'package:flutter_message_app/core/crypto/signature_utils.dart';
 
 class EncryptionUtils {
   static Future<Map<String, dynamic>> encryptMessageForUsers({
@@ -23,7 +25,7 @@ class EncryptionUtils {
 
     final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
     if (keyPair != null) {
-      payload['senderPublicKey'] = encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
+      payload['senderPublicKey'] = RsaKeyUtils.encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
     }
     return payload;
   }
@@ -77,7 +79,7 @@ class EncryptionUtils {
     try {
       print('🔍 Début vérification signature...');
       final canonical = canonicalJson(payload);
-      final publicKey = parsePublicKeyFromPem(senderPublicKeyPem);
+      final publicKey = RsaKeyUtils.parsePublicKeyFromPem(senderPublicKeyPem);
       final sig = base64.decode(signature);
 
       final verifier = pc.Signer('SHA-256/RSA')
@@ -95,27 +97,6 @@ class EncryptionUtils {
       print(st);
       return false;
     }
-  }
-
-  static Uint8List generateRandomAESKey() {
-    final random = Random.secure();
-    return Uint8List.fromList(List<int>.generate(32, (_) => random.nextInt(256)));
-  }
-
-  static Uint8List encryptAESKeyWithRSAOAEP(String publicKeyPem, Uint8List aesKey) {
-    final publicKey = parsePublicKeyFromPem(publicKeyPem);
-
-    final cipher = pc.OAEPEncoding(pc.RSAEngine())
-      ..init(true, pc.PublicKeyParameter<pc.RSAPublicKey>(publicKey));
-
-    return cipher.process(aesKey);
-  }
-
-  static Uint8List signDataWithPrivateKey(Uint8List data, pc.RSAPrivateKey privateKey) {
-    final signer = pc.Signer("SHA-256/RSA")
-      ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey));
-    final sig = signer.generateSignature(data) as pc.RSASignature;
-    return sig.bytes;
   }
 
   static Future<String> decryptMessageTaskSimple(Map<String, dynamic> params) async {
