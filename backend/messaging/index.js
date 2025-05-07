@@ -84,14 +84,28 @@ io.on('connection', (socket) => {
 
   socket.on('message:send', async (payload) => {
     try {
-      const {
-        conversationId,
-        encrypted,
-        iv,
-        keys = {},
-        signature,
-        senderPublicKey
-      } = payload || {};
+      // On récupère la chaîne JSON et les clés chiffrées
+      const { conversationId, encrypted_message, encrypted_keys = {} } = payload || {};
+
+      // Validation basique du payload
+      if (!conversationId || typeof encrypted_message !== 'string') {
+        console.error('❌ Invalid payload:', payload);
+        return socket.emit('error', { error: 'Invalid payload' });
+      }
+ 
+      // Déballage de l’envelope JSON
+      let envelope;
+      try {
+        envelope = JSON.parse(encrypted_message);
+      } catch (e) {
+        console.error('❌ Invalid envelope JSON:', e);
+        return socket.emit('error', { error: 'Invalid envelope JSON' });
+      }
+      const { encrypted, iv, signature, senderPublicKey } = envelope;
+      if (!encrypted || !iv || !signature || !senderPublicKey) {
+        console.error('❌ Incomplete envelope:', envelope);
+        return socket.emit('error', { error: 'Incomplete envelope' });
+      }
 
       const senderId = socket.user.id;
 
@@ -125,21 +139,19 @@ io.on('connection', (socket) => {
 
       // Vérification de la signature avec la clé de compte
       const verify = createVerify('SHA256');
-      const canonicalPayload = JSON.stringify(Object.fromEntries(
-        Object.entries({ encrypted, iv }).sort(([a], [b]) => a.localeCompare(b))
-      ));
-      verify.update(Buffer.from(canonicalPayload));
+      // On reconstruit exactement JSON.stringify({encrypted, iv})
+      const canonical = JSON.stringify({ encrypted, iv });
+      verify.update(Buffer.from(canonical));
       verify.end();
-
       const isSignatureValid = verify.verify(publicKey, Buffer.from(signature, 'base64'));
 
       // Toujours stocker le message, même si la signature est invalide
-      const encryptedMessageData = JSON.stringify({ encrypted, iv, signature, senderPublicKey });
+      const encryptedMessageData = encrypted_message;
 
       await fastify.pg.query(
         `INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys, signature_valid)
          VALUES ($1, $2, $3, $4, $5)`,
-        [conversationId, senderId, encryptedMessageData, keys, isSignatureValid]
+        [conversationId, senderId, encryptedMessageData, encrypted_keys, isSignatureValid]
       );
 
       console.log(`📨 Emitting message:new to conversation ${conversationId}`, { senderId });
@@ -149,10 +161,9 @@ io.on('connection', (socket) => {
         conversationId,
         encrypted,
         iv,
-        keys,
-        signature,
-        senderPublicKey,
-        signatureValid: isSignatureValid
+        encrypted_keys,
+        signatureValid: isSignatureValid,
+        senderPublicKey
       };
 
       io.to(conversationId).emit('message:new', newMessage);
