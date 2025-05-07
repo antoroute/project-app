@@ -76,8 +76,8 @@ export function groupRoutes(fastify) {
     }
   });
 
-  // ─── Déposer une demande d’adhésion ──────────────────────────────────────────
-  fastify.post('/groups/:id/join-request', {
+  // ─── Déposer une demande d’adhésion (clé perdue OU nouvelle adhésion) ───────────
+  fastify.post('/groups/:id/join-requests', {
     preHandler: fastify.authenticate,
     schema: {
       body: {
@@ -90,39 +90,36 @@ export function groupRoutes(fastify) {
     }
   }, async (request, reply) => {
     const groupId = request.params.id;
-    const userId = request.user.id;
+    const userId  = request.user.id;
     const { publicKeyGroup } = request.body;
 
-    // Le groupe doit exister
+    // 1) Vérifier que le groupe existe
     const grp = await pool.query('SELECT 1 FROM groups WHERE id = $1', [groupId]);
     if (grp.rowCount === 0) {
       return reply.code(404).send({ error: 'Group not found' });
     }
 
-    // Pas déjà membre
-    const already = await pool.query(
-      'SELECT 1 FROM user_groups WHERE user_id = $1 AND group_id = $2',
-      [userId, groupId]
-    );
-    if (already.rowCount > 0) {
-      return reply.code(409).send({ error: 'Already a member' });
-    }
-
-    // Pas déjà en attente
+    // 2) S’assurer qu’il n’existe pas déjà une requête pendante
     const pending = await pool.query(
       `SELECT 1 FROM join_requests
-       WHERE user_id = $1 AND group_id = $2 AND status = 'pending'`,
+      WHERE user_id = $1
+        AND group_id = $2
+        AND status = 'pending'`,
       [userId, groupId]
     );
     if (pending.rowCount > 0) {
-      return reply.code(409).send({ error: 'Join request already pending' });
+      return reply
+        .code(409)
+        .send({ error: 'You already have a pending join request' });
     }
 
+    // 3) Créer la requête (on stocke la clé que l’utilisateur fournit)
     try {
       const jr = await pool.query(
-        `INSERT INTO join_requests (group_id, user_id, public_key_group)
-         VALUES ($1, $2, $3)
-         RETURNING id, created_at`,
+        `INSERT INTO join_requests
+          (group_id, user_id, public_key_group)
+        VALUES($1,$2,$3)
+        RETURNING id, created_at`,
         [groupId, userId, publicKeyGroup]
       );
       return reply.code(201).send({
@@ -256,54 +253,59 @@ export function groupRoutes(fastify) {
     const requestId = request.params.reqId;
     const userId    = request.user.id;
     const { action }= request.body;
-
-    // 1) Vérifier que je suis bien le créateur du groupe
-    const grp = await pool.query(
+  
+    // 1) Vérifier que je suis bien le créateur
+    const g = await pool.query(
       'SELECT creator_id FROM groups WHERE id = $1',
       [groupId]
     );
-    if (grp.rowCount === 0) {
+    if (g.rowCount === 0) {
       return reply.code(404).send({ error: 'Group not found' });
     }
-    if (grp.rows[0].creator_id !== userId) {
-      return reply.code(403).send({ error: 'Only the group creator can handle join requests' });
+    if (g.rows[0].creator_id !== userId) {
+      return reply
+        .code(403)
+        .send({ error: 'Only the group creator may handle join requests' });
     }
-
+  
     // 2) Charger la requête
-    const jr = await pool.query(
+    const jrRes = await pool.query(
       `SELECT user_id, public_key_group, status
          FROM join_requests
-        WHERE id = $1 AND group_id = $2`,
+        WHERE id = $1
+          AND group_id = $2`,
       [requestId, groupId]
     );
-    if (jr.rowCount === 0) {
+    if (jrRes.rowCount === 0) {
       return reply.code(404).send({ error: 'Join request not found' });
     }
-    if (jr.rows[0].status !== 'pending') {
-      return reply.code(400).send({ error: 'Join request already handled' });
+    const jr = jrRes.rows[0];
+    if (jr.status !== 'pending') {
+      return reply.code(400).send({ error: 'Request already handled' });
     }
-
+  
+    // 3) Marquer accept/reject
+    const newStatus = action === 'accept' ? 'accepted' : 'rejected';
     try {
-      // 3) Mettre à jour le statut
       await pool.query(
         `UPDATE join_requests
             SET status = $1,
                 handled_by = $2
           WHERE id = $3`,
-        [action === 'accept' ? 'accepted' : 'rejected', userId, requestId]
+        [newStatus, userId, requestId]
       );
-
-      // 4) Si accepté → on inscrit définitivement dans user_groups
+  
+      // 4) Si on accepte → upsert dans user_groups
       if (action === 'accept') {
-        const newUserId = jr.rows[0].user_id;
-        const publicKey = jr.rows[0].public_key_group;
         await pool.query(
           `INSERT INTO user_groups (user_id, group_id, public_key_group)
-           VALUES ($1, $2, $3)`,
-          [newUserId, groupId, publicKey]
+           VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, group_id)
+           DO UPDATE SET public_key_group = EXCLUDED.public_key_group`,
+          [jr.user_id, groupId, jr.public_key_group]
         );
       }
-
+  
       return reply.send({ handled: true });
     } catch (err) {
       request.log.error(err);
