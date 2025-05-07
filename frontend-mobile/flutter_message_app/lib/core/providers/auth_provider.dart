@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:flutter_message_app/core/crypto/key_manager.dart';
+import 'package:pointycastle/pointycastle.dart' as pc;
 
 class AuthProvider extends ChangeNotifier {
   final _storage = const FlutterSecureStorage();
@@ -51,6 +52,11 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> register(String email, String password, String username) async {
     try {
+      await KeyManager().generateKeyPairForGroup('user_rsa');
+      final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
+      if (keyPair == null) throw Exception('Erreur génération clé RSA utilisateur');
+      final publicKeyPem = encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
+
       final url = Uri.parse('https://auth.kavalek.fr/auth/register');
       final res = await http.post(
         url,
@@ -59,11 +65,12 @@ class AuthProvider extends ChangeNotifier {
           'email': email,
           'password': password,
           'username': username,
+          'publicKey': publicKeyPem,
         }),
       );
 
-      if (res.statusCode != 200) {
-        throw Exception('Erreur d\'inscription : ${res.body}');
+      if (res.statusCode != 200 && res.statusCode != 201) {
+        throw Exception('Erreur d\'inscription : \'${res.body}\'');
       }
     } catch (e, stacktrace) {
       debugPrint('❌ Register failed: $e');

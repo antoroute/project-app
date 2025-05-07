@@ -35,6 +35,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   // Ajout : mapping userId → username pour le groupe courant
   Map<String, String> _usernamesById = {};
 
+  // Ajout : mapping userId → publicKey pour la conversation
+  Map<String, String> _userPublicKeys = {};
+
   // Pagination
   static const int _pageSize = 20;
   int _currentPage = 0;
@@ -202,6 +205,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
           _hasMore = messages.length == _pageSize;
           if (_hasMore) _currentPage++;
         });
+        // Pré-remplir _verifiedSignatures si signatureValid est présent
+        for (int i = 0; i < _rawMessages.length; i++) {
+          final m = _rawMessages[i];
+          final messageId = _generateMessageId(m, i);
+          if (m.containsKey('signatureValid')) {
+            _verifiedSignatures[messageId] = m['signatureValid'] == true;
+          }
+        }
         await _decryptVisibleMessages();
       } else {
         _showError('Erreur chargement messages: ${res.body}');
@@ -231,16 +242,26 @@ class _ConversationScreenState extends State<ConversationScreen> {
           'aesKey': base64.encode(_aesConversationKey!),
         });
         _decryptedMessages[messageId] = decrypted;
-        final signedPayload = json.encode({
-          'encrypted': m['encrypted'],
-          'iv': m['iv'],
-        });
-        final valid = await EncryptionUtils.verifySignature(
-          payload: json.decode(signedPayload),
-          signature: m['signature'],
-          senderPublicKeyPem: m['senderPublicKey'],
-        );
-        _verifiedSignatures[messageId] = valid;
+        // Utiliser signatureValid si présent, sinon fallback sur vérification locale
+        if (m.containsKey('signatureValid')) {
+          _verifiedSignatures[messageId] = m['signatureValid'] == true;
+        } else {
+          final signedPayload = json.encode({
+            'encrypted': m['encrypted'],
+            'iv': m['iv'],
+          });
+          final senderId = m['senderId'];
+          final expectedPublicKey = _userPublicKeys[senderId];
+          bool valid = false;
+          if (expectedPublicKey != null) {
+            valid = await EncryptionUtils.verifySignature(
+              payload: json.decode(signedPayload),
+              signature: m['signature'],
+              senderPublicKeyPem: expectedPublicKey,
+            );
+          }
+          _verifiedSignatures[messageId] = valid;
+        }
       } catch (e) {
         _decryptedMessages[messageId] = '[Déchiffrement impossible]';
       }
@@ -397,13 +418,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
         headers: {'Authorization': 'Bearer $token'},
       );
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final members = List<Map<String, dynamic>>.from(data);
+        final members = List<Map<String, dynamic>>.from(jsonDecode(res.body));
         setState(() {
           _usernamesById = {
             for (final m in members)
               if (m['userId'] != null && m['username'] != null)
                 m['userId']: m['username']
+          };
+          _userPublicKeys = {
+            for (final m in members)
+              if (m['userId'] != null && m['publicKeyGroup'] != null)
+                m['userId']: m['publicKeyGroup']
           };
         });
       }
@@ -576,7 +601,11 @@ class _MessageBubbleState extends State<MessageBubble> {
             padding: const EdgeInsets.only(right: 8),
             child: CircleAvatar(
               radius: 18,
-              child: Text(widget.senderInitial!),
+              child: Text(
+                (widget.senderUsername != null && widget.senderUsername!.isNotEmpty)
+                  ? widget.senderUsername![0].toUpperCase()
+                  : widget.senderInitial ?? '',
+              ),
             ),
           ),
         Flexible(

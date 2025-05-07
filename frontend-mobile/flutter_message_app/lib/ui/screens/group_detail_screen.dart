@@ -11,6 +11,7 @@ import '../../core/crypto/encryption_utils.dart';
 import '../../core/crypto/aes_utils.dart';
 import '../../core/crypto/rsa_key_utils.dart';
 import 'conversation_screen.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 class GroupDetailScreen extends StatefulWidget {
   final String groupId;
@@ -33,10 +34,25 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   String? _cachedSignature;
   Map<String, String>? _cachedEncryptedSecrets;
 
+  // Cache des membres par conversationId
+  final Map<String, List<Map<String, dynamic>>> _conversationMembers = {};
+  final Set<String> _loadingConversations = {};
+
+  bool _didFetchConversations = false;
+
   @override
   void initState() {
     super.initState();
     _fetchGroupMembers();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_didFetchConversations) {
+      Provider.of<ConversationProvider>(context, listen: false).fetchConversations(context);
+      _didFetchConversations = true;
+    }
   }
 
   Future<void> _fetchGroupMembers() async {
@@ -72,6 +88,27 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       );
     }
     setState(() => _loading = false);
+  }
+
+  Future<void> _fetchConversationMembers(String conversationId) async {
+    if (_conversationMembers.containsKey(conversationId) || _loadingConversations.contains(conversationId)) return;
+    _loadingConversations.add(conversationId);
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final token = auth.token;
+    if (token == null) return;
+    try {
+      final res = await http.get(
+        Uri.parse('https://api.kavalek.fr/api/conversations/$conversationId/members'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (res.statusCode == 200) {
+        final data = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+        setState(() {
+          _conversationMembers[conversationId] = data;
+        });
+      }
+    } catch (_) {}
+    _loadingConversations.remove(conversationId);
   }
 
   Future<void> _createConversation() async {
@@ -155,6 +192,21 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 16, bottom: 8),
+                  child: Column(
+                    children: [
+                      QrImageView(
+                        data: widget.groupId,
+                        version: QrVersions.auto,
+                        size: 120.0,
+                        backgroundColor: Colors.white,
+                      ),
+                      const SizedBox(height: 6),
+                      Text('ID du groupe : ${widget.groupId}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                    ],
+                  ),
+                ),
                 Expanded(
                   child: ListView(
                     children: [
@@ -162,19 +214,36 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                         padding: EdgeInsets.all(8),
                         child: Text('Conversations', style: TextStyle(fontSize: 18)),
                       ),
-                      ...conversations.map((c) => ListTile(
-                            title: Text(c['type'] == 'subset' ? 'Conversation de groupe' : 'Conversation privée'),
-                            subtitle: Text('ID: ${c['conversationId']}'),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ConversationScreen(
-                                  conversationId: c['conversationId'],
-                                  groupId: widget.groupId,
-                                ),
+                      ...conversations.map((c) {
+                        final conversationId = c['conversationId'];
+                        final members = _conversationMembers[conversationId];
+                        if (members == null) {
+                          // Lancer le chargement si pas déjà fait
+                          _fetchConversationMembers(conversationId);
+                        }
+                        final otherUsernames = members == null
+                            ? null
+                            : members
+                                .where((m) => m['userId'] != _currentUserId)
+                                .map((m) => m['username'] ?? 'Inconnu')
+                                .toList();
+                        final title = otherUsernames == null
+                            ? 'Chargement...'
+                            : (otherUsernames.isNotEmpty ? otherUsernames.join(', ') : 'Conversation');
+                        return ListTile(
+                          title: Text(title),
+                          subtitle: Text('ID: ${c['conversationId']}'),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ConversationScreen(
+                                conversationId: c['conversationId'],
+                                groupId: widget.groupId,
                               ),
                             ),
-                          )),
+                          ),
+                        );
+                      }),
                       const Divider(),
                       const Padding(
                         padding: EdgeInsets.all(8),

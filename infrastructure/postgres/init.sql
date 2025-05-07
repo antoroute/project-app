@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL, -- A stocker hashé (bcrypt)
   username TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  public_key TEXT
 );
 
 -- Table des groupes
@@ -49,5 +50,6 @@ CREATE TABLE IF NOT EXISTS messages (
   sender_id UUID REFERENCES users(id),
   encrypted_message TEXT NOT NULL,
   encrypted_keys JSONB NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  signature_valid BOOLEAN DEFAULT TRUE
 );
