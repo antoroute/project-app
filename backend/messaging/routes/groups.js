@@ -62,7 +62,7 @@ export function groupRoutes(fastify) {
 
       try {
         const result = await pool.query(
-          'SELECT id, name FROM groups WHERE id = $1',
+          'SELECT id, name, creator_id FROM groups WHERE id = $1',
           [groupId]
         );
         if (result.rowCount === 0) {
