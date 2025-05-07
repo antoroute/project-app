@@ -95,7 +95,7 @@ io.on('connection', (socket) => {
 
       const senderId = socket.user.id;
 
-      if (!conversationId || !encrypted || !iv || !signature || !senderPublicKey) {
+      if (!conversationId || !encrypted || !iv || !signature) {
         console.error('❌ Invalid payload:', payload);
         return socket.emit('error', { error: 'Invalid payload' });
       }
@@ -109,7 +109,21 @@ io.on('connection', (socket) => {
         return socket.emit('error', { error: 'You are not a member of this conversation' });
       }
 
-      // Vérification de la signature
+      // Récupérer le groupId de la conversation
+      const groupRes = await fastify.pg.query('SELECT group_id FROM conversations WHERE id = $1', [conversationId]);
+      if (groupRes.rowCount === 0) {
+        return socket.emit('error', { error: 'Conversation not found' });
+      }
+      const groupId = groupRes.rows[0].group_id;
+
+      // Récupérer la clé publique du compte utilisateur (users.public_key)
+      const userRes = await fastify.pg.query('SELECT public_key FROM users WHERE id = $1', [senderId]);
+      if (userRes.rowCount === 0 || !userRes.rows[0].public_key) {
+        return socket.emit('error', { error: 'Public key not found for sender' });
+      }
+      const publicKey = userRes.rows[0].public_key;
+
+      // Vérification de la signature avec la clé de compte
       const verify = createVerify('SHA256');
       const canonicalPayload = JSON.stringify(Object.fromEntries(
         Object.entries({ encrypted, iv }).sort(([a], [b]) => a.localeCompare(b))
@@ -117,19 +131,15 @@ io.on('connection', (socket) => {
       verify.update(Buffer.from(canonicalPayload));
       verify.end();
 
-      const isSignatureValid = verify.verify(senderPublicKey, Buffer.from(signature, 'base64'));
+      const isSignatureValid = verify.verify(publicKey, Buffer.from(signature, 'base64'));
 
-      if (!isSignatureValid) {
-        console.error('❌ Invalid signature from user:', senderId);
-        return socket.emit('error', { error: 'Invalid message signature' });
-      }
-
+      // Toujours stocker le message, même si la signature est invalide
       const encryptedMessageData = JSON.stringify({ encrypted, iv, signature, senderPublicKey });
 
       await fastify.pg.query(
-        `INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys)
-         VALUES ($1, $2, $3, $4)`,
-        [conversationId, senderId, encryptedMessageData, keys]
+        `INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys, signature_valid)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [conversationId, senderId, encryptedMessageData, keys, isSignatureValid]
       );
 
       console.log(`📨 Emitting message:new to conversation ${conversationId}`, { senderId });
@@ -141,7 +151,8 @@ io.on('connection', (socket) => {
         iv,
         keys,
         signature,
-        senderPublicKey
+        senderPublicKey,
+        signatureValid: isSignatureValid
       };
 
       io.to(conversationId).emit('message:new', newMessage);

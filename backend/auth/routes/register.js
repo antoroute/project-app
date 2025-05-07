@@ -5,16 +5,17 @@ export function registerRoutes(fastify) {
     schema: {
       body: {
         type: 'object',
-        required: ['email', 'password', 'username'],
+        required: ['email', 'password', 'username', 'publicKey'],
         properties: {
           email: { type: 'string', format: 'email' },
           password: { type: 'string', minLength: 6 },
-          username: { type: 'string', minLength: 3, maxLength: 30 }
+          username: { type: 'string', minLength: 3, maxLength: 20 },
+          publicKey: { type: 'string', minLength: 700 }
         }
       }
     }
   }, async (req, reply) => {
-    const { email, password, username } = req.body;
+    const { email, password, username, publicKey } = req.body;
 
     try {
       const existingEmail = await fastify.pg.query('SELECT 1 FROM users WHERE email = $1', [email]);
@@ -29,12 +30,12 @@ export function registerRoutes(fastify) {
 
       const hashedPassword = await bcrypt.hash(password, 12);
 
-      await fastify.pg.query(
-        'INSERT INTO users (email, username, password) VALUES ($1, $2, $3)',
-        [email, username, hashedPassword]
+      const result = await fastify.pg.query(
+        'INSERT INTO users (email, username, password, public_key) VALUES ($1, $2, $3, $4) RETURNING id',
+        [email, username, hashedPassword, publicKey]
       );
 
-      return reply.code(201).send({ message: 'User registered' });
+      return reply.code(201).send({ id: result.rows[0].id });
 
     } catch (err) {
       req.log.error(err);

@@ -165,7 +165,7 @@ export function conversationRoutes(fastify) {
     
         try {
           const res = await db.query(
-            `SELECT id, sender_id AS "senderId", encrypted_message, encrypted_keys, created_at
+            `SELECT id, sender_id AS "senderId", encrypted_message, encrypted_keys, created_at, signature_valid
              FROM messages
              WHERE conversation_id = $1
              ORDER BY created_at ASC`,
@@ -189,6 +189,7 @@ export function conversationRoutes(fastify) {
               signature: parsed.signature ?? null,
               senderPublicKey: parsed.senderPublicKey ?? null,
               timestamp: Math.floor(new Date(msg.created_at).getTime() / 1000),
+              signatureValid: msg.signature_valid
             };
           });
     
@@ -236,29 +237,33 @@ export function conversationRoutes(fastify) {
         }
     
         try {
-          // 🔐 Vérification de la signature
+          // Récupérer la clé publique du compte utilisateur (users.public_key)
+          const userRes = await db.query('SELECT public_key FROM users WHERE id = $1', [userId]);
+          if (userRes.rowCount === 0 || !userRes.rows[0].public_key) {
+            return reply.code(400).send({ error: 'Public key not found for sender' });
+          }
+          const publicKey = userRes.rows[0].public_key;
+
+          // 🔐 Vérification de la signature avec la clé de compte
           const parsedMessage = JSON.parse(encryptedMessage);
           const canonicalPayload = JSON.stringify({
             encrypted: parsedMessage.encrypted,
             iv: parsedMessage.iv
           });
-    
+
           const verify = createVerify('SHA256');
           verify.update(Buffer.from(canonicalPayload));
           verify.end();
-    
-          const isValid = verify.verify(senderPublicKey, Buffer.from(signature, 'base64'));
-    
-          if (!isValid) {
-            return reply.code(400).send({ error: 'Invalid message signature' });
-          }
-    
+
+          const isValid = verify.verify(publicKey, Buffer.from(signature, 'base64'));
+
+          // Toujours stocker le message, même si la signature est invalide
           await db.query(
-            'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys) VALUES ($1, $2, $3, $4)',
-            [conversationId, userId, encryptedMessage, encryptedKeys]
+            'INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys, signature_valid) VALUES ($1, $2, $3, $4, $5)',
+            [conversationId, userId, encryptedMessage, encryptedKeys, isValid]
           );
-    
-          return reply.code(201).send({ status: 'Message stored' });
+
+          return reply.code(201).send({ status: 'Message stored', signatureValid: isValid });
         } catch (err) {
           request.log.error(err);
           return reply.code(500).send({ error: 'Message not stored' });
