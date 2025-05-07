@@ -42,12 +42,12 @@ dependencies:
   socket_io_client: ^2.0.0
   qr_flutter: ^4.1.0
   mobile_scanner: ^3.5.5
-  flutter_launcher_icons: ^0.9.3
+  flutter_launcher_icons: ^0.11.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_launcher_icons: ^0.9.3
+  flutter_launcher_icons: ^0.11.0
 
 flutter_icons:
   android: true
