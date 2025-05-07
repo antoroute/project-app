@@ -111,7 +111,7 @@ class EncryptionUtils {
     required String plaintext,
     required Uint8List aesKey,
   }) async {
-    final iv = encrypt.IV.fromLength(16);
+    final iv = encrypt.IV.fromSecureRandom(16);
     final encrypter = encrypt.Encrypter(
       encrypt.AES(encrypt.Key(aesKey), mode: encrypt.AESMode.cbc),
     );

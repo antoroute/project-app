@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:crypto/crypto.dart';
@@ -8,21 +9,40 @@ import 'package:flutter_message_app/core/crypto/rsa_key_utils.dart';
 import 'package:flutter_message_app/core/crypto/aes_utils.dart';
 import 'package:flutter_message_app/core/crypto/signature_utils.dart';
 
-Future<pc.AsymmetricKeyPair<pc.PublicKey, pc.PrivateKey>> generateRsaKeyPairTask(dynamic _) async {
-  final keyGen = pc.RSAKeyGenerator()
-    ..init(pc.ParametersWithRandom(
-      pc.RSAKeyGeneratorParameters(BigInt.parse('65537'), 4096, 64),
-      pc.SecureRandom("Fortuna")..seed(pc.KeyParameter(Uint8List.fromList(List.generate(32, (_) => 42))))
-    ));
-  return keyGen.generateKeyPair();
-}
+Future<pc.AsymmetricKeyPair<pc.PublicKey, pc.PrivateKey>>
+    generateRsaKeyPairTask(dynamic _) async {
+  // 1. Préparer Fortuna avec un véritable seed aléatoire
+  final secureRandom = pc.SecureRandom("Fortuna");
+  secureRandom.seed(
+    pc.KeyParameter(
+      Uint8List.fromList(
+        List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+      ),
+    ),
+  );
 
+  // 2. Instancier et initialiser le générateur RSA
+  final keyGenerator = pc.RSAKeyGenerator();
+  keyGenerator.init(
+    pc.ParametersWithRandom(
+      pc.RSAKeyGeneratorParameters(
+        BigInt.parse('65537'), // Exposant public
+        4096,                   // Longueur en bits de la clé
+        64,                     // Certainty
+      ),
+      secureRandom,
+    ),
+  );
+
+  // 3. Générer la paire (publique + privée)
+  return keyGenerator.generateKeyPair();
+}
 Future<Map<String, dynamic>> encryptMessageTask(Map<String, dynamic> params) async {
   final plaintext = params['plaintext'] as String;
   final Map<String, String> publicKeysByUserId = Map<String, String>.from(params['publicKeysByUserId']);
 
   final aesKey = AesUtils.generateRandomAESKey();
-  final iv = encrypt.IV.fromLength(16);
+  final iv = encrypt.IV.fromSecureRandom(16);
   final encrypter = encrypt.Encrypter(encrypt.AES(encrypt.Key(aesKey), mode: encrypt.AESMode.cbc));
   final encryptedText = encrypter.encrypt(plaintext, iv: iv);
 

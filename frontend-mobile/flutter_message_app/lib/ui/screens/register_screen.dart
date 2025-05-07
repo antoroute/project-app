@@ -49,10 +49,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         }
       }
 
-      // 🔥 Après inscription, générer immédiatement la clé user_rsa
-      await KeyManager().generateKeyPairForGroup('user_rsa');
-      debugPrint('🔐 Clé RSA utilisateur générée après inscription.');
-
       // 🎯 Auto-login après inscription
       await authProvider.login(
         _emailController.text.trim(),

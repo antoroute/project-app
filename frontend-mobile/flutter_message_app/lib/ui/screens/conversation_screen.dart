@@ -149,32 +149,44 @@ class _ConversationScreenState extends State<ConversationScreen> {
         headers: {'Authorization': 'Bearer $token'},
       );
 
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final secrets = data['encrypted_secrets'];
-        final encryptedSecretBase64 = secrets[_currentUserId];
-        if (encryptedSecretBase64 == null) {
-          _showError('Secret AES non disponible pour cet utilisateur.');
-          return;
-        }
-
-        final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
-        if (keyPair == null) {
-          _showError('Clé RSA utilisateur absente');
-          return;
-        }
-
-        final privateKey = keyPair.privateKey as pc.RSAPrivateKey;
-        final cipher = pc.OAEPEncoding(pc.RSAEngine())
-          ..init(false, pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey));
-
-        _aesConversationKey = cipher.process(base64.decode(encryptedSecretBase64));
-        print('🧬 _aesConversationKey = ${base64.encode(_aesConversationKey!)}');
-      } else {
-        _showError('Erreur chargement secret: ${res.body}');
+      if (res.statusCode != 200) {
+        _showError('Impossible de récupérer les informations de la conversation.');
+        return;
       }
+
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final secrets = data['encrypted_secrets'] as Map<String, dynamic>;
+      final encryptedSecretBase64 = secrets[_currentUserId];
+      if (encryptedSecretBase64 == null) {
+        _showError('Vous n\'avez pas (ou plus) accès à cette conversation. Les anciens messages ne sont pas disponibles.');
+        return;
+      }
+
+      // On tente de déchiffrer en RSA‐OAEP
+      final keyPair = await KeyManager().getKeyPairForGroup(widget.groupId);
+      if (keyPair == null) {
+        _showError('Clé privée du groupe introuvable. Veuillez recréer une conversation.');
+        return;
+      }
+
+      final privateKey = keyPair.privateKey as pc.RSAPrivateKey;
+      final cipher = pc.OAEPEncoding(pc.RSAEngine())
+        ..init(false, pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey));
+
+      _aesConversationKey = cipher.process(base64.decode(encryptedSecretBase64));
+      debugPrint('🧬 Clé AES chargée: ${base64.encode(_aesConversationKey!)}');
+    } on FormatException {
+      // Erreur de base64.decode ou JSON
+      _showError(
+        'Impossible de lire la clé de chiffrement.\n'
+        'Si vous venez de mettre à jour votre clé de groupe, créez une nouvelle conversation pour obtenir un nouveau secret.'
+      );
     } catch (e) {
-      _showError('Erreur parsing secret: $e');
+      // Toute autre erreur
+      _showError(
+        'Impossible de lire la clé de chiffrement.\n'
+        'Si vous venez de mettre à jour votre clé de groupe, créez une nouvelle conversation pour obtenir un nouveau secret.'
+      );
     }
   }
 
@@ -324,13 +336,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
         keyPair.publicKey as pc.RSAPublicKey,
       );
 
-      WebSocketService().sendMessage({
-        'conversationId': widget.conversationId,
-        'encrypted': encrypted['encrypted'],
-        'iv': encrypted['iv'],
-        'keys': {},
-        'signature': signatureBase64,
+      // On crée un JSON “envelope” complet
+      final envelope = {
+        'encrypted':       encrypted['encrypted'],
+        'iv':              encrypted['iv'],
+        'signature':       signatureBase64,
         'senderPublicKey': publicKeyPem,
+      };
+
+      WebSocketService().sendMessage({
+        'conversationId':    widget.conversationId,
+        'encrypted_message': jsonEncode(envelope),
+        'encrypted_keys':    {}, 
       });
     } catch (e) {
       _showError('Erreur envoi message: $e');
