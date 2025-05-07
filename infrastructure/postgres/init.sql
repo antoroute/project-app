@@ -26,6 +26,29 @@ CREATE TABLE IF NOT EXISTS user_groups (
   PRIMARY KEY (user_id, group_id)
 );
 
+-- Table des requêtes d'adhésion à un groupe
+CREATE TABLE IF NOT EXISTS join_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
+  handled_by UUID REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table des votes sur les requêtes d'adhésion
+CREATE TABLE IF NOT EXISTS join_request_votes (
+  request_id UUID NOT NULL REFERENCES join_requests(id) ON DELETE CASCADE,
+  voter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  vote BOOLEAN NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (request_id, voter_id)
+);
+
+-- Index pour accélérer le filtrage des requêtes par groupe et statut
+CREATE INDEX IF NOT EXISTS idx_join_requests_group_status
+  ON join_requests(group_id, status);
+
 -- Table des conversations (privées ou subset)
 CREATE TABLE IF NOT EXISTS conversations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
