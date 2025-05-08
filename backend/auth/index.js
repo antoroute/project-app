@@ -4,6 +4,7 @@ import fastifyCors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { registerRoutes } from './routes/register.js';
 import { loginRoutes } from './routes/login.js';
+import { refreshRoutes } from './routes/refresh.js';
 import { verifyJWT } from './middlewares/auth.js';
 import { connectDB } from './plugins/db.js';
 
@@ -16,17 +17,16 @@ await fastify.register(fastifyJWT, {
   sign: { expiresIn: '1h' }
 });
 
-await connectDB(fastify); // connect fastify.pg to db
-
+await connectDB(fastify);
 registerRoutes(fastify);
 loginRoutes(fastify);
+refreshRoutes(fastify);
 
 fastify.get('/health', async () => 'Auth OK');
 
 fastify.get('/me', {
   preHandler: verifyJWT(fastify)
 }, async (req, reply) => {
-  try {
     const { id } = req.user;
 
     // Récupère email + username
@@ -54,13 +54,7 @@ fastify.get('/me', {
         groups
       }
     });
-
-  } catch (err) {
-    req.log.error(err);
-    return reply.code(500).send({ error: 'Failed to fetch user info' });
-  }
 });
-
 
 try {
   await fastify.listen({ port: process.env.PORT || 3000, host: '0.0.0.0' });
