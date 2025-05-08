@@ -1,8 +1,10 @@
+// lib/ui/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/services/snackbar_service.dart';
 import 'register_screen.dart';
+import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,19 +20,54 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+
+      // 1) Si un refreshToken existe ET biométrie dispo, on lance tout de suite la popup
+      final hasRefresh = await auth.hasRefreshToken();
+      final canBio     = await auth.canUseBiometrics();
+      if (hasRefresh && canBio) {
+        final ok = await auth.loginWithBiometrics();
+        if (ok) {
+          _goHome();
+          return;
+        }
+      }
+
+      // 2) Sinon on tente l'auto-login classique (avec refresh si besoin)
+      await auth.tryAutoLogin();
+      if (auth.isAuthenticated) {
+        _goHome();
+      }
+    });
+  }
+
+  void _goHome() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+    );
+  }
+
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() => _isLoading = true);
-
     try {
-      await Provider.of<AuthProvider>(context, listen: false).login(
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      await auth.login(
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
       SnackbarService.showSuccess(context, "Connexion réussie !");
+      _goHome();
     } catch (e) {
-      SnackbarService.showError(context, "Erreur de connexion : $e");
+      SnackbarService.showError(
+        context,
+        "Erreur de connexion : $e",
+      );
     } finally {
       setState(() => _isLoading = false);
     }

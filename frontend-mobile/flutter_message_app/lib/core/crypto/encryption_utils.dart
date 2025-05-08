@@ -123,4 +123,6 @@ class EncryptionUtils {
     };
   }
 
+  static decryptWithBiometricKey(String encrypted) {}
+
 }

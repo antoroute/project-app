@@ -41,12 +41,10 @@ class _GroupScreenState extends State<GroupScreen> {
     final publicPem = encodePublicKeyToPem(pair.publicKey as pc.RSAPublicKey);
 
     // Appel API /groups
+    final headers = await auth.getAuthHeaders();
     final res = await http.post(
       Uri.parse("https://api.kavalek.fr/api/groups"),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ${auth.token}',
-      },
+      headers: headers,
       body: jsonEncode({
         'name': _groupNameController.text.trim(),
         'publicKeyGroup': publicPem,
@@ -104,12 +102,10 @@ class _GroupScreenState extends State<GroupScreen> {
     final publicPem = encodePublicKeyToPem(pair.publicKey as pc.RSAPublicKey);
 
     // Appel API /groups/:id/jjoin-request
+    final headers = await auth.getAuthHeaders();
     final res = await http.post(
       Uri.parse("https://api.kavalek.fr/api/groups/$groupId/join-requests"),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ${auth.token}',
-      },
+      headers: headers,
       body: jsonEncode({
         'publicKeyGroup': publicPem,
       }),

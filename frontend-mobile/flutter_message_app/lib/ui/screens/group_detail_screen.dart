@@ -104,15 +104,12 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
 
       // 4) Send join-request to update key
       final auth = Provider.of<AuthProvider>(context, listen: false);
-      final token = auth.token!;
+      final headers = await auth.getAuthHeaders();
       final res = await http.post(
         Uri.parse(
           'https://api.kavalek.fr/api/groups/${widget.groupId}/join-requests',
         ),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+        headers: headers,
         body: jsonEncode({'publicKeyGroup': publicPem}),
       );
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -208,13 +205,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           as pc.RSASignature;
       _cachedSignature = base64.encode(sig.bytes);
     }
-
+    final headers = await auth.getAuthHeaders();
     final res = await http.post(
       Uri.parse('https://api.kavalek.fr/api/conversations'),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
+      headers: headers,
       body: jsonEncode({
         'groupId': widget.groupId,
         'userIds': _selectedUserIds.toList(),

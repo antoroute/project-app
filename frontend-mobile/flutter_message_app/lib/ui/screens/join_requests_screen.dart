@@ -52,13 +52,10 @@ class _JoinRequestsScreenState extends State<JoinRequestsScreen> {
 
   Future<void> _vote(String reqId, bool vote) async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token!;
+    final headers = await auth.getAuthHeaders();
     final res = await http.post(
       Uri.parse('https://api.kavalek.fr/api/groups/${widget.groupId}/join-requests/$reqId/vote'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token'
-      },
+      headers: headers,
       body: jsonEncode({'vote': vote}),
     );
     if (res.statusCode == 200) {
@@ -70,13 +67,10 @@ class _JoinRequestsScreenState extends State<JoinRequestsScreen> {
 
   Future<void> _handle(String reqId, String action) async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token!;
+    final headers = await auth.getAuthHeaders();
     final res = await http.post(
       Uri.parse('https://api.kavalek.fr/api/groups/${widget.groupId}/join-requests/$reqId/handle'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token'
-      },
+      headers: headers,
       body: jsonEncode({'action': action}),
     );
     if (res.statusCode == 200) {
