@@ -54,7 +54,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   @override
   void initState() {
     super.initState();
-    WebSocketService().screenAttached();
+    WebSocketService.instance.screenAttached();
     _initializeConversation();
     _scrollController.addListener(_onScroll);
     _fetchGroupMembers();
@@ -64,8 +64,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    WebSocketService().removeOnNewMessageListener(_listenerId);
-    WebSocketService().screenDetached();
+    WebSocketService.instance.removeOnNewMessageListener(_listenerId);
+    WebSocketService.instance.screenDetached();
     super.dispose();
   }
 
@@ -78,16 +78,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
     await _loadConversationSecret();
 
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token;
-    if (token == null) {
-      _showError('Token JWT manquant');
+    final tokenValid = await auth.ensureTokenValid();
+    if (!tokenValid) {
+      _showError('Session expirée, veuillez vous reconnecter');
       return;
     }
+    final token = auth.token;
+    if (token == null) { _showError('Token JWT manquant'); return; }
 
-    WebSocketService().connect(token, conversationId: widget.conversationId);
-    WebSocketService().subscribeConversation(widget.conversationId);
+    WebSocketService.instance.connect(context, conversationId: widget.conversationId);
+    WebSocketService.instance.subscribeConversation(widget.conversationId);
 
-    WebSocketService().setOnNewMessageListener(
+    WebSocketService.instance.setOnNewMessageListener(
       _listenerId,
       (message) async {
         if (!mounted) return;
@@ -105,22 +107,25 @@ class _ConversationScreenState extends State<ConversationScreen> {
       },
     );
 
-    WebSocketService().statusStream.listen((status) {
+    WebSocketService.instance.statusStream.listen((status) {
       if (status == SocketStatus.error) {
         _showError('Erreur WebSocket');
+        _attemptReconnect();
       }
     });
-
     await _loadMessages();
+    setState(() => _loading = false);
   }
 
   Future<void> _loadCurrentUserId() async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token;
-    if (token == null) {
-      _showError('Token JWT manquant');
+    final tokenValid = await auth.ensureTokenValid();
+    if (!tokenValid) {
+      _showError('Session expirée, veuillez vous reconnecter');
       return;
     }
+    final token = auth.token;
+    if (token == null) { _showError('Token JWT manquant'); return; }
 
     final resUser = await http.get(
       Uri.parse('https://auth.kavalek.fr/auth/me'),
@@ -137,11 +142,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   Future<void> _loadConversationSecret() async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token;
-    if (token == null) {
-      _showError('Token JWT manquant');
+    final tokenValid = await auth.ensureTokenValid();
+    if (!tokenValid) {
+      _showError('Session expirée, veuillez vous reconnecter');
       return;
     }
+    final token = auth.token;
+    if (token == null) { _showError('Token JWT manquant'); return; }
 
     try {
       final res = await http.get(
@@ -344,7 +351,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         'senderPublicKey': publicKeyPem,
       };
 
-      WebSocketService().sendMessage({
+      WebSocketService.instance.sendMessage({
         'conversationId':    widget.conversationId,
         'encrypted_message': jsonEncode(envelope),
         'encrypted_keys':    {}, 
@@ -398,37 +405,46 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-  void _attemptReconnect() async {
-    if (!mounted) return;
-
+  Future<void> _attemptReconnect() async {
+    // Vérifie et rafraîchit le token si besoin
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token;
-    if (token != null) {
-      WebSocketService().connect(token);
-      WebSocketService().subscribeConversation(widget.conversationId);
-      WebSocketService().setOnNewMessageListener(
-        _listenerId,
-        (message) async {
+    final valid = await auth.ensureTokenValid();
+    if (!valid) {
+      _showError('Session expirée, impossible de se reconnecter');
+      return;
+    }
+    // Réinitialise et reconnecte
+    WebSocketService.instance.disconnect();
+    WebSocketService.instance.connect(
+      context,
+      conversationId: widget.conversationId,
+    );
+    WebSocketService.instance.subscribeConversation(widget.conversationId);
+    WebSocketService.instance.setOnNewMessageListener(
+      _listenerId,
+      (message) async {
+        if (!mounted) return;
+        final messageId = _generateMessageId(message, _rawMessages.length);
+        final exists = _rawMessages.any((m) => _generateMessageId(m, _rawMessages.indexOf(m)) == messageId);
+        if (!exists) {
           setState(() => _rawMessages.insert(0, message));
           await _decryptVisibleMessages();
-        },
-      );
-      WebSocketService().statusStream.listen((status) {
-        if (status == SocketStatus.error) {
-          _showError('Erreur WebSocket');
-          _attemptReconnect();
+          if (_userIsAtBottom) _scrollToBottom();
         }
-      });
-    } else {
-      _showError('Impossible de se reconnecter : token manquant');
-    }
+      },
+    );
   }
 
-  // Ajout : récupération des membres du groupe
+  // récupération des membres du groupe
   Future<void> _fetchGroupMembers() async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
+    final tokenValid = await auth.ensureTokenValid();
+    if (!tokenValid) {
+      _showError('Session expirée, veuillez vous reconnecter');
+      return;
+    }
     final token = auth.token;
-    if (token == null) return;
+    if (token == null) { _showError('Token JWT manquant'); return; }
     try {
       final res = await http.get(
         Uri.parse('https://api.kavalek.fr/api/groups/${widget.groupId}/members'),
