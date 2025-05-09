@@ -11,7 +11,7 @@ class KeyManager {
   static final KeyManager _instance = KeyManager._internal();
   final _storage = const FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    //iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device_only),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
   );
 
   factory KeyManager() => _instance;

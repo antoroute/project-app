@@ -2,11 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:provider/provider.dart';
 
 class ConversationProvider extends ChangeNotifier {
-  final _storage = const FlutterSecureStorage();
   List<Map<String, dynamic>> _conversations = [];
 
   List<Map<String, dynamic>> get conversations => _conversations;

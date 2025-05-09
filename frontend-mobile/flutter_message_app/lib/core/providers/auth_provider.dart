@@ -8,7 +8,11 @@ import 'package:flutter_message_app/core/services/biometric_service.dart';
 import 'package:pointycastle/pointycastle.dart' as pc;
 
 class AuthProvider extends ChangeNotifier {
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
   final BiometricService _biometric = BiometricService();
   String? _token;
   String? get token => _token;

@@ -1,4 +1,3 @@
-// lib/ui/screens/login_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/auth_provider.dart';
@@ -26,21 +25,21 @@ class _LoginScreenState extends State<LoginScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final auth = Provider.of<AuthProvider>(context, listen: false);
 
-      // 1) Si un refreshToken existe ET biométrie dispo, on lance tout de suite la popup
-      final hasRefresh = await auth.hasRefreshToken();
-      final canBio     = await auth.canUseBiometrics();
-      if (hasRefresh && canBio) {
-        final ok = await auth.loginWithBiometrics();
-        if (ok) {
-          _goHome();
-          return;
-        }
-      }
-
-      // 2) Sinon on tente l'auto-login classique (avec refresh si besoin)
+      // On tente l'auto-login classique au démarrage
       await auth.tryAutoLogin();
       if (auth.isAuthenticated) {
         _goHome();
+      } else {  
+        // Sinon si un refreshToken existe ET biométrie dispo, on lance tout de suite la popup
+        final hasRefresh = await auth.hasRefreshToken();
+        final canBio     = await auth.canUseBiometrics();
+        if (hasRefresh && canBio) {
+          final ok = await auth.loginWithBiometrics();
+          if (ok) {
+            _goHome();
+            return;
+          }
+        }
       }
     });
   }
