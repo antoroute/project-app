@@ -77,7 +77,6 @@ class EncryptionUtils {
     required String senderPublicKeyPem,
   }) async {
     try {
-      print('🔍 Début vérification signature...');
       final canonical = canonicalJson(payload);
       final publicKey = RsaKeyUtils.parsePublicKeyFromPem(senderPublicKeyPem);
       final sig = base64.decode(signature);
@@ -90,11 +89,10 @@ class EncryptionUtils {
         pc.RSASignature(sig),
       );
 
-      print(verified ? '✅ Signature valide (interne)' : '⚠️ Signature invalide (interne)');
       return verified;
     } catch (e, st) {
-      print('❌ Exception pendant la vérification de signature : $e');
-      print(st);
+      debugPrint('❌ Exception pendant la vérification de signature : $e');
+      debugPrint(st.toString());
       return false;
     }
   }
