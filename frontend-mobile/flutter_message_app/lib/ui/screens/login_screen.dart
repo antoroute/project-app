@@ -117,7 +117,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   context,
                   MaterialPageRoute(builder: (_) => const RegisterScreen()),
                 ),
-                child: const Text('Pas encore inscrit ?\n Créer un compte'),
+                child: const Text(
+                  'Pas encore inscrit ?\n Créer un compte',
+                  textAlign: TextAlign.center,
+                  ),
               ),
             ],
           ),

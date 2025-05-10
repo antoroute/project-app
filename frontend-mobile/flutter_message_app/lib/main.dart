@@ -9,14 +9,14 @@ import 'ui/screens/home_screen.dart';
 import 'ui/screens/login_screen.dart';
 
 Future<void> main() async {
-  // 1. On attend que Flutter soit prêt
+  //On attend que Flutter soit prêt
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. On crée le provider d'auth et on tente l'auto-login
+  //On crée le provider d'auth et on tente l'auto-login
   final authProvider = AuthProvider();
   await authProvider.tryAutoLogin();
 
-  // 3. On lance l'app en injectant le provider déjà initialisé
+  //On lance l'app en injectant le provider déjà initialisé
   runApp(
     MultiProvider(
       providers: <SingleChildWidget>[
@@ -41,7 +41,7 @@ class SecureChatApp extends StatelessWidget {
       title: 'Secure Chat',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(),
-      // 4. On choisit directement la page d’accueil ou la login
+      //On choisit directement la page d’accueil ou la login
       home: isAuthenticated ? const HomeScreen() : const LoginScreen(),
     );
   }
