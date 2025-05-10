@@ -25,20 +25,14 @@ class _LoginScreenState extends State<LoginScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final auth = Provider.of<AuthProvider>(context, listen: false);
 
-      // On tente l'auto-login classique au démarrage
-      await auth.tryAutoLogin();
-      if (auth.isAuthenticated) {
-        _goHome();
-      } else {  
-        // Sinon si un refreshToken existe ET biométrie dispo, on lance tout de suite la popup
-        final hasRefresh = await auth.hasRefreshToken();
-        final canBio     = await auth.canUseBiometrics();
-        if (hasRefresh && canBio) {
-          final ok = await auth.loginWithBiometrics();
-          if (ok) {
-            _goHome();
-            return;
-          }
+      // Si un refreshToken existe ET biométrie dispo, on lance tout de suite la popup
+      final hasRefresh = await auth.hasRefreshToken();
+      final canBio     = await auth.canUseBiometrics();
+      if (hasRefresh && canBio) {
+        final ok = await auth.loginWithBiometrics();
+        if (ok) {
+          _goHome();
+          return;
         }
       }
     });
@@ -123,7 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   context,
                   MaterialPageRoute(builder: (_) => const RegisterScreen()),
                 ),
-                child: const Text('Pas encore inscrit ? Créer un compte'),
+                child: const Text('Pas encore inscrit ?\n Créer un compte'),
               ),
             ],
           ),

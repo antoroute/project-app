@@ -237,7 +237,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         _showError('Erreur chargement messages: ${res.body}');
       }
     } catch (e) {
-      _showError('Erreur réseau: $e');
+      _showError('Erreur réseau');
     } finally {
       setState(() {
         _loading = false;
@@ -357,7 +357,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         'encrypted_keys':    {}, 
       });
     } catch (e) {
-      _showError('Erreur envoi message: $e');
+      _showError('Erreur envoi message');
     } finally {
       setState(() => _sending = false);
     }

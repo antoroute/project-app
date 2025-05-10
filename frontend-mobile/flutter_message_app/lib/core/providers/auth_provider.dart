@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:flutter_message_app/core/crypto/key_manager.dart';
@@ -67,19 +68,14 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Essaie auto-login : accès direct ou via refresh si expiré
+  /// Verifie si un accessToken est présent et valide pour autologin
   Future<void> tryAutoLogin() async {
     final stored = await _storage.read(key: 'accessToken');
-    if (stored != null) {
-      if (!JwtDecoder.isExpired(stored)) {
-        _token = stored;
-      } else {
-        final ok = await refreshAccessToken();
-        if (!ok) return;
-      }
-      await KeyManager().generateUserKeyIfAbsent();
-      notifyListeners();
-    }
+    if (stored == null || JwtDecoder.isExpired(stored)) return;
+
+    _token = stored;
+    notifyListeners();
+    unawaited(KeyManager().generateUserKeyIfAbsent());
   }
 
   /// Rafraîchissement du token via biométrie et appel /refresh

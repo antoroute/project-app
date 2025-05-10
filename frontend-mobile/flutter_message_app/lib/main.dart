@@ -1,50 +1,48 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
+
 import 'core/providers/auth_provider.dart';
 import 'core/providers/group_provider.dart';
 import 'core/providers/conversation_provider.dart';
-import 'ui/screens/login_screen.dart';
 import 'ui/screens/home_screen.dart';
+import 'ui/screens/login_screen.dart';
 
-void main() {
-  runApp(const SecureChatApp());
-}
+Future<void> main() async {
+  // 1. On attend que Flutter soit prêt
+  WidgetsFlutterBinding.ensureInitialized();
 
-List<SingleChildWidget> buildProviders() {
-  return [
-    ChangeNotifierProvider(create: (_) => AuthProvider()),
-    ChangeNotifierProvider(create: (_) => GroupProvider()),
-    ChangeNotifierProvider(create: (_) => ConversationProvider()),
-  ];
+  // 2. On crée le provider d'auth et on tente l'auto-login
+  final authProvider = AuthProvider();
+  await authProvider.tryAutoLogin();
+
+  // 3. On lance l'app en injectant le provider déjà initialisé
+  runApp(
+    MultiProvider(
+      providers: <SingleChildWidget>[
+        ChangeNotifierProvider.value(value: authProvider),
+        ChangeNotifierProvider(create: (_) => GroupProvider()),
+        ChangeNotifierProvider(create: (_) => ConversationProvider()),
+      ],
+      child: SecureChatApp(isAuthenticated: authProvider.isAuthenticated),
+    ),
+  );
 }
 
 class SecureChatApp extends StatelessWidget {
-  const SecureChatApp({super.key});
+  final bool isAuthenticated;
+
+  const SecureChatApp({Key? key, required this.isAuthenticated})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: buildProviders(),
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'Secure Chat',
-        theme: ThemeData.dark(),
-        home: const AuthGate(),
-      ),
-    );
-  }
-}
-
-class AuthGate extends StatelessWidget {
-  const AuthGate({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<AuthProvider>(
-      builder: (context, auth, _) {
-        return auth.isAuthenticated ? const HomeScreen() : const LoginScreen();
-      },
+    return MaterialApp(
+      title: 'Secure Chat',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark(),
+      // 4. On choisit directement la page d’accueil ou la login
+      home: isAuthenticated ? const HomeScreen() : const LoginScreen(),
     );
   }
 }
