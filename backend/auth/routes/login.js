@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import { v4 as uuidv4 } from 'uuid';
+import { randomBytes, createHash } from 'crypto';
 
 export function loginRoutes(fastify) {
   fastify.post('/login', {
@@ -39,20 +39,24 @@ export function loginRoutes(fastify) {
         { expiresIn: '1h' }
       );
 
-      // Génération d'un refresh token aléatoire UUID
-      const refreshToken = uuidv4();
-      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 jours
+      // Génération d'un refresh token cryptographique
+      const plainToken = randomBytes(64).toString('hex');
+      // Hash SHA-256 à stocker
+      const tokenHash = createHash('sha256').update(plainToken).digest('hex');
 
-      // Stockage du refresh token en base
+      // Expiration à 15 jours
+      const expiresAt = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+
+      // Stockage du hash en base
       await fastify.pg.query(
-        'INSERT INTO refresh_tokens(user_id, token, expires_at) VALUES($1, $2, $3)',
-        [user.id, refreshToken, expiresAt]
+        'INSERT INTO refresh_tokens(user_id, token_hash, expires_at) VALUES($1, $2, $3)',
+        [user.id, tokenHash, expiresAt]
       );
 
-      // Envoi des deux tokens
+      // Envoi des deux tokens au client
       return reply.send({
         accessToken,
-        refreshToken
+        refreshToken: plainToken
       });
 
     } catch (err) {
