@@ -69,6 +69,7 @@ io.on('connection', (socket) => {
 
   socket.join(`user:${userId}`);
   socket.joinedConversations = new Set();
+  fastify.log.info(`Socket ${socket.id} a rejoint room user:${userId}`);
 
   socket.on('conversation:subscribe', async (conversationId, ack) => {
     socket.join(conversationId);

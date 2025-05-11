@@ -79,6 +79,7 @@ export function conversationRoutes(fastify) {
 
     // WS : notifie chaque user
     allUserIds.forEach(uid => {
+      fastify.log.info(`Émission conversation:joined → user:${uid}`);
       fastify.io.to(`user:${uid}`).emit('conversation:joined', { conversationId });
     });
 
