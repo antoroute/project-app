@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS groups (
 
 -- Table de liaison utilisateur↔groupe
 CREATE TABLE IF NOT EXISTS user_groups (
-  user_id UUID REFERENCES users(id)    ON DELETE CASCADE,
-  group_id UUID REFERENCES groups(id)  ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
   public_key_group TEXT NOT NULL,
   PRIMARY KEY (user_id, group_id)
 );
@@ -31,11 +31,11 @@ CREATE TABLE IF NOT EXISTS user_groups (
 CREATE TABLE IF NOT EXISTS join_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  user_id  UUID NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   public_key_group TEXT NOT NULL,
   status TEXT NOT NULL
-    CHECK (status IN ('pending','accepted','rejected'))
-    DEFAULT 'pending',
+  CHECK (status IN ('pending','accepted','rejected'))
+  DEFAULT 'pending',
   handled_by UUID REFERENCES users(id),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS join_requests (
 -- Votes sur ces requêtes
 CREATE TABLE IF NOT EXISTS join_request_votes (
   request_id UUID NOT NULL REFERENCES join_requests(id) ON DELETE CASCADE,
-  voter_id   UUID NOT NULL REFERENCES users(id)         ON DELETE CASCADE,
+  voter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   vote BOOLEAN NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (request_id, voter_id)
@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 -- Participants aux conversations
 CREATE TABLE IF NOT EXISTS conversation_users (
   conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
-  user_id         UUID REFERENCES users(id)         ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  last_read_at TIMESTAMP WITH TIME ZONE,
   PRIMARY KEY (conversation_id, user_id)
 );
 
@@ -72,7 +73,7 @@ CREATE TABLE IF NOT EXISTS messages (
   conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
   sender_id UUID REFERENCES users(id),
   encrypted_message TEXT NOT NULL,
-  encrypted_keys    JSONB NOT NULL,
+  encrypted_keys JSONB NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   signature_valid BOOLEAN DEFAULT TRUE
 );
@@ -98,7 +99,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 -- Indexes sur refresh_tokens
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id
-  ON refresh_tokens(user_id);
+ON refresh_tokens(user_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash
-  ON refresh_tokens(token_hash);
+ON refresh_tokens(token_hash);
