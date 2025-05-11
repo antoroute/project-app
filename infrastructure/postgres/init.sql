@@ -77,13 +77,23 @@ CREATE TABLE IF NOT EXISTS messages (
   signature_valid BOOLEAN DEFAULT TRUE
 );
 
--- Table des refresh tokens pour la rotation (version modifiée)
+-- Table des refresh tokens pour la rotation des tokens
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   id SERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token_hash TEXT UNIQUE NOT NULL,
   expires_at TIMESTAMP NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table des notifications
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 -- Indexes sur refresh_tokens
