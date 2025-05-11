@@ -27,6 +27,30 @@ export function groupRoutes(fastify) {
     }
   });
 
+  // ─── Lister les groupes de l'utilisateur ────────────────────────────────────
+  fastify.get('/groups', {
+    preHandler: fastify.authenticate
+  }, async (request, reply) => {
+    const userId = request.user.id;
+    try {
+      const res = await fastify.pg.query(
+        `SELECT g.id   AS "groupId",
+                g.name,
+                g.creator_id  AS "creatorId",
+                g.created_at  AS "createdAt"
+          FROM user_groups ug
+          JOIN groups g ON g.id = ug.group_id
+          WHERE ug.user_id = $1
+      ORDER BY g.created_at DESC`,
+        [userId]
+      );
+      return reply.send(res.rows);
+    } catch (err) {
+      request.log.error(err);
+      return reply.code(500).send({ error: 'Failed to load groups' });
+    }
+  });
+
   // Détails d’un groupe
   fastify.get('/groups/:id', {
     preHandler: fastify.authenticate,
