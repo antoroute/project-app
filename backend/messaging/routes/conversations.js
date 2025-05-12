@@ -131,35 +131,53 @@ export function conversationRoutes(fastify) {
   // Historique des messages
   fastify.get('/conversations/:id/messages', {
     preHandler: fastify.authenticate,
-    schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } } }
+    schema: {
+      params: {
+        type: 'object',
+        required: ['id'],
+        properties: { id: { type: 'string', format: 'uuid' } }
+      }
+    }
   }, async (request, reply) => {
     const conversationId = request.params.id;
     const userId = request.user.id;
+
+    // Vérification d’appartenance
     const inConv = await pool.query(
       'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
       [conversationId, userId]
     );
-    if (inConv.rowCount === 0) return reply.code(403).send({ error: 'Access denied to this conversation' });
+    if (inConv.rowCount === 0) {
+      return reply.code(403).send({ error: 'Access denied to this conversation' });
+    }
+
     try {
       const msgsRes = await pool.query(
-        `SELECT id, sender_id AS "senderId", encrypted_message, encrypted_keys, created_at, signature_valid
-           FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
+        `SELECT id, sender_id AS "senderId",
+                encrypted_message, encrypted_keys,
+                created_at, signature_valid
+          FROM messages
+          WHERE conversation_id = $1
+      ORDER BY created_at ASC`,
         [conversationId]
       );
+
       const messages = msgsRes.rows.map(msg => {
         let parsed = {};
         try { parsed = JSON.parse(msg.encrypted_message); } catch {}
+
         return {
-          id: msg.id,
-          senderId: msg.senderId,
-          encrypted: parsed.encrypted || null,
-          iv: parsed.iv || null,
-          signature: parsed.signature || null,
-          senderPublicKey: parsed.senderPublicKey || null,
-          timestamp: Math.floor(new Date(msg.created_at).getTime()/1000),
-          signatureValid: msg.signature_valid
+          id:               msg.id,
+          conversationId,       
+          senderId:         msg.senderId,
+          encrypted:        parsed.encrypted || null,
+          iv:               parsed.iv       || null,
+          signatureValid:   msg.signature_valid,
+          senderPublicKey:  parsed.senderPublicKey || null,
+          timestamp:        Math.floor(new Date(msg.created_at).getTime() / 1000)
         };
       });
+
       return reply.send(messages);
     } catch (err) {
       request.log.error(err);
@@ -170,32 +188,65 @@ export function conversationRoutes(fastify) {
   // Envoyer un message (fallback REST)
   fastify.post('/messages', {
     preHandler: fastify.authenticate,
-    schema: { body: { type: 'object', required: ['conversationId','encrypted_message','encrypted_keys'], properties: { conversationId:{type:'string',format:'uuid'}, encrypted_message:{type:'string',minLength:10}, encrypted_keys:{type:'object'} } } }
+    schema: {
+      body: {
+        type: 'object',
+        required: ['conversationId','encrypted_message','encrypted_keys'],
+        properties: {
+          conversationId:   { type: 'string', format: 'uuid' },
+          encrypted_message:{ type: 'string', minLength: 10 },
+          encrypted_keys:   { type: 'object' }
+        }
+      }
+    }
   }, async (request, reply) => {
     const userId = request.user.id;
     const { conversationId, encrypted_message, encrypted_keys } = request.body;
+
+    // Vérification d’appartenance
     const inConv = await pool.query(
       'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
       [conversationId, userId]
     );
-    if (inConv.rowCount === 0) return reply.code(403).send({ error: 'You are not in this conversation' });
+    if (inConv.rowCount === 0) {
+      return reply.code(403).send({ error: 'You are not in this conversation' });
+    }
 
     try {
+      // On parse l’enveloppe pour en extraire encrypted, iv, signature & senderPublicKey
       const envelope = JSON.parse(encrypted_message);
       const { encrypted, iv, signature, senderPublicKey } = envelope;
-      const canonical = JSON.stringify({ encrypted, iv });
-      const verify = createVerify('SHA256'); verify.update(Buffer.from(canonical)); verify.end();
-      const isValid = verify.verify(senderPublicKey, Buffer.from(signature,'base64'));
 
+      // Vérification signature…
+      const canonical = JSON.stringify({ encrypted, iv });
+      const verify = createVerify('SHA256');
+      verify.update(Buffer.from(canonical));
+      verify.end();
+      const isValid = verify.verify(senderPublicKey, Buffer.from(signature, 'base64'));
+
+      // Insertion en base
       const insertRes = await pool.query(
-        `INSERT INTO messages (conversation_id, sender_id, encrypted_message, encrypted_keys, signature_valid)
-         VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at`,
+        `INSERT INTO messages
+          (conversation_id, sender_id, encrypted_message, encrypted_keys, signature_valid)
+        VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, created_at`,
         [conversationId, userId, encrypted_message, encrypted_keys, isValid]
       );
       const msgRow = insertRes.rows[0];
-      const newMessage = { id: msgRow.id, senderId: userId, conversationId, encrypted, iv, signatureValid: isValid, senderPublicKey, timestamp: Math.floor(new Date(msgRow.created_at).getTime()/1000) };
 
-      // Broadcast WS
+      // On reconstruit l’objet à renvoyer
+      const newMessage = {
+        id:               msgRow.id,
+        conversationId,                   // ← on l’ajoute ici aussi
+        senderId:         userId,
+        encrypted,
+        iv,
+        signatureValid:   isValid,
+        senderPublicKey,
+        timestamp:        Math.floor(new Date(msgRow.created_at).getTime() / 1000)
+      };
+
+      // Envoi WS à tous les abonnés de la conversation
       fastify.io.to(conversationId).emit('message:new', newMessage);
 
       // Notifications
@@ -214,7 +265,7 @@ export function conversationRoutes(fastify) {
         }
       }
 
-      return reply.code(201).send({ status:'Message stored', message:newMessage });
+      return reply.code(201).send({ status: 'Message stored', message: newMessage });
     } catch (err) {
       request.log.error(err);
       return reply.code(500).send({ error: 'Message not stored' });
