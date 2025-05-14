@@ -153,9 +153,12 @@ export function conversationRoutes(fastify) {
 
     try {
       const msgsRes = await pool.query(
-        `SELECT id, sender_id AS "senderId",
-                encrypted_message, encrypted_keys,
-                created_at, signature_valid
+        `SELECT id,
+                sender_id        AS "senderId",
+                encrypted_message,
+                encrypted_keys,
+                created_at,
+                signature_valid
           FROM messages
           WHERE conversation_id = $1
       ORDER BY created_at ASC`,
@@ -164,14 +167,19 @@ export function conversationRoutes(fastify) {
 
       const messages = msgsRes.rows.map(msg => {
         let parsed = {};
-        try { parsed = JSON.parse(msg.encrypted_message); } catch {}
+        try {
+          parsed = JSON.parse(msg.encrypted_message);
+        } catch {
+          parsed = {};
+        }
 
         return {
           id:               msg.id,
-          conversationId,       
+          conversationId,
           senderId:         msg.senderId,
-          encrypted:        parsed.encrypted || null,
-          iv:               parsed.iv       || null,
+          encrypted:        parsed.encrypted        || null,
+          iv:               parsed.iv               || null,
+          encrypted_keys:   msg.encrypted_keys     || {},
           signatureValid:   msg.signature_valid,
           senderPublicKey:  parsed.senderPublicKey || null,
           timestamp:        Math.floor(new Date(msg.created_at).getTime() / 1000)
