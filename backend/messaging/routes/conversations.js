@@ -128,70 +128,89 @@ export function conversationRoutes(fastify) {
     }
   });
 
-  // Historique des messages
-  fastify.get('/conversations/:id/messages', {
-    preHandler: fastify.authenticate,
-    schema: {
-      params: {
-        type: 'object',
-        required: ['id'],
-        properties: { id: { type: 'string', format: 'uuid' } }
+  // Historique des messages (avec support du paramètre `after`)
+fastify.get(
+  '/conversations/:id/messages',
+    {
+      preHandler: fastify.authenticate,
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' }
+          }
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            after: { type: 'integer', minimum: 0 }
+          }
+        }
       }
-    }
-  }, async (request, reply) => {
-    const conversationId = request.params.id;
-    const userId = request.user.id;
+    },
+    async (request, reply) => {
+      const conversationId = request.params.id;
+      const userId = request.user.id;
+      const afterTs = request.query.after; 
 
-    // Vérification d’appartenance
-    const inConv = await pool.query(
-      'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
-      [conversationId, userId]
-    );
-    if (inConv.rowCount === 0) {
-      return reply.code(403).send({ error: 'Access denied to this conversation' });
-    }
+      // Vérification d’appartenance
+      const inConv = await pool.query(
+        'SELECT 1 FROM conversation_users WHERE conversation_id = $1 AND user_id = $2',
+        [conversationId, userId]
+      );
+      if (inConv.rowCount === 0) {
+        return reply.code(403).send({ error: 'Access denied to this conversation' });
+      }
 
-    try {
-      const msgsRes = await pool.query(
-        `SELECT id,
+      try {
+        // Construction dynamique de la requête
+        let sql = `
+          SELECT id,
                 sender_id        AS "senderId",
                 encrypted_message,
                 encrypted_keys,
                 created_at,
                 signature_valid
-          FROM messages
+            FROM messages
           WHERE conversation_id = $1
-      ORDER BY created_at ASC`,
-        [conversationId]
-      );
+        `;
+        const params = [conversationId];
 
-      const messages = msgsRes.rows.map(msg => {
-        let parsed = {};
-        try {
-          parsed = JSON.parse(msg.encrypted_message);
-        } catch {
-          parsed = {};
+        if (typeof afterTs === 'number') {
+          sql += ' AND created_at > to_timestamp($2) ';
+          params.push(afterTs);
         }
 
-        return {
-          id:               msg.id,
-          conversationId,
-          senderId:         msg.senderId,
-          encrypted:        parsed.encrypted        || null,
-          iv:               parsed.iv               || null,
-          encrypted_keys:   msg.encrypted_keys     || {},
-          signatureValid:   msg.signature_valid,
-          senderPublicKey:  parsed.senderPublicKey || null,
-          timestamp:        Math.floor(new Date(msg.created_at).getTime() / 1000)
-        };
-      });
+        sql += ' ORDER BY created_at ASC';
 
-      return reply.send(messages);
-    } catch (err) {
-      request.log.error(err);
-      return reply.code(500).send({ error: 'Failed to fetch messages' });
+        const msgsRes = await pool.query(sql, params);
+
+        const messages = msgsRes.rows.map(msg => {
+          let parsed = {};
+          try { parsed = JSON.parse(msg.encrypted_message); } catch {}
+
+          return {
+            id:               msg.id,
+            conversationId,
+            senderId:         msg.senderId,
+            encrypted:        parsed.encrypted        || null,
+            iv:               parsed.iv               || null,
+            encrypted_keys:   msg.encrypted_keys      || {},
+            signatureValid:   msg.signature_valid,
+            senderPublicKey:  parsed.senderPublicKey  || null,
+            timestamp:        Math.floor(new Date(msg.created_at).getTime() / 1000)
+          };
+        });
+
+        return reply.send(messages);
+      } catch (err) {
+        request.log.error(err);
+        return reply.code(500).send({ error: 'Failed to fetch messages' });
+      }
     }
-  });
+  );
+
 
   // Envoyer un message (fallback REST)
   fastify.post('/messages', {
@@ -245,10 +264,11 @@ export function conversationRoutes(fastify) {
       // On reconstruit l’objet à renvoyer
       const newMessage = {
         id:               msgRow.id,
-        conversationId,                   // ← on l’ajoute ici aussi
+        conversationId,                   
         senderId:         userId,
         encrypted,
         iv,
+        encrypted_keys,
         signatureValid:   isValid,
         senderPublicKey,
         timestamp:        Math.floor(new Date(msgRow.created_at).getTime() / 1000)
