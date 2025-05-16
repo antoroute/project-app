@@ -175,9 +175,13 @@ export function conversationRoutes(fastify) {
           WHERE conversation_id = $1
         `;
         const params = [conversationId];
+        let afterTsRaw = request.query.after;
+        let afterTs = typeof afterTsRaw === 'string'
+          ? parseFloat(afterTsRaw)
+          : afterTsRaw;
 
-        if (typeof afterTs === 'number') {
-          sql += ` AND created_at > to_timestamp($2) + INTERVAL '1 millisecond'`;
+        if (!isNaN(afterTs)) {
+          sql += ' AND created_at > to_timestamp($2) ';
           params.push(afterTs);
         }
 
