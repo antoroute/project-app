@@ -151,7 +151,7 @@ export function conversationRoutes(fastify) {
     async (request, reply) => {
       const conversationId = request.params.id;
       const userId = request.user.id;
-      const rawAfter: number | undefined = request.query.after;
+      const afterTs = request.query.after; 
 
       // Vérification d’appartenance
       const inConv = await pool.query(
@@ -174,10 +174,11 @@ export function conversationRoutes(fastify) {
             FROM messages
           WHERE conversation_id = $1
         `;
-        const params: any[] = [conversationId];
-        if (rawAfter !== undefined) {
-          sql += ` AND (extract(epoch from created_at) * 1000) > $2 `;
-          params.push(rawAfter);
+        const params = [conversationId];
+
+        if (typeof afterTs === 'number') {
+          sql += ' AND created_at > to_timestamp($2) ';
+          params.push(afterTs);
         }
 
         sql += ' ORDER BY created_at ASC';
@@ -197,7 +198,7 @@ export function conversationRoutes(fastify) {
             encrypted_keys:   msg.encrypted_keys      || {},
             signatureValid:   msg.signature_valid,
             senderPublicKey:  parsed.senderPublicKey  || null,
-            timestampMs:       new Date(msg.created_at).getTime(),
+            timestamp:        Math.floor(new Date(msg.created_at).getTime() / 1000)
           };
         });
 
