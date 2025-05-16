@@ -129,8 +129,7 @@ export function conversationRoutes(fastify) {
   });
 
   // Historique des messages (avec support du paramètre `after`)
-fastify.get(
-  '/conversations/:id/messages',
+  fastify.get('/conversations/:id/messages',
     {
       preHandler: fastify.authenticate,
       schema: {
@@ -144,7 +143,7 @@ fastify.get(
         querystring: {
           type: 'object',
           properties: {
-            after: { type: 'integer', minimum: 0 }
+            after: { type: 'number', minimum: 0 }
           }
         }
       }
