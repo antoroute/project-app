@@ -177,7 +177,7 @@ export function conversationRoutes(fastify) {
         const params = [conversationId];
 
         if (typeof afterTs === 'number') {
-          sql += ' AND created_at > to_timestamp($2) ';
+          sql += ` AND created_at > to_timestamp($2) + INTERVAL '1 millisecond'`;
           params.push(afterTs);
         }
 
