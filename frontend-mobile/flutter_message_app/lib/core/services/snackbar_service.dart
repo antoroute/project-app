@@ -1,26 +1,42 @@
 import 'package:flutter/material.dart';
 
+/// Service pour afficher des SnackBars globalement.
 class SnackbarService {
-  static void show(BuildContext context, String message, {Color? backgroundColor}) {
-    ScaffoldMessenger.of(context).clearSnackBars();
+  /// Affiche une erreur en rouge.
+  static void showError(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: backgroundColor ?? Colors.redAccent,
-        duration: const Duration(seconds: 3),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
+  /// Affiche un message de succès en vert.
   static void showSuccess(BuildContext context, String message) {
-    show(context, message, backgroundColor: Colors.green);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
-  static void showError(BuildContext context, String message) {
-    show(context, message, backgroundColor: Colors.redAccent);
-  }
-
+  /// Affiche un message d’information en bleu.
   static void showInfo(BuildContext context, String message) {
-    show(context, message, backgroundColor: Colors.blueAccent);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.blueAccent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// Erreur spécifique en cas de rate limit (429).
+  static void showRateLimitError(BuildContext context) {
+    showError(context, 'Trop de requêtes, veuillez réessayer dans un instant.');
   }
 }

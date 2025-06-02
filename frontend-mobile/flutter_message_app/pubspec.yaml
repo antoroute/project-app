@@ -44,6 +44,7 @@ dependencies:
   mobile_scanner: ^3.5.5
   flutter_launcher_icons: ^0.11.0
   local_auth: ^2.3.0
+  intl: ^0.18.0
 
 flutter_icons:
   android: true

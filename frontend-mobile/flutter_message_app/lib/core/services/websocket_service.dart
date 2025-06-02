@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
+import 'package:flutter_message_app/core/models/message.dart';
+import 'package:flutter_message_app/core/services/api_service.dart';
+import 'package:provider/provider.dart';
 
 enum SocketStatus { disconnected, connecting, connected, error }
 
@@ -12,37 +14,23 @@ class WebSocketService {
 
   IO.Socket? _socket;
   SocketStatus _status = SocketStatus.disconnected;
-  String? _lastConversationId;
-  int _reconnectAttempts = 0;
-  Timer? _reconnectTimer;
-  int _activeScreens = 0;
-
-  static const int _maxReconnectAttempts = 5;
-  static const Duration _baseReconnectDelay = Duration(seconds: 2);
-
-  final Map<String, Function(dynamic)> _messageListeners = {};
   final StreamController<SocketStatus> _statusController = StreamController.broadcast();
 
   SocketStatus get status => _status;
   Stream<SocketStatus> get statusStream => _statusController.stream;
 
-  void screenAttached() => _activeScreens++;
+  /// Callbacks à brancher depuis vos providers
+  void Function(Message message)? onNewMessage;
+  void Function(String conversationId, String userId)? onUserAdded;
+  VoidCallback? onNotificationNew;
+  VoidCallback? onConversationJoined;
+  VoidCallback? onGroupJoined;
 
-  void screenDetached() {
-    _activeScreens--;
-    if (_activeScreens <= 0) {
-      disconnect();
-    }
-  }
-
-    /// Connecte la socket, vérifie et rafraîchit le token si nécessaire
-  Future<void> connect(BuildContext context, {String? conversationId}) async {
+  /// Établit la connexion WS
+  Future<void> connect(BuildContext context) async {
     if (_status == SocketStatus.connected || _status == SocketStatus.connecting) return;
-    _status = SocketStatus.connecting;
-    _statusController.add(_status);
-    _lastConversationId = conversationId;
+    _updateStatus(SocketStatus.connecting);
 
-    // Validation du JWT
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final valid = await auth.ensureTokenValid();
     if (!valid) {
@@ -50,10 +38,8 @@ class WebSocketService {
       return;
     }
     final token = auth.token!;
-
-    // Initialisation de la connexion WebSocket
     _disposeSocket();
-    _log('Initialisation de la connexion WebSocket...', level: 'info');
+
     try {
       _socket = IO.io(
         'https://api.kavalek.fr',
@@ -61,123 +47,99 @@ class WebSocketService {
             .setPath('/socket.io')
             .setTransports(['websocket'])
             .setAuth({'token': token})
-            .disableAutoConnect()
             .build(),
       );
       _registerListeners(context);
       _socket!.connect();
     } catch (e) {
-      _handleError("Erreur d'initialisation WebSocket: $e");
+      _handleError("Erreur d'initialisation du WebSocket: $e");
     }
   }
 
   void _registerListeners(BuildContext context) {
     if (_socket == null) return;
-    _socket!.onConnect((_) {
-      _log('WebSocket connecté', level: 'info');
-      _status = SocketStatus.connected;
-      _statusController.add(_status);
-      _reconnectAttempts = 0;
-      if (_lastConversationId != null) {
-        subscribeConversation(_lastConversationId!);
-      }
-    });
 
-    _socket!.onDisconnect((_) {
-      _log('WebSocket déconnecté', level: 'warn');
-      _status = SocketStatus.disconnected;
-      _statusController.add(_status);
-      _tryReconnect(context);
-    });
-
-    _socket!.on('message:new', (data) {
-      _messageListeners.values.forEach((cb) => cb(data));
-    });
-
-    _socket!.onError((data) => _handleError('Erreur WebSocket: $data'));
-
-    _socket!.on('connect_error', (data) => _handleError('Erreur de connexion: $data'));
-
-    _socket!.on('connect_timeout', (data) => _handleError('Timeout de connexion: $data'));
-
-    _socket!.on('reconnect_failed', (_) => _handleError('Échec de reconnexion'));
-
-    _socket!.onReconnecting((_) {
-      _log('Reconnexion en cours...', level: 'warn');
-    });
-
-    _socket!.onReconnect((_) {
-      _log('Reconnecté', level: 'info');
-    });
-  }
-
-  void _tryReconnect(BuildContext context) {
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
-      _handleError('Échec de reconnexion après plusieurs tentatives');
-      return;
-    }
-    _reconnectAttempts++;
-    final delay = _baseReconnectDelay * _reconnectAttempts;
-    _log('Tentative de reconnexion dans ${delay.inSeconds}s', level: 'warn');
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(delay, () => connect(context, conversationId: _lastConversationId));
-  }
-
-  void forceReconnect(BuildContext context) {
-    _log('Reconnexion forcée', level: 'info');
-    disconnect();
-    connect(context, conversationId: _lastConversationId);
+    _socket!
+      ..onConnect((_) {
+        _log('WebSocket connecté', level: 'info');
+        _updateStatus(SocketStatus.connected);
+      })
+      ..onDisconnect((_) {
+        _log('WebSocket déconnecté', level: 'warn');
+        _updateStatus(SocketStatus.disconnected);
+        Future.delayed(const Duration(seconds: 3), () => connect(context));
+      })
+      // message:new : on reçoit déjà un JSON `{ id, senderId, conversationId, ... }`
+      ..on('message:new', (data) {
+        final Map<String, dynamic> json = data as Map<String, dynamic>;
+        // on utilise la factory qui ne prend qu'un Map
+        final msg = Message.fromJson(json);
+        onNewMessage?.call(msg);
+      })
+      ..on('conversation:user_added', (data) {
+        final Map<String, dynamic> json = data as Map<String, dynamic>;
+        onUserAdded?.call(
+          json['conversationId'] as String,
+          json['userId'] as String,
+        );
+      })
+      ..on('notification:new', (_) => onNotificationNew?.call())
+      ..on('conversation:joined', (_) => onConversationJoined?.call())
+      ..on('group:joined', (_) => onGroupJoined?.call())
+      ..on('group:user_added', (data) {
+        final Map<String, dynamic> json = data as Map<String, dynamic>;
+        _log(
+          'Nouvel utilisateur ajouté au groupe '
+          '${json['groupId']} : ${json['userId']}',
+          level: 'info',
+        );
+      })
+      ..onError((err) => _handleError('Erreur WebSocket: $err'))
+      ..on('connect_error', (err) => _handleError('Erreur de connexion: $err'));
   }
 
   void subscribeConversation(String conversationId) {
-    if (_status == SocketStatus.connected) {
-      _log('Abonnement à la conversation: $conversationId', level: 'info');
-      _socket?.emit('conversation:subscribe', conversationId);
-    }
+    if (_status != SocketStatus.connected || _socket == null) return;
+    _log('Demande d’abonnement à la conversation : $conversationId', level: 'info');
+    _socket!.emitWithAck(
+      'conversation:subscribe',
+      conversationId,
+      ack: (resp) {
+        final ok = resp is Map && resp['success'] == true;
+        _log(ok
+            ? 'Abonnement réussi à $conversationId'
+            : 'Échec abonnement à $conversationId (ack: $resp)',
+          level: ok ? 'info' : 'warn'
+        );
+      },
+    );
   }
 
   void unsubscribeConversation(String conversationId) {
-    if (_status == SocketStatus.connected) {
-      _log('Désabonnement de la conversation: $conversationId', level: 'info');
-      _socket?.emit('conversation:unsubscribe', conversationId);
-    }
-  }
-
-  void sendMessage(dynamic payload) {
-    if (_status == SocketStatus.connected) {
-      _log('Envoi message: $payload', level: 'info');
-      _socket?.emit('message:send', payload);
-    } else {
-      _handleError('Socket non connectée, message non envoyé');
-    }
-  }
-
-  void setOnNewMessageListener(String id, Function(dynamic) callback) {
-    _messageListeners[id] = callback;
-  }
-
-  void removeOnNewMessageListener(String id) {
-    _messageListeners.remove(id);
+    if (_status != SocketStatus.connected || _socket == null) return;
+    _log('Désabonnement de la conversation : $conversationId', level: 'info');
+    _socket!.emit('conversation:unsubscribe', conversationId);
   }
 
   void disconnect() {
-    _log('Déconnexion manuelle', level: 'info');
     _disposeSocket();
-    _status = SocketStatus.disconnected;
-    _statusController.add(_status);
-    _reconnectTimer?.cancel();
+    _updateStatus(SocketStatus.disconnected);
   }
 
   void _disposeSocket() {
-    _socket?..clearListeners();
-    _socket?.dispose();
+    _socket?.clearListeners();
+    _socket?.disconnect();
     _socket = null;
   }
 
-  void _handleError(String msg) {
-    _log(msg, level: 'error');
-    _status = SocketStatus.error;
+  void _updateStatus(SocketStatus newStatus) {
+    _status = newStatus;
     _statusController.add(_status);
+  }
+
+  void _handleError(String message) {
+    _log(message, level: 'error');
+    _updateStatus(SocketStatus.error);
   }
 
   void _log(String message, {String level = 'info'}) {

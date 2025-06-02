@@ -1,102 +1,141 @@
 import 'dart:convert';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:flutter_message_app/core/crypto/key_manager.dart';
 import 'package:flutter_message_app/core/services/biometric_service.dart';
 import 'package:pointycastle/pointycastle.dart' as pc;
 
+/// Fournit le JWT et gère la mise à jour via biométrie.
 class AuthProvider extends ChangeNotifier {
-  final _storage = const FlutterSecureStorage(
+  final FlutterSecureStorage _storage = const FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
   );
 
   final BiometricService _biometric = BiometricService();
   String? _token;
+
+  /// Retourne le JWT courant ou null si non connecté.
   String? get token => _token;
+
+  /// Indique si l’utilisateur est authentifié.
   bool get isAuthenticated => _token != null;
 
   final Uri _loginUri    = Uri.parse('https://auth.kavalek.fr/auth/login');
   final Uri _refreshUri  = Uri.parse('https://auth.kavalek.fr/auth/refresh');
   final Uri _registerUri = Uri.parse('https://auth.kavalek.fr/auth/register');
 
-  /// Connexion classique : récupère accessToken et refreshToken
+  /// Retourne l’ID de l’utilisateur extrait du JWT (claim "id").
+  String? get userId {
+    if (_token == null) return null;
+    try {
+      final Map<String, dynamic> payload = JwtDecoder.decode(_token!);
+      return payload['id'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Connexion : récupère accessToken et refreshToken, les stocke, génère la clé RSA utilisateur.
   Future<void> login(String email, String password) async {
-    final res = await http.post(
+    final http.Response response = await http.post(
       _loginUri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'password': password}),
+      headers: <String, String>{'Content-Type': 'application/json'},
+      body: jsonEncode(<String, String>{
+        'email': email,
+        'password': password,
+      }),
     );
-    if (res.statusCode != 200) {
-      throw Exception('Erreur login: ${res.body}');
+
+    if (response.statusCode != 200) {
+      throw Exception('Erreur login : ${response.body}');
     }
-    final data = jsonDecode(res.body);
-    final accessToken  = data['accessToken']  as String?;
-    final refreshToken = data['refreshToken'] as String?;
+
+    final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
+    final String? accessToken  = data['accessToken']  as String?;
+    final String? refreshToken = data['refreshToken'] as String?;
+
     if (accessToken == null || refreshToken == null) {
-      throw Exception('Réponse invalide du serveur');
+      throw Exception('Réponse invalide du serveur lors du login');
     }
+
     await _storage.write(key: 'accessToken', value: accessToken);
     await _storage.write(key: 'refreshToken', value: refreshToken);
     _token = accessToken;
+
     await KeyManager().generateUserKeyIfAbsent();
     notifyListeners();
   }
 
-  /// Inscription : envoie email, password, username et publicKey
+  /// Inscription : génère la paire RSA, puis appelle l’API.
   Future<void> register(String email, String password, String username) async {
     await KeyManager().generateKeyPairForGroup('user_rsa');
-    final keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
-    if (keyPair == null) throw Exception('Erreur génération clé RSA utilisateur');
-    final publicKeyPem = encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
+    final pc.AsymmetricKeyPair? keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
+    if (keyPair == null) {
+      throw Exception('Erreur génération clé RSA pour l’inscription');
+    }
+    final String publicKeyPem = encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
 
-    final res = await http.post(
+    final http.Response response = await http.post(
       _registerUri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
+      headers: <String, String>{'Content-Type': 'application/json'},
+      body: jsonEncode(<String, String>{
         'email': email,
         'password': password,
         'username': username,
         'publicKey': publicKeyPem,
       }),
     );
-    if (res.statusCode != 200 && res.statusCode != 201) {
-      throw Exception('Erreur d\'inscription: ${res.body}');
+
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception('Erreur d\'inscription : ${response.body}');
     }
   }
 
-  /// Verifie si un accessToken est présent et valide pour autologin
+  /// Vérifie si un token valide est en mémoire et l’utilise pour l’auto-login.
   Future<void> tryAutoLogin() async {
-    final stored = await _storage.read(key: 'accessToken');
-    if (stored == null || JwtDecoder.isExpired(stored)) return;
-
+    final String? stored = await _storage.read(key: 'accessToken');
+    if (stored == null || JwtDecoder.isExpired(stored)) {
+      return;
+    }
     _token = stored;
     notifyListeners();
     unawaited(KeyManager().generateUserKeyIfAbsent());
   }
 
-  /// Rafraîchissement du token via biométrie et appel /refresh
+  /// Rafraîchit le token via biométrie (popup) et l’API /refresh.
   Future<bool> refreshAccessToken() async {
     try {
-      if (!await _biometric.canCheckBiometrics()) return false;
-      final authenticated = await _biometric.authenticate();
-      if (!authenticated) return false;
-      final refresh = await _storage.read(key: 'refreshToken');
-      if (refresh == null) return false;
-      final res = await http.post(
+      if (!await _biometric.canCheckBiometrics()) {
+        return false;
+      }
+      final bool authenticated = await _biometric.authenticate();
+      if (!authenticated) {
+        return false;
+      }
+      final String? storedRefresh = await _storage.read(key: 'refreshToken');
+      if (storedRefresh == null) {
+        return false;
+      }
+      final http.Response response = await http.post(
         _refreshUri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'refreshToken': refresh}),
+        headers: <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, String>{'refreshToken': storedRefresh}),
       );
-      if (res.statusCode != 200) return false;
-      final data = jsonDecode(res.body);
-      final newToken = data['accessToken'] as String?;
-      if (newToken == null) return false;
-      _token = newToken;
-      await _storage.write(key: 'accessToken', value: newToken);
+      if (response.statusCode != 200) {
+        return false;
+      }
+      final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
+      final String? newAccessToken = data['accessToken'] as String?;
+      if (newAccessToken == null) {
+        return false;
+      }
+      _token = newAccessToken;
+      await _storage.write(key: 'accessToken', value: newAccessToken);
       notifyListeners();
       return true;
     } catch (_) {
@@ -104,24 +143,22 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Si le JWT en mémoire est absent ou expiré,
-  /// tente un refresh via biométrie avant de continuer.
+  /// Vérifie que le token en mémoire existe et n’est pas expiré, sinon tente un refresh.
   Future<bool> ensureTokenValid() async {
     if (_token == null) {
-      final stored = await _storage.read(key: 'accessToken');
-      if (stored == null) return false;
+      final String? stored = await _storage.read(key: 'accessToken');
+      if (stored == null) {
+        return false;
+      }
       _token = stored;
     }
-
     if (JwtDecoder.isExpired(_token!)) {
-      return await refreshAccessToken(); 
-      // refreshAccessToken() affiche la popup biométrique
+      return await refreshAccessToken();
     }
-
     return true;
   }
 
-  /// Supprime tous les tokens
+  /// Supprime le token et le refreshToken de la storage.
   Future<void> logout() async {
     _token = null;
     await _storage.delete(key: 'accessToken');
@@ -129,26 +166,34 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Indique si la biométrie est disponible
+  /// Indique si la biométrie est disponible.
   Future<bool> canUseBiometrics() async {
     return await _biometric.canCheckBiometrics();
   }
 
-  /// Vérifie la présence d'un refreshToken en storage
+  /// Vérifie la présence d’un refreshToken.
   Future<bool> hasRefreshToken() async {
-    final token = await _storage.read(key: 'refreshToken');
+    final String? token = await _storage.read(key: 'refreshToken');
     return token != null;
   }
 
-  /// Connexion via biométrie : rafraîchit le token
+  /// Connexion par biométrie : rafraîchit simplement l’accessToken.
   Future<bool> loginWithBiometrics() async {
     return await refreshAccessToken();
   }
 
+  /// Expose les en-têtes à utiliser pour tous les appels REST (Content-Type + JWT).
   Future<Map<String, String>> getAuthHeaders() async {
-    final ok = await ensureTokenValid();
-    if (!ok) throw Exception('Session expirée');
-    return {
+    final bool valid = await ensureTokenValid();
+    if (!valid) {
+      final bool biometricsAvailable = await canUseBiometrics();
+      if (!biometricsAvailable) {
+        logout();
+        throw Exception('Token invalide et biométrie indisponible déconnexion');
+      }
+      loginWithBiometrics();
+    }
+    return <String, String>{
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $_token',
     };

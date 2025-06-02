@@ -1,22 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/providers/auth_provider.dart';
-import '../../core/services/snackbar_service.dart';
-import 'register_screen.dart';
+import 'package:flutter_message_app/core/providers/auth_provider.dart';
+import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'home_screen.dart';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({Key? key}) : super(key: key);
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
-
+  final TextEditingController _emailController    = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final GlobalKey<FormState> _formKey             = GlobalKey<FormState>();
   bool _isLoading = false;
 
   @override
@@ -24,15 +23,12 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final auth = Provider.of<AuthProvider>(context, listen: false);
-
-      // Si un refreshToken existe ET biométrie dispo, on lance tout de suite la popup
-      final hasRefresh = await auth.hasRefreshToken();
-      final canBio     = await auth.canUseBiometrics();
+      final bool hasRefresh = await auth.hasRefreshToken();
+      final bool canBio    = await auth.canUseBiometrics();
       if (hasRefresh && canBio) {
-        final ok = await auth.loginWithBiometrics();
+        final bool ok = await auth.loginWithBiometrics();
         if (ok) {
           _goHome();
-          return;
         }
       }
     });
@@ -54,13 +50,10 @@ class _LoginScreenState extends State<LoginScreen> {
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
-      SnackbarService.showSuccess(context, "Connexion réussie !");
+      SnackbarService.showSuccess(context, 'Connexion réussie !');
       _goHome();
     } catch (e) {
-      SnackbarService.showError(
-        context,
-        "Erreur de connexion : $e",
-      );
+      SnackbarService.showError(context, 'Erreur de connexion : $e');
     } finally {
       setState(() => _isLoading = false);
     }
@@ -82,14 +75,18 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Form(
           key: _formKey,
           child: Column(
-            children: [
+            children: <Widget>[
               TextFormField(
                 controller: _emailController,
                 decoration: const InputDecoration(labelText: 'Email'),
                 keyboardType: TextInputType.emailAddress,
                 validator: (value) {
-                  if (value == null || value.isEmpty) return 'Entrez votre email';
-                  if (!value.contains('@')) return 'Email invalide';
+                  if (value == null || value.isEmpty) {
+                    return 'Entrez votre email';
+                  }
+                  if (!value.contains('@')) {
+                    return 'Email invalide';
+                  }
                   return null;
                 },
               ),
@@ -99,8 +96,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: const InputDecoration(labelText: 'Mot de passe'),
                 obscureText: true,
                 validator: (value) {
-                  if (value == null || value.isEmpty) return 'Entrez votre mot de passe';
-                  if (value.length < 6) return 'Minimum 6 caractères';
+                  if (value == null || value.isEmpty) {
+                    return 'Entrez votre mot de passe';
+                  }
+                  if (value.length < 6) {
+                    return 'Minimum 6 caractères';
+                  }
                   return null;
                 },
               ),
@@ -113,14 +114,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                ),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                  );
+                },
                 child: const Text(
-                  'Pas encore inscrit ?\n Créer un compte',
+                  'Pas encore inscrit ?\nCréer un compte',
                   textAlign: TextAlign.center,
-                  ),
+                ),
               ),
             ],
           ),

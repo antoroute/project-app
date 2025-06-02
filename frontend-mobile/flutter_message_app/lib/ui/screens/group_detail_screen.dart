@@ -1,251 +1,277 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart'; 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:pointycastle/export.dart' as pc;
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:pointycastle/export.dart' as pc;
+import 'package:flutter/services.dart';
 
-import '../../core/crypto/crypto_tasks.dart';         
-import '../../core/crypto/key_manager.dart';
-import '../../core/crypto/rsa_key_utils.dart';
-import '../../core/crypto/aes_utils.dart';
-import '../../core/crypto/encryption_utils.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/providers/group_provider.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/services/snackbar_service.dart';
-import 'conversation_screen.dart';
+import '../../core/services/websocket_service.dart';
+import '../../core/crypto/aes_utils.dart';
+import '../../core/crypto/rsa_key_utils.dart';
+import '../../core/crypto/key_manager.dart';
 import 'join_requests_screen.dart';
+import 'conversation_screen.dart';
 
+/// Écran de détail d’un groupe : liste des conversations et création de conversation.
 class GroupDetailScreen extends StatefulWidget {
   final String groupId;
   final String groupName;
 
   const GroupDetailScreen({
-    super.key,
+    Key? key,
     required this.groupId,
     required this.groupName,
-  });
+  }) : super(key: key);
 
   @override
   State<GroupDetailScreen> createState() => _GroupDetailScreenState();
 }
 
 class _GroupDetailScreenState extends State<GroupDetailScreen> {
-  List<Map<String, dynamic>> _members = [];
-  Map<String, List<Map<String, dynamic>>> _conversationMembers = {};
-  final Set<String> _loadingConversations = {};
+  bool _loading = true;
+  bool _isCreator = false;
   final Set<String> _selectedUserIds = {};
 
-  bool _loading = true;
-  bool _loadingCreator = true;
-  bool _isCreator = false;
-  String? _currentUserId;
-
   Uint8List? _cachedAESKey;
-  String? _cachedSignature;
   Map<String, String>? _cachedEncryptedSecrets;
+  String? _cachedSignature;
 
   @override
   void initState() {
     super.initState();
-    _checkCreator();
-    _ensureGroupKey();
-    _fetchGroupMembers();
-  }
-
-  Future<void> _checkCreator() async {
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token!;
-    // 1) Récupère l’ID courant
-    final meRes = await http.get(
-      Uri.parse('https://auth.kavalek.fr/auth/me'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
-    if (meRes.statusCode != 200) {
-      throw Exception('Impossible de récupérer l’utilisateur');
-    }
-    final me = jsonDecode(meRes.body)['user'];
-    final currentUserId = me['id'] as String;
-
-    // 2) Récupère les infos du groupe (y compris creator_id)
-    final grpRes = await http.get(
-      Uri.parse('https://api.kavalek.fr/api/groups/${widget.groupId}'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
-    if (grpRes.statusCode != 200) {
-      throw Exception('Impossible de récupérer le groupe');
-    }
-    final info = jsonDecode(grpRes.body);
-    final creatorId = info['creator_id'] as String;
-
-    // 3) Compare
-    setState(() {
-      _currentUserId = currentUserId;
-      _isCreator = creatorId == currentUserId;
-      _loadingCreator = false;
-    });
-  }
-
-  Future<void> _ensureGroupKey() async {
-    final existing = await KeyManager().getKeyPairForGroup(widget.groupId);
-    if (existing == null) {
-      // 1) Generate key pair off main thread
-      final pair = await compute(generateRsaKeyPairTask, null);
-      // 2) Store locally
-      await KeyManager().storeKeyPairForGroup(widget.groupId, pair);
-
-      // 3) Encode public key
-      final publicPem = RsaKeyUtils.encodePublicKeyToPem(
-        pair.publicKey as pc.RSAPublicKey,
-      );
-
-      // 4) Send join-request to update key
-      final auth = Provider.of<AuthProvider>(context, listen: false);
-      final headers = await auth.getAuthHeaders();
-      final res = await http.post(
-        Uri.parse(
-          'https://api.kavalek.fr/api/groups/${widget.groupId}/join-requests',
-        ),
-        headers: headers,
-        body: jsonEncode({'publicKeyGroup': publicPem}),
-      );
-      if (res.statusCode == 200 || res.statusCode == 201) {
-        SnackbarService.showSuccess(
+    _loadGroupData();
+    WebSocketService.instance.onGroupJoined = () {
+      if (mounted) {
+        _loadGroupData();
+        SnackbarService.showInfo(
           context,
-          'Clé absente : demande de mise à jour envoyée au créateur.',
-        );
-      } else {
-        SnackbarService.showError(
-          context,
-          'Erreur demande mise à jour clé : ${res.body}',
+          'Vous avez rejoint un nouveau groupe',
         );
       }
-    }
+    };
   }
 
-  Future<void> _fetchGroupMembers() async {
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token!;
-    // get my userId
-    final me = await http.get(
-      Uri.parse('https://auth.kavalek.fr/auth/me'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
-    if (me.statusCode == 200) {
-      _currentUserId = jsonDecode(me.body)['user']['id'] as String?;
-    }
+  Future<void> _loadGroupData() async {
+    setState(() => _loading = true);
 
-    final res = await http.get(
-      Uri.parse('https://api.kavalek.fr/api/groups/${widget.groupId}/members'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
-    if (res.statusCode == 200) {
-      final data = List<Map<String, dynamic>>.from(jsonDecode(res.body));
-      // sort: others first, me last
-      final sorted = [
-        ...data.where((m) => m['userId'] != _currentUserId),
-        ...data.where((m) => m['userId'] == _currentUserId),
-      ];
-      setState(() => _members = sorted);
-    } else {
-      SnackbarService.showError(context, 'Erreur membres: ${res.body}');
-    }
-    setState(() => _loading = false);
-  }
+    final String? currentUserId = context.read<AuthProvider>().userId;
+    final groupProv = context.read<GroupProvider>();
+    final convProv  = context.read<ConversationProvider>();
 
-  Future<void> _fetchConversationMembers(String convId) async {
-    if (_conversationMembers.containsKey(convId) ||
-        _loadingConversations.contains(convId)) return;
-    _loadingConversations.add(convId);
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token!;
-    final res = await http.get(
-      Uri.parse('https://api.kavalek.fr/api/conversations/$convId/members'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
-    if (res.statusCode == 200) {
-      final list = List<Map<String, dynamic>>.from(jsonDecode(res.body));
-      setState(() {
-        _conversationMembers[convId] = list;
-      });
+    try {
+      await groupProv.fetchGroupDetail(widget.groupId);
+      await groupProv.fetchGroupMembers(widget.groupId);
+      await convProv.fetchConversations();
+
+      // Détermine si l’utilisateur courant est le créateur
+      final creatorId = groupProv.groupDetail?['creator_id'] as String?;
+      _isCreator = currentUserId != null && creatorId == currentUserId;
+    } catch (error) {
+      SnackbarService.showError(
+        context,
+        'Erreur chargement : $error',
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-    _loadingConversations.remove(convId);
   }
 
   Future<void> _createConversation() async {
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final token = auth.token!;
-    final participants = {..._selectedUserIds};
-    if (_currentUserId != null) participants.add(_currentUserId!);
+    final String? currentUserId = context.read<AuthProvider>().userId;
+    if (currentUserId == null) {
+      SnackbarService.showError(context, 'Utilisateur non authentifié');
+      return;
+    }
 
+    final convProv = context.read<ConversationProvider>();
+    final groupProv = context.read<GroupProvider>();
+
+    // 1) Compose la liste des participants
+    final participants = Set<String>.from(_selectedUserIds)..add(currentUserId);
+
+    // 2) Prépare l’enveloppe chiffrée
     if (_cachedAESKey == null || _cachedEncryptedSecrets == null) {
+      // Génère une clé AES
       _cachedAESKey = AesUtils.generateRandomAESKey();
-      final secrets = <String, String>{};
+      final Map<String, String> secrets = {};
+
+      // Chiffre la clé AES pour chaque participant
       for (final uid in participants) {
-        final member = _members.firstWhere((m) => m['userId'] == uid,
-            orElse: () => {});
-        final pem = member['publicKeyGroup'] as String?;
-        if (pem == null) throw Exception('Clé publique absente pour $uid');
-        final ct = RsaKeyUtils.encryptAESKeyWithRSAOAEP(pem, _cachedAESKey!);
-        secrets[uid] = base64.encode(ct);
+        final member = groupProv.members.firstWhere(
+          (m) => m['userId'] == uid,
+          orElse: () => <String, dynamic>{},
+        );
+        final String? pem = member['publicKeyGroup'] as String?;
+        if (pem == null) {
+          throw Exception('Clé publique absente pour $uid');
+        }
+        final Uint8List cipherBytes =
+            RsaKeyUtils.encryptAESKeyWithRSAOAEP(pem, _cachedAESKey!);
+        secrets[uid] = base64.encode(cipherBytes);
       }
       _cachedEncryptedSecrets = secrets;
 
+      // Récupère la clé privée du groupe pour signer
       final kp = await KeyManager().getKeyPairForGroup(widget.groupId);
-      if (kp == null) throw Exception('Clé privée groupe manquante');
+      if (kp == null) {
+        throw Exception('Clé privée du groupe manquante');
+      }
       final signer = pc.Signer('SHA-256/RSA')
-        ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(
-            kp.privateKey as pc.RSAPrivateKey));
-      final payload = jsonEncode(_cachedEncryptedSecrets);
-      final sig = signer
+        ..init(
+          true,
+          pc.PrivateKeyParameter<pc.RSAPrivateKey>(kp.privateKey as pc.RSAPrivateKey),
+        );
+
+      // Signature de l’enveloppe JSON
+      final String payload = jsonEncode(_cachedEncryptedSecrets);
+      final pc.RSASignature signature = signer
           .generateSignature(Uint8List.fromList(utf8.encode(payload)))
-          as pc.RSASignature;
-      _cachedSignature = base64.encode(sig.bytes);
+        as pc.RSASignature;
+      _cachedSignature = base64.encode(signature.bytes);
     }
-    final headers = await auth.getAuthHeaders();
-    final res = await http.post(
-      Uri.parse('https://api.kavalek.fr/api/conversations'),
-      headers: headers,
-      body: jsonEncode({
-        'groupId': widget.groupId,
-        'userIds': _selectedUserIds.toList(),
-        'encryptedSecrets': _cachedEncryptedSecrets,
-        'creatorSignature': _cachedSignature,
-      }),
-    );
-    if (res.statusCode == 200 || res.statusCode == 201) {
+
+    // 3) Appel à l’API
+    try {
+      final String newConversationId = await convProv.createConversation(
+        widget.groupId,
+        participants.toList(),
+        _cachedEncryptedSecrets!,
+        _cachedSignature!,
+      );
       SnackbarService.showSuccess(context, 'Conversation créée !');
-      await Provider.of<ConversationProvider>(context, listen: false)
-          .fetchConversations(context);
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ConversationScreen(
+            conversationId: newConversationId,
+          ),
+        ),
+      );
+    } catch (error) {
+      SnackbarService.showError(context, 'Erreur création : $error');
+    } finally {
+      // Réinitialisation
       setState(() {
         _selectedUserIds.clear();
         _cachedAESKey = null;
         _cachedEncryptedSecrets = null;
         _cachedSignature = null;
       });
-    } else {
-      SnackbarService.showError(context, 'Erreur création: ${res.body}');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading || _loadingCreator) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
+    final groupProv = context.watch<GroupProvider>();
+    final convProv  = context.watch<ConversationProvider>();
+    final String? currentUserId = context.read<AuthProvider>().userId;
 
-    final convs = Provider.of<ConversationProvider>(context)
-        .getConversationsForGroup(widget.groupId);
+    // Trie : place l’utilisateur courant en dernier
+    final members = List<Map<String, dynamic>>.from(groupProv.members);
+    members.sort((a, b) {
+      if (a['userId'] == currentUserId) return 1;
+      if (b['userId'] == currentUserId) return -1;
+      return 0;
+    });
+
+    // Filtre des conversations du groupe
+    final convs = convProv.conversations
+        .where((c) => c.groupId == widget.groupId)
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.groupName),
         actions: [
+          // Bouton QR code
+          IconButton(
+            icon: const Icon(Icons.qr_code),
+            tooltip: 'Voir QR code',
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                backgroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                builder: (bottomCtx) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        QrImageView(
+                          data: widget.groupId,
+                          version: QrVersions.auto,
+                          size: 200.0,
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.black,
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  const Text(
+                                    'ID du groupe',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.black,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    widget.groupId,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.black,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.copy),
+                              color: Colors.black,
+                              tooltip: 'Copier l’ID',
+                              onPressed: () {
+                                Clipboard.setData(
+                                  ClipboardData(text: widget.groupId),
+                                );
+                                Navigator.of(bottomCtx).pop();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('ID copié !')),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          child: const Text('FERMER'),
+                          onPressed: () => Navigator.of(bottomCtx).pop(),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+
+          // Bouton demandes d’adhésion
           IconButton(
             icon: const Icon(Icons.how_to_reg),
             tooltip: 'Demandes d’adhésion',
@@ -256,104 +282,108 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                   builder: (_) => JoinRequestsScreen(
                     groupId: widget.groupId,
                     groupName: widget.groupName,
-                    isCreator: _isCreator,
+                    isCreator: true,
                   ),
                 ),
-              );
+              ).then((_) {
+                // Recharger après retour
+                _loadGroupData();
+              });
             },
-          )
+          ),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 16, bottom: 8),
-            child: Column(
+
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
               children: [
-                QrImageView(
-                  data: widget.groupId,
-                  version: QrVersions.auto,
-                  size: 120,
-                  backgroundColor: Colors.white,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'ID du groupe : ${widget.groupId}',
-                  style: const TextStyle(fontSize: 13, color: Colors.grey),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              children: [
-                const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: Text('Conversations',
-                      style: TextStyle(fontSize: 18)),
-                ),
-                ...convs.map((c) {
-                  final convId = c['conversationId'] as String;
-                  final members = _conversationMembers[convId];
-                  if (members == null) _fetchConversationMembers(convId);
-                  final title = members
-                          ?.where((m) => m['userId'] != _currentUserId)
-                          .map((m) => m['username'] ?? '')
-                          .join(', ') ??
-                      'Chargement...';
-                  return ListTile(
-                    title: Text(title),
-                    subtitle: Text('ID: $convId'),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ConversationScreen(
-                          conversationId: convId,
-                          groupId: widget.groupId,
-                        ),
-                      ),
+                const Divider(height: 1),
+
+                // Liste des conversations
+                if (convs.isNotEmpty) ...[
+                  const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Text(
+                      'Conversations',
+                      style: TextStyle(fontSize: 18),
                     ),
-                  );
-                }),
-                const Divider(),
-                const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: Text('Créer une nouvelle conversation',
-                      style: TextStyle(fontSize: 18)),
-                ),
-                ..._members.map((m) {
-                  final isSelf = m['userId'] == _currentUserId;
-                  return CheckboxListTile(
-                    title: Text(m['username'] ?? 'Utilisateur'),
-                    subtitle: Text(m['email']),
-                    value: _selectedUserIds.contains(m['userId']),
-                    onChanged: isSelf
-                        ? null
-                        : (sel) {
-                            setState(() {
-                              if (sel == true) {
-                                _selectedUserIds.add(m['userId']);
-                              } else {
-                                _selectedUserIds.remove(m['userId']);
-                              }
-                            });
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: convs.length,
+                      itemBuilder: (context, index) {
+                        final conv = convs[index];
+                        return ListTile(
+                          title: Text('Conversation ${conv.conversationId}'),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ConversationScreen(
+                                  conversationId: conv.conversationId,
+                                ),
+                              ),
+                            );
                           },
-                  );
-                }),
+                        );
+                      },
+                    ),
+                  ),
+                ] else
+                  const Expanded(
+                    child: Center(child: Text('Aucune conversation')),
+                  ),
+
+                const Divider(height: 1),
+
+                // Sélecteur d’utilisateurs pour créer une conversation
                 Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: ElevatedButton(
-                    onPressed: _selectedUserIds.isNotEmpty
-                        ? _createConversation
-                        : null,
-                    child: const Text('Créer la conversation'),
+                  padding: const EdgeInsets.all(8),
+                  child: Text(
+                    'Créer une nouvelle conversation',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: members.length,
+                    itemBuilder: (context, index) {
+                      final member = members[index];
+                      final String userId = member['userId'] as String;
+                      final String username =
+                          member['username'] as String? ?? 'Utilisateur';
+                      final bool isSelf = userId == currentUserId;
+
+                      return CheckboxListTile(
+                        title: Text(username),
+                        subtitle: Text(member['email'] as String? ?? ''),
+                        value: _selectedUserIds.contains(userId),
+                        onChanged: isSelf
+                            ? null
+                            : (bool? selected) {
+                                setState(() {
+                                  if (selected == true) {
+                                    _selectedUserIds.add(userId);
+                                  } else {
+                                    _selectedUserIds.remove(userId);
+                                  }
+                                });
+                              },
+                      );
+                    },
                   ),
                 ),
               ],
             ),
-          ),
-        ],
-      ),
+
+      floatingActionButton: _selectedUserIds.isNotEmpty
+          ? FloatingActionButton(
+              onPressed: _createConversation,
+              child: const Icon(Icons.chat),
+              tooltip: 'Créer conversation',
+            )
+          : null,
     );
   }
 }
