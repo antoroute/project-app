@@ -36,7 +36,7 @@ class Message {
       encrypted:        json['encrypted'] as String?,
       iv:               json['iv'] as String?,
       encryptedKeys:    rawKeys != null
-                         ? rawKeys.map((k, v) => MapEntry(k as String, v as String))
+                         ? rawKeys.map((k, v) => MapEntry(k, v as String))
                          : <String, String>{},
       signatureValid:   json['signatureValid'] as bool,
       senderPublicKey:  json['senderPublicKey'] as String?,

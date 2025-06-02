@@ -1,13 +1,10 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_message_app/core/crypto/crypto_tasks.dart';
 import 'package:flutter_message_app/core/crypto/key_manager.dart';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:flutter_message_app/core/crypto/rsa_key_utils.dart';
-import 'package:flutter_message_app/core/crypto/aes_utils.dart';
-import 'package:flutter_message_app/core/crypto/signature_utils.dart';
 
 class EncryptionUtils {
   static Future<Map<String, dynamic>> encryptMessageForUsers({

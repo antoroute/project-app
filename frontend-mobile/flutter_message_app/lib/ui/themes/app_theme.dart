@@ -24,7 +24,7 @@ class AppTheme {
   static final ThemeData theme = ThemeData(
     primarySwatch: AppColors.purple,
     colorScheme: colorScheme,
-    scaffoldBackgroundColor: colorScheme.background,
+    scaffoldBackgroundColor: colorScheme.surface,
 
     // AppBar
     appBarTheme: AppBarTheme(
@@ -54,16 +54,16 @@ class AppTheme {
 
     // Styles de texte
     textTheme: TextTheme(
-      displayLarge: TextStyle(color: colorScheme.onBackground),
-      displayMedium: TextStyle(color: colorScheme.onBackground),
-      bodyLarge: TextStyle(color: colorScheme.onBackground),
-      bodyMedium: TextStyle(color: colorScheme.onBackground),
+      displayLarge: TextStyle(color: colorScheme.onSurface),
+      displayMedium: TextStyle(color: colorScheme.onSurface),
+      bodyLarge: TextStyle(color: colorScheme.onSurface),
+      bodyMedium: TextStyle(color: colorScheme.onSurface),
       labelLarge: TextStyle(color: colorScheme.onSurface),
       labelMedium: TextStyle(color: colorScheme.onSurface),
     ),
 
     // Icônes
-    iconTheme: IconThemeData(color: colorScheme.onBackground),
+    iconTheme: IconThemeData(color: colorScheme.onSurface),
 
     // FAB
     floatingActionButtonTheme: FloatingActionButtonThemeData(

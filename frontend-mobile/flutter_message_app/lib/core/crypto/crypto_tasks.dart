@@ -7,7 +7,6 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_message_app/core/crypto/key_manager.dart';
 import 'package:flutter_message_app/core/crypto/rsa_key_utils.dart';
 import 'package:flutter_message_app/core/crypto/aes_utils.dart';
-import 'package:flutter_message_app/core/crypto/signature_utils.dart';
 
 Future<pc.AsymmetricKeyPair<pc.PublicKey, pc.PrivateKey>>
     generateRsaKeyPairTask(dynamic _) async {
