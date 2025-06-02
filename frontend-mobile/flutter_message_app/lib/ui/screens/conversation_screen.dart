@@ -304,8 +304,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 style: TextStyle(
                   color: Theme.of(context)
                       .colorScheme
-                      .onSurface
-                      .withOpacity(0.6),
+                      .onSecondary,
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
                 ),

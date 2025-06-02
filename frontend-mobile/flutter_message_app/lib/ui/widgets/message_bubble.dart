@@ -60,18 +60,20 @@ class MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bubbleColor =
-        isMe ? theme.colorScheme.primary : theme.colorScheme.surface;
+        isMe ? theme.colorScheme.primary : theme.colorScheme.secondary;
     final messageStyle = theme.textTheme.bodyLarge!;
-    final timeStyle = theme.textTheme.bodySmall!;
+    final timeStyle = theme.textTheme.bodySmall!.copyWith(
+      color: theme.colorScheme.onSecondary,
+    );
     final usernameStyle = messageStyle.copyWith(
       fontWeight: FontWeight.bold,
-      color: theme.colorScheme.onSurface,
+      color: theme.colorScheme.onSecondary,
       fontSize: 13,
     );
 
     final iconData = signatureValid ? Icons.verified : Icons.warning_amber;
     final iconColor = signatureValid
-        ? theme.colorScheme.onPrimary
+        ? theme.colorScheme.onError
         : theme.colorScheme.error;
     final tooltipMsg = signatureValid
         ? 'Signature vérifiée : message signé par l’expéditeur.'
@@ -89,7 +91,7 @@ class MessageBubble extends StatelessWidget {
             child: Text(senderUsername, style: usernameStyle),
           ),
 
-        // bubble + avatar aligné sur le bas de la bulle
+        // bubble + avatar 
         Row(
           mainAxisAlignment:
               isMe ? MainAxisAlignment.end : MainAxisAlignment.start,

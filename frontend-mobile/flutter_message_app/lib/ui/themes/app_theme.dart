@@ -11,13 +11,14 @@ class AppTheme {
     brightness: Brightness.dark,
   ).copyWith(
     surface: AppColors.grey[800],
-    onSurface: AppColors.grey[100]!,
+    onSurface: AppColors.grey[50],
     secondary: AppColors.blue[300],      // fab, boutons d’action
     onSecondary: Colors.white,
     tertiary: AppColors.yellow[400],     // couleur tertiaire
     onTertiary: Colors.white,
     error: AppColors.red[400],
-    onError: Colors.white,
+    onError: AppColors.green[400],
+    outlineVariant: AppColors.grey[900],
   );
 
   /// Thème global de l’application
@@ -29,7 +30,7 @@ class AppTheme {
     // AppBar
     appBarTheme: AppBarTheme(
       backgroundColor: colorScheme.surface,
-      foregroundColor: colorScheme.onSurface,
+      foregroundColor: colorScheme.onSecondary,
       elevation: 1,
     ),
 
@@ -44,8 +45,8 @@ class AppTheme {
     // Champs de saisie
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: colorScheme.onSurface,
-      hintStyle: TextStyle(color: colorScheme.onSurface.withOpacity(0.6)),
+      fillColor: AppColors.grey[700],
+      hintStyle: TextStyle(color: colorScheme.onSecondary.withOpacity(0.6)),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide.none,
@@ -54,12 +55,12 @@ class AppTheme {
 
     // Styles de texte
     textTheme: TextTheme(
-      displayLarge: TextStyle(color: colorScheme.onSurface),
-      displayMedium: TextStyle(color: colorScheme.onSurface),
-      bodyLarge: TextStyle(color: colorScheme.onSurface),
-      bodyMedium: TextStyle(color: colorScheme.onSurface),
-      labelLarge: TextStyle(color: colorScheme.onSurface),
-      labelMedium: TextStyle(color: colorScheme.onSurface),
+      displayLarge: TextStyle(color: colorScheme.onSecondary),
+      displayMedium: TextStyle(color: colorScheme.onSecondary),
+      bodyLarge: TextStyle(color: colorScheme.onSecondary),
+      bodyMedium: TextStyle(color: colorScheme.onSecondary),
+      labelLarge: TextStyle(color: colorScheme.onSecondary),
+      labelMedium: TextStyle(color: colorScheme.onSecondary),
     ),
 
     // Icônes
