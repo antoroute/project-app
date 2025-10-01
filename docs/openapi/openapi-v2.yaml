@@ -1,0 +1,292 @@
+openapi: 3.1.0
+info:
+  title: Project App – API v2 (E2EE X25519/Ed25519)
+  version: "2.0.0"
+servers:
+  - url: https://api.kavalek.fr
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    DeviceKey:
+      type: object
+      required: [userId, deviceId, pk_sig, pk_kem, key_version, status]
+      properties:
+        userId: { type: string, format: uuid }
+        deviceId: { type: string }
+        pk_sig: { type: string, description: Base64(32B) }
+        pk_kem: { type: string, description: Base64(32B) }
+        key_version: { type: integer }
+        status: { type: string, enum: [active, revoked] }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+
+    RecipientWrap:
+      type: object
+      required: [userId, deviceId, wrap, nonce]
+      properties:
+        userId: { type: string, format: uuid }
+        deviceId: { type: string }
+        wrap: { type: string, description: Base64(AES-GCM wrap of mk) }
+        nonce: { type: string, description: Base64(12B) }
+
+    MessageV2:
+      type: object
+      required: [v, alg, groupId, convId, messageId, sentAt, sender, recipients, iv, ciphertext, sig]
+      properties:
+        v: { type: integer, enum: [2] }
+        alg:
+          type: object
+          properties:
+            kem: { type: string, enum: [X25519] }
+            kdf: { type: string, enum: [HKDF-SHA256] }
+            aead: { type: string, enum: [AES-256-GCM] }
+            sig: { type: string, enum: [Ed25519] }
+        groupId: { type: string, format: uuid }
+        convId: { type: string, format: uuid }
+        messageId: { type: string, format: uuid }
+        sentAt: { type: string, format: date-time }
+        sender:
+          type: object
+          required: [userId, deviceId, eph_pub, key_version]
+          properties:
+            userId: { type: string, format: uuid }
+            deviceId: { type: string }
+            eph_pub: { type: string, description: Base64(32B X25519) }
+            key_version: { type: integer }
+        recipients:
+          type: array
+          items: { $ref: '#/components/schemas/RecipientWrap' }
+        iv: { type: string, description: Base64(12B) }
+        ciphertext: { type: string }
+        sig: { type: string, description: Base64(64B Ed25519) }
+
+    Conversation:
+      type: object
+      required: [id, groupId, type, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        type: { type: string, enum: [private, subset] }
+        created_at: { type: string, format: date-time }
+
+    Group:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, username]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                username: { type: string }
+      responses:
+        "201": { description: Created }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access: { type: string }
+                  refresh: { type: string }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access: { type: string }
+
+  /groups:
+    post:
+      tags: [groups]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses: { "201": { description: Created } }
+    get:
+      tags: [groups]
+      responses:
+        "200":
+          description: List groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Group' }
+
+  /groups/{groupId}/members:
+    parameters:
+      - in: path
+        name: groupId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [groups]
+      responses:
+        "200":
+          description: Members
+    post:
+      tags: [groups]
+      description: Add member (admin only)
+      responses: { "204": { description: Added } }
+
+  /groups/{groupId}/keys/devices:
+    parameters:
+      - in: path
+        name: groupId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [keys]
+      summary: Répertoire des clés publiques par (user, device) d’un groupe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DeviceKey' }
+    post:
+      tags: [keys]
+      summary: Publier les clés d’un nouvel appareil (pairing)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId, pk_sig, pk_kem, key_version, attestation]
+              properties:
+                deviceId: { type: string }
+                pk_sig: { type: string }
+                pk_kem: { type: string }
+                key_version: { type: integer }
+                attestation:
+                  type: object
+                  properties:
+                    signed_by_device: { type: string }   # deviceId du parrain
+                    signature: { type: string }         # Ed25519(base64)
+                    ts: { type: string, format: date-time }
+      responses: { "201": { description: Created } }
+
+  /groups/{groupId}/keys/devices/{deviceId}:
+    delete:
+      tags: [keys]
+      summary: Révoquer un appareil
+      responses: { "204": { description: Revoked } }
+
+  /conversations:
+    post:
+      tags: [conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [groupId, type, members]
+              properties:
+                groupId: { type: string, format: uuid }
+                type: { type: string, enum: [private, subset] }
+                members:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses: { "201": { description: Created } }
+    get:
+      tags: [conversations]
+      responses: { "200": { description: List } }
+
+  /conversations/{conversationId}/messages:
+    parameters:
+      - in: path
+        name: conversationId
+        required: true
+        schema: { type: string, format: uuid }
+      - in: query
+        name: cursor
+        schema: { type: string }
+      - in: query
+        name: limit
+        schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    get:
+      tags: [messages]
+      responses:
+        "200":
+          description: Page de messages v2
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/MessageV2' }
+                  nextCursor: { type: string, nullable: true }
+
+  /messages:
+    post:
+      tags: [messages]
+      summary: Envoi d’un message v2 (X25519 + Ed25519)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageV2' }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
