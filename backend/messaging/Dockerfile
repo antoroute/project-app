@@ -10,6 +10,10 @@ RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 # Build TypeScript
 COPY tsconfig.json ./
 COPY src ./src
+RUN node -v && npm -v \
+ && echo '--- TREE ---' \
+ && find src -maxdepth 3 -type f -print \
+ && echo '--- BUILD ---'
 RUN npm run build
 
 # ---- Runner (prod) ----
