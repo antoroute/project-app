@@ -4,9 +4,21 @@ import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 
-import dbPlugin from './plugins/db.js';
-import enforceVersion from './middlewares/enforceVersion.js';
-import authRoutes from './routes/auth.js';
+import dbPlugin from './plugins/db';
+import enforceVersion from './middlewares/enforceVersion';
+import authRoutes from './routes/auth';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    db: {
+      query: (q: string, p?: any[]) => Promise<any>;
+      one: (q: string, p?: any[]) => Promise<any>;
+      any: (q: string, p?: any[]) => Promise<any[]>;
+      none: (q: string, p?: any[]) => Promise<void>;
+    };
+    authenticate: any;
+  }
+}
 
 async function build() {
   const app = Fastify({ logger: true });
@@ -16,27 +28,23 @@ async function build() {
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
   await app.register(fastifyJwt, {
-    secret: process.env.JWT_SECRET!,
-    sign: { iss: 'auth-service', aud: 'messaging'},
-    verify: { allowedIss: 'auth-service' }
+    secret: process.env.JWT_SECRET || 'dev-secret'
+    // NOTE: pas d'issuer/subject ici. On mettra iss/sub dans le payload lors du sign().
   });
 
-  // Helper d’auth pour routes protégées
   app.decorate('authenticate', async (req: any, reply: any) => {
     try { await req.jwtVerify(); }
-    catch { return reply.code(401).send({ error: 'unauthorized' }); }
+    catch { reply.code(401).send({ error: 'unauthorized' }); }
   });
 
-  // DB + santé
   await app.register(dbPlugin);
+
   app.get('/health', async () => ({ ok: true }));
 
-  // Enforcer version client + routes Auth
   await app.register(enforceVersion);
   await app.register(authRoutes, { prefix: '/auth' });
 
   const port = Number(process.env.PORT || 3000);
-  await app.listen({ host: '0.0.0.0', port });
+  await app.listen({ port, host: '0.0.0.0' });
 }
-
 build().catch((e) => { console.error(e); process.exit(1); });

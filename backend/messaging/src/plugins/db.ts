@@ -2,40 +2,27 @@
 // Plugin DB simple basé sur node-postgres (pg).
 // Adapte si tu utilises pg-promise ou autre ORM.
 
-import { FastifyInstance } from 'fastify';
+import { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
 import { Pool } from 'pg';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    db: Pool;
-  }
-}
-
-export default fp(async function (app: FastifyInstance) {
+const dbPlugin: FastifyPluginAsync = async (app) => {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL ||
-      `postgres://postgres:postgres@postgres:5432/postgres`,
+    connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@postgres:5432/postgres',
   });
 
-  // expose un petit helper
   app.decorate('db', {
-    query: (text: string, params?: any[]) => pool.query(text, params),
-    one: async (text: string, params?: any[]) => {
-      const r = await pool.query(text, params);
-      if (r.rows.length === 0) throw new Error('No rows');
+    query: (q: string, p?: any[]) => pool.query(q, p),
+    one: async (q: string, p?: any[]) => {
+      const r = await pool.query(q, p);
+      if (!r.rows.length) throw new Error('No rows');
       return r.rows[0];
     },
-    any: async (text: string, params?: any[]) => {
-      const r = await pool.query(text, params);
-      return r.rows;
-    },
-    none: async (text: string, params?: any[]) => {
-      await pool.query(text, params);
-    },
+    any: async (q: string, p?: any[]) => (await pool.query(q, p)).rows,
+    none: async (q: string, p?: any[]) => { await pool.query(q, p); }
   });
 
-  app.addHook('onClose', async () => {
-    await pool.end();
-  });
-});
+  app.addHook('onClose', async () => { await pool.end(); });
+};
+
+export default fp(dbPlugin);
