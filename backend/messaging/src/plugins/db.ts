@@ -1,14 +1,12 @@
-// backend/messaging/src/plugins/db.ts
-// Plugin DB simple basé sur node-postgres (pg).
-// Adapte si tu utilises pg-promise ou autre ORM.
-
-import { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
-import { Pool } from 'pg';
+import pg from 'pg';
+const { Pool } = pg;
 
 const dbPlugin: FastifyPluginAsync = async (app) => {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@postgres:5432/postgres',
+    connectionString:
+      process.env.DATABASE_URL || 'postgres://postgres:postgres@postgres:5432/postgres',
   });
 
   app.decorate('db', {
@@ -19,10 +17,14 @@ const dbPlugin: FastifyPluginAsync = async (app) => {
       return r.rows[0];
     },
     any: async (q: string, p?: any[]) => (await pool.query(q, p)).rows,
-    none: async (q: string, p?: any[]) => { await pool.query(q, p); }
+    none: async (q: string, p?: any[]) => {
+      await pool.query(q, p);
+    },
   });
 
-  app.addHook('onClose', async () => { await pool.end(); });
+  app.addHook('onClose', async () => {
+    await pool.end();
+  });
 };
 
 export default fp(dbPlugin);

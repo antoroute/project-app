@@ -1,10 +1,13 @@
-import { FastifyPluginAsync } from 'fastify';
+// ESM + NodeNext + 'pg' (CommonJS) : utiliser l'import par défaut puis destructurer.
+import type { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
-import { Pool } from 'pg';
+import pg from 'pg';
+const { Pool } = pg;
 
 const dbPlugin: FastifyPluginAsync = async (app) => {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@postgres:5432/postgres',
+    connectionString:
+      process.env.DATABASE_URL || 'postgres://postgres:postgres@postgres:5432/postgres',
   });
 
   app.decorate('db', {
@@ -15,10 +18,14 @@ const dbPlugin: FastifyPluginAsync = async (app) => {
       return r.rows[0];
     },
     any: async (q: string, p?: any[]) => (await pool.query(q, p)).rows,
-    none: async (q: string, p?: any[]) => { await pool.query(q, p); }
+    none: async (q: string, p?: any[]) => {
+      await pool.query(q, p);
+    },
   });
 
-  app.addHook('onClose', async () => { await pool.end(); });
+  app.addHook('onClose', async () => {
+    await pool.end();
+  });
 };
 
 export default fp(dbPlugin);

@@ -11,16 +11,16 @@ import fastifyHelmet from '@fastify/helmet';
 import { Server as IOServer } from 'socket.io';
 import http from 'node:http';
 
-import dbPlugin from './plugins/db';
-import socketAuth from './middlewares/socketAuth';
+import dbPlugin from './plugins/db.js';
+import socketAuth from './middlewares/socketAuth.js';
 
-import keysDevicesRoutes from './routes/keys.devices';
-import messagesV2Routes from './routes/messages.v2';
-import conversationsRoutes from './routes/conversations';
-import groupsRoutes from './routes/groups';
+import keysDevicesRoutes from './routes/keys.devices.js';
+import messagesV2Routes from './routes/messages.v2.js';
+import conversationsRoutes from './routes/conversations.js';
+import groupsRoutes from './routes/groups.js';
 
-import { initPresenceService } from './services/presence';
-import { initAclService } from './services/acl';
+import { initPresenceService } from './services/presence.js';
+import { initAclService } from './services/acl.js';
 
 declare module 'fastify' {
   interface FastifyInstance {

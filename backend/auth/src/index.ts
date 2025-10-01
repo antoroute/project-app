@@ -1,31 +1,25 @@
+import type { FastifyPluginAsync } from 'fastify';
+
 import Fastify from 'fastify';
 import fastifyJwt from '@fastify/jwt';
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 
-import dbPlugin from './plugins/db';
-import enforceVersion from './middlewares/enforceVersion';
-import authRoutes from './routes/auth';
-
-declare module 'fastify' {
-  interface FastifyInstance {
-    db: {
-      query: (q: string, p?: any[]) => Promise<any>;
-      one: (q: string, p?: any[]) => Promise<any>;
-      any: (q: string, p?: any[]) => Promise<any[]>;
-      none: (q: string, p?: any[]) => Promise<void>;
-    };
-    authenticate: any;
-  }
-}
+import dbPlugin from './plugins/db.js';
+import enforceVersion from './middlewares/enforceVersion.js';
+import authRoutes from './routes/auth.js';
 
 async function build() {
   const app = Fastify({ logger: true });
 
   await app.register(fastifyHelmet, { contentSecurityPolicy: false });
   await app.register(fastifyCors, { origin: true, credentials: true });
-  await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
+  const rateLimitPlugin = rateLimit as unknown as FastifyPluginAsync<{ max: number; timeWindow: string }>;
+  await app.register(rateLimitPlugin, {
+    max: 100,
+    timeWindow: '1 minute'
+  });
 
   await app.register(fastifyJwt, {
     secret: process.env.JWT_SECRET || 'dev-secret'
