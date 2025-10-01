@@ -13,7 +13,6 @@ import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
 import authRoutes from './routes/auth.js';
 
-
 async function build() {
   const app = Fastify({ logger: true });
 

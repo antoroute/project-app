@@ -1,0 +1,9 @@
+declare module './plugins/db.js';
+declare module './middlewares/socketAuth.js';
+declare module './routes/keys.devices.js';
+declare module './routes/messages.v2.js';
+declare module './routes/conversations.js';
+declare module './routes/groups.js';
+declare module './services/presence.js';
+declare module './services/acl.js';
+declare module './schemas/messageV2.schema.js';

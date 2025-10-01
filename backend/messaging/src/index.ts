@@ -13,12 +13,10 @@ import { Server as IOServer } from 'socket.io';
 
 import dbPlugin from './plugins/db.js';
 import socketAuth from './middlewares/socketAuth.js';
-
 import keysDevicesRoutes from './routes/keys.devices.js';
 import messagesV2Routes from './routes/messages.v2.js';
 import conversationsRoutes from './routes/conversations.js';
 import groupsRoutes from './routes/groups.js';
-
 import { initPresenceService } from './services/presence.js';
 import { initAclService } from './services/acl.js';
 
