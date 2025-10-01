@@ -1,6 +1,21 @@
-// Déclarations Fastify côté Auth (db, authenticate, jwt)
+// backend/auth/src/types/fastify.d.ts
+import type {
+  FastifyInstance as FI,
+  RawServerDefault,
+  RawRequestDefaultExpression,
+  RawReplyDefaultExpression,
+  FastifyBaseLogger,
+  FastifyTypeProviderDefault
+} from 'fastify';
+
 declare module 'fastify' {
-  interface FastifyInstance {
+  interface FastifyInstance<
+    RawServer = RawServerDefault,
+    RawRequest = RawRequestDefaultExpression,
+    RawReply = RawReplyDefaultExpression,
+    Logger = FastifyBaseLogger,
+    TypeProvider = FastifyTypeProviderDefault
+  > {
     db: {
       query: (text: string, params?: any[]) => Promise<any>;
       one: (text: string, params?: any[]) => Promise<any>;

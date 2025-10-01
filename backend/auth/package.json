@@ -13,7 +13,6 @@
     "@fastify/helmet": "^13.0.0",
     "@fastify/jwt": "^9.0.0",
     "@fastify/rate-limit": "^10.0.0",
-    "@sinclair/typebox": "^0.32.33",
     "fastify": "^4.26.2",
     "fastify-plugin": "^4.5.1",
     "pg": "^8.11.5"

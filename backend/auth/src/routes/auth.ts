@@ -1,16 +1,20 @@
-import { FastifyInstance } from 'fastify';
-import { Type } from '@sinclair/typebox';
+// backend/auth/src/routes/auth.ts
+// Auth avec scrypt (crypto natif Node) — aucun module natif à compiler.
+
+import type { FastifyInstance } from 'fastify';
 import { randomBytes, scrypt as _scrypt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 
 const scrypt = promisify(_scrypt);
 
-const SCRYPT_N = 16384;
+// Paramètres scrypt (équilibrés sécurité/latence)
+const SCRYPT_N = 16384; // 2^14
 const SCRYPT_r = 8;
 const SCRYPT_p = 1;
-const KEYLEN = 64;
-const SALT_LEN = 16;
+const KEYLEN = 64; // bytes
+const SALT_LEN = 16; // 128 bits
 
+// Format stocké: "scrypt$N$r$p$saltB64$keyB64"
 async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(SALT_LEN);
   const key = (await scrypt(password, salt, KEYLEN, { N: SCRYPT_N, r: SCRYPT_r, p: SCRYPT_p })) as Buffer;
@@ -20,29 +24,26 @@ async function hashPassword(password: string): Promise<string> {
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parts = stored.split('$');
   if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
+
   const N = parseInt(parts[1], 10);
   const r = parseInt(parts[2], 10);
   const p = parseInt(parts[3], 10);
   const salt = Buffer.from(parts[4], 'base64');
   const key = Buffer.from(parts[5], 'base64');
+
   const derived = (await scrypt(password, salt, key.length, { N, r, p })) as Buffer;
   return timingSafeEqual(derived, key);
 }
 
-const RegisterBody = Type.Object({
-  email: Type.String({ format: 'email' }),
-  username: Type.String({ minLength: 3, maxLength: 64 }),
-  password: Type.String({ minLength: 8 })
-});
-
-const LoginBody = Type.Object({
-  email: Type.String({ format: 'email' }),
-  password: Type.String({ minLength: 8 })
-});
-
 export default async function routes(app: FastifyInstance) {
-  app.post('/register', { schema: { body: RegisterBody } }, async (req: any, reply: any) => {
-    const { email, username, password } = req.body as any;
+  // POST /auth/register
+  app.post('/register', async (req: any, reply: any) => {
+    const { email, username, password } = (req.body ?? {}) as { email?: string; username?: string; password?: string };
+
+    if (!email || !username || !password || password.length < 8) {
+      return reply.code(400).send({ error: 'invalid_payload' });
+    }
+
     const hash = await hashPassword(password);
     try {
       const user = await app.db.one(
@@ -51,7 +52,7 @@ export default async function routes(app: FastifyInstance) {
          RETURNING id, email, username, created_at`,
         [email, username, hash]
       );
-      reply.code(201).send(user);
+      return reply.code(201).send(user);
     } catch (e: any) {
       if (String(e.message).includes('duplicate key')) {
         return reply.code(409).send({ error: 'email_exists' });
@@ -60,12 +61,14 @@ export default async function routes(app: FastifyInstance) {
     }
   });
 
-  app.post('/login', { schema: { body: LoginBody } }, async (req: any, reply: any) => {
-    const { email, password } = req.body as any;
-    const row = await app.db.one(
-      `SELECT id, email, username, password FROM users WHERE email=$1`,
-      [email]
-    ).catch(() => null);
+  // POST /auth/login
+  app.post('/login', async (req: any, reply: any) => {
+    const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
+    if (!email || !password) return reply.code(400).send({ error: 'invalid_payload' });
+
+    const row = await app.db
+      .one(`SELECT id, email, username, password FROM users WHERE email=$1`, [email])
+      .catch(() => null);
     if (!row) return reply.code(401).send({ error: 'invalid_credentials' });
 
     const ok = await verifyPassword(password, row.password);
@@ -83,14 +86,18 @@ export default async function routes(app: FastifyInstance) {
     return reply.send({ access, refresh, user: { id: row.id, email: row.email, username: row.username } });
   });
 
+  // POST /auth/refresh
   app.post('/refresh', async (req: any, reply: any) => {
     const auth = req.headers.authorization;
     if (!auth?.startsWith('Bearer ')) return reply.code(401).send({ error: 'no_token' });
     const token = auth.slice(7);
 
     let payload: any;
-    try { payload = await app.jwt.verify(token); }
-    catch { return reply.code(401).send({ error: 'invalid_token' }); }
+    try {
+      payload = await app.jwt.verify(token);
+    } catch {
+      return reply.code(401).send({ error: 'invalid_token' });
+    }
     if (payload.type !== 'refresh') return reply.code(400).send({ error: 'not_refresh' });
 
     const ok = await app.db.any(
@@ -106,8 +113,11 @@ export default async function routes(app: FastifyInstance) {
     return reply.send({ access });
   });
 
-  app.get('/me', { onRequest: [app.authenticate] }, async (req: any, reply: any) => {
-    const userId = (req.user as any).sub;
+  // GET /auth/me
+  app.get('/me', { onRequest: [(app as any).authenticate] }, async (req: any, reply: any) => {
+    const userId = (req.user as any)?.sub;
+    if (!userId) return reply.code(401).send({ error: 'unauthorized' });
+
     const user = await app.db.one(
       `SELECT id, email, username, created_at FROM users WHERE id=$1`,
       [userId]
@@ -115,10 +125,12 @@ export default async function routes(app: FastifyInstance) {
     return user;
   });
 
+  // POST /auth/logout
   app.post('/logout', async (req: any, reply: any) => {
     const auth = req.headers.authorization;
     if (!auth?.startsWith('Bearer ')) return reply.code(400).send({ ok: true });
     const token = auth.slice(7);
+
     await app.db.none(
       `DELETE FROM refresh_tokens
         WHERE crypt($1, token_hash) = token_hash`,

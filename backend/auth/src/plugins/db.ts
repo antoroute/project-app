@@ -1,11 +1,11 @@
-import { FastifyInstance } from 'fastify';
+// backend/auth/src/plugins/db.ts
 import fp from 'fastify-plugin';
 import { Pool } from 'pg';
+import type { FastifyInstance } from 'fastify';
 
 export default fp(async function (app: FastifyInstance) {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL ||
-      'postgres://postgres:postgres@postgres:5432/postgres',
+    connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@postgres:5432/postgres',
   });
 
   app.decorate('db', {
