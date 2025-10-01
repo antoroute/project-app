@@ -9,7 +9,7 @@ import fastifyJwt from '@fastify/jwt';
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import { Server as IOServer } from 'socket.io';
-import http from 'node:http';
+import http from 'http';
 
 import dbPlugin from './plugins/db';
 import socketAuth from './middlewares/socketAuth';
