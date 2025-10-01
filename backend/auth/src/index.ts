@@ -9,9 +9,10 @@ import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 
-import dbPlugin from './plugins/db';
-import enforceVersion from './middlewares/enforceVersion';
-import authRoutes from './routes/auth';
+import dbPlugin from './plugins/db.js';
+import enforceVersion from './middlewares/enforceVersion.js';
+import authRoutes from './routes/auth.js';
+
 
 async function build() {
   const app = Fastify({ logger: true });

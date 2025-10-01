@@ -3,7 +3,7 @@
 // Émet "message:new" en WS sur la room conv:<id>.
 
 import { FastifyInstance } from 'fastify';
-import { SendMessageV2Schema, SendMessageV2Reply } from '../schemas/messageV2.schema';
+import { SendMessageV2Schema, SendMessageV2Reply } from '../schemas/messageV2.schema.js';
 import { Type } from '@sinclair/typebox';
 
 export default async function routes(app: FastifyInstance) {
