@@ -6,6 +6,12 @@ import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { Pool } from 'pg';
 
+declare module 'fastify' {
+  interface FastifyInstance {
+    db: Pool;
+  }
+}
+
 export default fp(async function (app: FastifyInstance) {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL ||

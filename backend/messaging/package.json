@@ -13,7 +13,7 @@
     "@fastify/helmet": "^13.0.0",
     "@fastify/jwt": "^9.0.0",
     "@fastify/rate-limit": "^10.0.0",
-    "@sinclair/typebox": "^0.32.33",
+    "@sinclair/typebox": "^0.32.35",
     "fastify": "^4.26.2",
     "fastify-plugin": "^4.5.1",
     "pg": "^8.11.5",
@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.11",
+    "@types/pg": "^8.10.2",
     "tsx": "^4.15.7",
     "typescript": "^5.5.4"
   },

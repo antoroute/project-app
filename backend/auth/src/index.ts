@@ -16,8 +16,9 @@ async function build() {
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
   await app.register(fastifyJwt, {
-    secret: process.env.JWT_SECRET || 'dev-secret',
-    sign: { issuer: 'project-app', audience: 'messaging' }
+    secret: process.env.JWT_SECRET!,
+    sign: { iss: 'auth-service', aud: 'messaging'},
+    verify: { allowedIss: 'auth-service' }
   });
 
   // Helper d’auth pour routes protégées
