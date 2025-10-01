@@ -1,4 +1,3 @@
-// backend/auth/src/plugins/db.ts
 import fp from 'fastify-plugin';
 import { Pool } from 'pg';
 import type { FastifyInstance } from 'fastify';

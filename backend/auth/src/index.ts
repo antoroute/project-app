@@ -1,8 +1,3 @@
-// Service Auth minimal pour la v2 (ESM + TS)
-// - JWT (HS256 par défaut ; passe à RS256 si tu préfères des clés privées/publiques)
-// - Helmet, CORS, Rate-limit
-// - /health et routes de base: register, login, refresh, me, logout
-
 import Fastify from 'fastify';
 import fastifyJwt from '@fastify/jwt';
 import fastifyCors from '@fastify/cors';
@@ -25,24 +20,22 @@ async function build() {
     sign: { issuer: 'project-app', audience: 'messaging' }
   });
 
-  // Expose a small helper for protected routes
+  // Helper d’auth pour routes protégées
   app.decorate('authenticate', async (req: any, reply: any) => {
-    try { await req.jwtVerify(); } catch { reply.code(401).send({ error: 'unauthorized' }); }
+    try { await req.jwtVerify(); }
+    catch { return reply.code(401).send({ error: 'unauthorized' }); }
   });
 
+  // DB + santé
   await app.register(dbPlugin);
-
-  // Health
   app.get('/health', async () => ({ ok: true }));
 
-  // Enforce client version >= 2 for protected and significant routes
+  // Enforcer version client + routes Auth
   await app.register(enforceVersion);
-
-  // Auth API
   await app.register(authRoutes, { prefix: '/auth' });
 
   const port = Number(process.env.PORT || 3000);
-  await app.listen({ port, host: '0.0.0.0' });
+  await app.listen({ host: '0.0.0.0', port });
 }
 
 build().catch((e) => { console.error(e); process.exit(1); });
