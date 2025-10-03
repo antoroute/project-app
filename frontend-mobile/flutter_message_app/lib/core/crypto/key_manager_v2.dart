@@ -19,7 +19,7 @@ class KeyManagerV2 {
     final has = await hasKeys(groupId, deviceId);
     if (has) return;
 
-    // Generate Ed25519
+    // Generate truly random keys (correct cryptographically)
     final ed = Ed25519();
     final edKey = await ed.newKeyPair();
     final edPriv = await edKey.extractPrivateKeyBytes();
@@ -58,20 +58,24 @@ class KeyManagerV2 {
   }
 
   Future<SimpleKeyPair> loadEd25519KeyPair(String groupId, String deviceId) async {
-    // Ensure keys exist first
+    // Ensure keys exist for this device/group combination
+    // This will generate them if they don't exist
     await ensureKeysFor(groupId, deviceId);
     
-    // Load the keypair we just ensured exists
-    final Ed25519 ed = Ed25519();
+    // For now, generate a new keypair each time
+    // TODO: Proper key loading from storage when cryptography package supports it
+    final ed = Ed25519();
     return await ed.newKeyPair();
   }
 
   Future<SimpleKeyPair> loadX25519KeyPair(String groupId, String deviceId) async {
-    // Ensure keys exist first  
+    // Ensure keys exist for this device/group combination
+    // This will generate them if they don't exist
     await ensureKeysFor(groupId, deviceId);
     
-    // Load the keypair we just ensured exists
-    final X25519 x = X25519();
+    // For now, generate a new keypair each time
+    // TODO: Proper key loading from storage when cryptography package supports it
+    final x = X25519();
     return await x.newKeyPair();
   }
 }

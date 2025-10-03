@@ -340,17 +340,17 @@ class ConversationProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('❌ sendMessage error: $e');
       
-      // Si c'est une erreur de clés manquantes, essayer de les publier automatiquement
-      if (e.toString().contains('length=0') || e.toString().contains('Failed assertion')) {
+      // Si c'est une erreur de clés manquantes, essayer UNE SEULE FOIS
+      if ((e.toString().contains('length=0') || e.toString().contains('Failed assertion')) && !plaintext.contains('🔧 RETRY:')) {
         try {
-          debugPrint('🔧 Tentative de publication automatique des clés...');
+          debugPrint('🔧 Tentative UNIQUE de publication automatique des clés...');
           final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
           final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
           await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
           
-          // Retry l'envoi du message
-          SnackbarService.showSuccess(context, 'Clés publiées, message renvoyé automatiquement');
-          await sendMessage(context, conversationId, plaintext);
+          // Retry une seule fois avec un marqueur pour éviter la boucle
+          SnackbarService.showSuccess(context, 'Clés publiées, nouvelle tentative');
+          await sendMessage(context, conversationId, '🔧 RETRY: $plaintext');
           return;
         } catch (retryError) {
           debugPrint('❌ Retry failed: $retryError');

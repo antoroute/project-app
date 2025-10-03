@@ -79,6 +79,7 @@ class GroupProvider extends ChangeNotifier {
       
       final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
       debugPrint('🔑 Clés générées - Sig: ${pubKeys['pk_sig']!.substring(0, 10)}..., KEM: ${pubKeys['pk_kem']!.substring(0, 10)}...');
+      debugPrint('🔑 Longueurs: Sig=${pubKeys['pk_sig']!.length}, KEM=${pubKeys['pk_kem']!.length}');
       
       final sigPub = pubKeys['pk_sig']!;
       final kemPub = pubKeys['pk_kem']!;
