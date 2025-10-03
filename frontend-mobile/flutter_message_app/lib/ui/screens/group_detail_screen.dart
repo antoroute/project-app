@@ -61,9 +61,15 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     final convProv  = context.read<ConversationProvider>();
 
     try {
+      debugPrint('🔄 Loading group detail for ${widget.groupId}');
       await groupProv.fetchGroupDetail(widget.groupId);
+      debugPrint('✅ Group detail loaded');
+      
       await groupProv.fetchGroupMembers(widget.groupId);
+      debugPrint('✅ Group members loaded');
+      
       await convProv.fetchConversations();
+      debugPrint('✅ Conversations loaded');
 
       // v2: creator flag unused
     } catch (error) {
@@ -84,7 +90,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     }
 
     final convProv = context.read<ConversationProvider>();
-    final groupProv = context.read<GroupProvider>();
 
     // 1) Compose la liste des participants
     final participants = Set<String>.from(_selectedUserIds)..add(currentUserId);
@@ -123,6 +128,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     final groupProv = context.watch<GroupProvider>();
     final convProv  = context.watch<ConversationProvider>();
     final String? currentUserId = context.read<AuthProvider>().userId;
+    
+    // Debug info
+    debugPrint('🔄 Group Detail - Members: ${groupProv.members.length}, Conversations: ${convProv.conversations.length}');
 
     // Trie : place l’utilisateur courant en dernier
     final members = List<Map<String, dynamic>>.from(groupProv.members);
@@ -266,13 +274,61 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               children: [
                 const Divider(height: 1),
 
-                // Liste des conversations
-                if (convs.isNotEmpty) ...[
+                // Section des membres + création de conversation
+                if (members.isNotEmpty) ...[
                   const Padding(
                     padding: EdgeInsets.all(8),
                     child: Text(
-                      'Conversations',
-                      style: TextStyle(fontSize: 18),
+                      'Membres du groupe',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Container(
+                    height: 200, // Hauteur fixe pour la liste des membres
+                    child: ListView.builder(
+                      itemCount: members.length,
+                      itemBuilder: (context, index) {
+                        final member = members[index];
+                        final isSelected = _selectedUserIds.contains(member['userId']);
+                        return CheckboxListTile(
+                          title: Text(member['username'] ?? member['email'] ?? 'Utilisateur'),
+                          subtitle: Text(member['email'] ?? ''),
+                          value: isSelected,
+                          onChanged: (bool? checked) {
+                            setState(() {
+                              if (checked == true) {
+                                _selectedUserIds.add(member['userId']);
+                              } else {
+                                _selectedUserIds.remove(member['userId']);
+                              }
+                            });
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+
+                const Divider(height: 1),
+
+                // Liste des conversations
+
+                if (convs.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Conversations',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.refresh),
+                          onPressed: _loadGroupData,
+                          tooltip: 'Actualiser',
+                        ),
+                      ],
                     ),
                   ),
                   Expanded(
@@ -281,7 +337,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                       itemBuilder: (context, index) {
                         final conv = convs[index];
                         return ListTile(
-                          title: Text('Conversation ${conv.conversationId}'),
+                          leading: const Icon(Icons.chat),
+                          title: Text('Conversation ${conv.conversationId.substring(0, 8)}...'),
+                          subtitle: Text('Type: ${conv.type}'),
                           onTap: () {
                             Navigator.push(
                               context,
@@ -296,14 +354,18 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                       },
                     ),
                   ),
-                ] else
-                  const Expanded(
-                    child: Center(child: Text('Aucune conversation')),
+                ] else ...[
+                  const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Text(
+                      'Conversations',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
                   ),
-
-                const Divider(height: 1),
-
-                // V2: conversation creation UI temporarily disabled
+                  const Expanded(
+                    child: Center(child: Text('Aucune conversation créée')),
+                  ),
+                ],
               ],
             ),
 
