@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
@@ -207,6 +208,14 @@ class ApiService {
     required String pkKemB64,
     int keyVersion = 1,
   }) async {
+    debugPrint('📤 publishGroupDeviceKey DEBUG:');
+    debugPrint('  - groupId: $groupId');
+    debugPrint('  - deviceId: $deviceId');
+    debugPrint('  - pkSigB64 length: ${pkSigB64.length}');
+    debugPrint('  - pkKemB64 length: ${pkKemB64.length}');
+    debugPrint('  - pkSigB64: ${pkSigB64.substring(0, min(10, pkSigB64.length))}...');
+    debugPrint('  - pkKemB64: ${pkKemB64.substring(0, min(10, pkKemB64.length))}...');
+    
     final headers = await _buildHeaders();
     final uri = Uri.parse('$_baseUrl/keys/group/$groupId/devices');
     final payload = jsonEncode({
@@ -215,7 +224,9 @@ class ApiService {
       'pk_kem': pkKemB64,
       'key_version': keyVersion,
     });
+    debugPrint('  - Payload envoyé: ${payload.length} chars');
     final res = await http.post(uri, headers: headers, body: payload);
+    debugPrint('  - Status code: ${res.statusCode}');
     if (res.statusCode == 201 || res.statusCode == 200) return;
     if (res.statusCode == 429) throw RateLimitException();
     throw Exception('Erreur ${res.statusCode} lors de la publication clé device.');
@@ -394,8 +405,27 @@ class ApiService {
     if (limit != null) query['limit'] = '$limit';
     final uri = Uri.parse('$_baseUrl/conversations/$conversationId/messages').replace(queryParameters: query);
     final res = await http.get(uri, headers: headers);
+    
+    debugPrint('📥 fetchMessagesV2 DEBUG:');
+    debugPrint('  - URL: $uri');
+    debugPrint('  - Status: ${res.statusCode}');
+    debugPrint('  - Body length: ${res.body.length}');
+    debugPrint('  - Body: ${res.body.length > 200 ? res.body.substring(0, 200) + "..." : res.body}');
+    
     if (res.statusCode == 200) {
       final Map<String, dynamic> parsed = jsonDecode(res.body) as Map<String, dynamic>;
+      debugPrint('  - Parsed type: ${parsed.runtimeType}');
+      debugPrint('  - Parsed keys: ${parsed.keys.toList()}');
+      
+      final itemsRaw = parsed['items'];
+      debugPrint('  - items type: ${itemsRaw.runtimeType}');
+      if (itemsRaw is List) {
+        debugPrint('  - items count: ${itemsRaw.length}');
+        for (int i = 0; i < itemsRaw.length; i++) {
+          debugPrint('    Item $i keys: ${(itemsRaw[i] as Map).keys.toList()}');
+        }
+      }
+      
       final items = (parsed['items'] as List).map((e) => MessageV2Model.fromJson(e as Map<String, dynamic>)).toList();
       return items;
     }

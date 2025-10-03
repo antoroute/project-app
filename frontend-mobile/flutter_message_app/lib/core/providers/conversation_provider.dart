@@ -220,19 +220,23 @@ class ConversationProvider extends ChangeNotifier {
         limit: limit,
         cursor: cursor,
       );
-      final List<Message> display = items.map((it) => Message(
-        id: it.messageId,
-        conversationId: it.convId,
-        senderId: (it.sender['userId'] as String),
-        encrypted: null,
-        iv: null,
-        encryptedKeys: const {},
-        signatureValid: true,
-        senderPublicKey: null,
-        timestamp: it.sentAt,
-        v2Data: it.toJson(), // Stocker toutes les données V2 pour le déchiffrement
-        decryptedText: null,
-      )).toList();
+      final List<Message> display = items.map((it) {
+        final senderUserId = (it.sender['userId'] as String?) ?? '';
+        debugPrint('📝 Parsing message ${it.messageId}: sender={$senderUserId}');
+        return Message(
+          id: it.messageId,
+          conversationId: it.convId,
+          senderId: senderUserId,
+          encrypted: null,
+          iv: null,
+          encryptedKeys: const {},
+          signatureValid: true,
+          senderPublicKey: null,
+          timestamp: it.sentAt,
+          v2Data: it.toJson(), // Stocker toutes les données V2 pour le déchiffrement
+          decryptedText: null,
+        );
+      }).toList();
       
       // Pour le chargement initial, remplacer complètement
       if (cursor == null) {

@@ -61,8 +61,21 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
+    const userId = (req.user as any).sub;
     const { id } = req.params as any;
     const { cursor, limit = 50 } = req.query as any;
+
+    // ACL: vérifier que l'utilisateur est membre de la conversation
+    const membership = await app.db.any(
+      `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
+      [id, userId]
+    );
+    console.log(`📥 GET /conversations/${id}/messages - userId: ${userId}, membership: ${membership.length > 0 ? 'OK' : 'FORBIDDEN'}`);
+    
+    if (membership.length === 0) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
+
     const rows = await app.db.any(`
       SELECT id, conversation_id as "convId",
              encode(sender_eph_pub,'base64') as "sender_eph_pub",
@@ -78,6 +91,7 @@ export default async function routes(app: FastifyInstance) {
        ORDER BY sent_at DESC
        LIMIT $3
     `, [id, cursor ? new Date(Number(cursor)) : null, limit]);
+    console.log(`📥 Messages found for conversation ${id}: ${rows.length} messages`);
     return { items: rows, nextCursor: rows.length ? rows[rows.length-1].sentAt : null };
   });
 }

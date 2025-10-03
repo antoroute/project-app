@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -86,10 +87,17 @@ class MessageCipherV2 {
 
     // wrap mk per recipient
     final List<Map<String, String>> recipients = [];
+    var validRecipientsCount = 0;
     for (final entry in recipientsDevices) {
       debugPrint('🔐 Processing recipient ${entry.userId}/${entry.deviceId}:');
       debugPrint('  - pkKemB64 length: ${entry.pkKemB64.length}');
       debugPrint('  - pkKemB64: ${entry.pkKemB64.substring(0, math.min(10, entry.pkKemB64.length))}...');
+      
+      // Skip recipients with empty keys (they haven't published their keys yet)
+      if (entry.pkKemB64.isEmpty) {
+        debugPrint('⚠️  Skipping recipient ${entry.userId}/${entry.deviceId} - no keys published');
+        continue;
+      }
       
       final recipientPub = SimplePublicKey(
         base64.decode(entry.pkKemB64),
@@ -115,7 +123,15 @@ class MessageCipherV2 {
         'wrap': _b64(wrapped),
         'nonce': _b64(wrapNonce),
       });
+      validRecipientsCount++;
     }
+
+    // Check if we have at least one valid recipient
+    if (validRecipientsCount == 0) {
+      throw Exception('Aucun destinataire valide trouvé - tous les utilisateurs doivent publier leurs clés d\'abord');
+    }
+    
+    debugPrint('✅ ${validRecipientsCount} destinataire(s) valide(s) traité(s)');
 
     // assemble payload (without sig)
     final Map<String, dynamic> payload = {
@@ -139,7 +155,7 @@ class MessageCipherV2 {
     // sign
     debugPrint('📝 Signature pour sender $senderDeviceId:');
     final edKey = await KeyManagerV2.instance.loadEd25519KeyPair(groupId, senderDeviceId);
-    debugPrint('  - Ed25519 keypair obtenu: ${edKey != null ? "✅" : "❌"}');
+    debugPrint('  - Ed25519 keypair obtenu: ✅');
     final ed = Ed25519();
     final signature = await ed.sign(_concatCanonical(payload), keyPair: edKey);
     debugPrint('  - Signature créée: ${signature.bytes.length} bytes');
@@ -209,11 +225,30 @@ class MessageCipherV2 {
     // verify signature with sender Ed25519 public key from directory
     final ed = Ed25519();
     final entries = await keyDirectory.getGroupDevices(groupId);
+    debugPrint('🔍 Debug récupération depuis annuaire:');
+    debugPrint('  - Nombre d\'entrées trouvées: ${entries.length}');
+    for (final entry in entries) {
+      debugPrint('    📱 ${entry.userId}/${entry.deviceId}:');
+      debugPrint('      - pk_sig: ${entry.pkSigB64.length} chars');
+      debugPrint('      - pk_kem: ${entry.pkKemB64.length} chars');
+    }
+    
     final senderEntry = entries.firstWhere(
       (e) => e.userId == senderUserId && e.deviceId == senderDeviceId,
       orElse: () => throw Exception('Missing sender public key in directory'),
     );
-    final pub = SimplePublicKey(base64.decode(senderEntry.pkSigB64), type: KeyPairType.ed25519);
+    debugPrint('🔍 Debug vérification signature:');
+    debugPrint('  - senderEntry.pkSigB64 length: ${senderEntry.pkSigB64.length}');
+    debugPrint('  - senderEntry.pkSigB64: ${senderEntry.pkSigB64.substring(0, math.min(10, senderEntry.pkSigB64.length))}...');
+    
+    if (senderEntry.pkSigB64.isEmpty) {
+      throw Exception('⛔ senderEntry.pkSigB64 est vide - impossible de vérifier la signature');
+    }
+    
+    final sigPubBytes = base64.decode(senderEntry.pkSigB64);
+    debugPrint('  - sigPubBytes length après decode: ${sigPubBytes.length}');
+    
+    final pub = SimplePublicKey(sigPubBytes, type: KeyPairType.ed25519);
     final sigBytes = base64.decode(messageV2['sig'] as String);
     final verified = await ed.verify(
       _concatCanonical(messageV2),
