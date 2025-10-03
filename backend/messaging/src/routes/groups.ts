@@ -66,25 +66,27 @@ export default async function routes(app: FastifyInstance) {
     const { id: groupId } = req.params as any;
 
     // Vérifie que l'utilisateur est membre du groupe
-    const membership = await app.db.oneOrNone(
+    const membership = await app.db.any(
       `SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`,
       [userId, groupId]
     );
     
-    if (!membership) {
+    if (membership.length === 0) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
     // Récupère les détails du groupe
-    const group = await app.db.oneOrNone(
+    const groups = await app.db.any(
       `SELECT g.id, g.name, g.creator_id, g.created_at
         FROM groups g WHERE g.id=$1`,
       [groupId]
     );
 
-    if (!group) {
+    if (groups.length === 0) {
       return reply.code(404).send({ error: 'group_not_found' });
     }
+
+    const group = groups[0];
 
     return {
       id: group.id,
@@ -104,12 +106,12 @@ export default async function routes(app: FastifyInstance) {
     const { id: groupId } = req.params as any;
 
     // Vérifie que l'utilisateur est membre du groupe
-    const membership = await app.db.oneOrNone(
+    const membership = await app.db.any(
       `SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`,
       [userId, groupId]
     );
     
-    if (!membership) {
+    if (membership.length === 0) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
