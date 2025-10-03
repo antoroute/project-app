@@ -318,6 +318,9 @@ class ConversationProvider extends ChangeNotifier {
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
       
+      // S'assurer que nos clés device sont générées
+      await KeyManagerV2.instance.ensureKeysFor(groupId, myDeviceId);
+      
       // Vérifier et publier nos clés si nécessaire
       await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
       
@@ -367,6 +370,10 @@ class ConversationProvider extends ChangeNotifier {
       
       if (myKeysInGroup.isEmpty) {
         debugPrint('🔑 Publication automatique des clés manquantes pour le groupe $groupId');
+        
+        // S'assurer que les clés device sont générées
+        await KeyManagerV2.instance.ensureKeysFor(groupId, deviceId);
+        
         final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
         final sigPub = pubKeys['pk_sig']!;
         final kemPub = pubKeys['pk_kem']!;

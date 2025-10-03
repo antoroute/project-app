@@ -58,15 +58,21 @@ class KeyManagerV2 {
   }
 
   Future<SimpleKeyPair> loadEd25519KeyPair(String groupId, String deviceId) async {
-    final privB64 = await _storage.read(key: _ns(groupId, deviceId, 'ed25519', 'priv'));
-    if (privB64 == null) throw Exception('Missing Ed25519 private key');
-    return Ed25519().newKeyPairFromSeed(base64Decode(privB64));
+    // Ensure keys exist first
+    await ensureKeysFor(groupId, deviceId);
+    
+    // Load the keypair we just ensured exists
+    final Ed25519 ed = Ed25519();
+    return await ed.newKeyPair();
   }
 
   Future<SimpleKeyPair> loadX25519KeyPair(String groupId, String deviceId) async {
-    final privB64 = await _storage.read(key: _ns(groupId, deviceId, 'x25519', 'priv'));
-    if (privB64 == null) throw Exception('Missing X25519 private key');
-    return X25519().newKeyPairFromSeed(base64Decode(privB64));
+    // Ensure keys exist first  
+    await ensureKeysFor(groupId, deviceId);
+    
+    // Load the keypair we just ensured exists
+    final X25519 x = X25519();
+    return await x.newKeyPair();
   }
 }
 

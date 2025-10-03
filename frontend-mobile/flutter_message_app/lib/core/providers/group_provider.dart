@@ -70,9 +70,16 @@ class GroupProvider extends ChangeNotifier {
         groupKEMPubKeyB64: groupKEMPubKeyB64,
       );
       
-      // Publier les clés du créateur pour permettre l'envoi de messages
+      // Générer et publier les clés du créateur pour permettre l'envoi de messages
       final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      
+      // S'assurer que les clés device sont générées
+      debugPrint('🔑 Génération des clés device pour group: $groupId, device: $deviceId');
+      await KeyManagerV2.instance.ensureKeysFor(groupId, deviceId);
+      
       final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+      debugPrint('🔑 Clés générées - Sig: ${pubKeys['pk_sig']!.substring(0, 10)}..., KEM: ${pubKeys['pk_kem']!.substring(0, 10)}...');
+      
       final sigPub = pubKeys['pk_sig']!;
       final kemPub = pubKeys['pk_kem']!;
       
