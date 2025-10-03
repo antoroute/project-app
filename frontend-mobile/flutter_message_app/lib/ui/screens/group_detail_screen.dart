@@ -1,9 +1,9 @@
-import 'dart:convert';
+// Legacy creation flow code removed for v2
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:pointycastle/export.dart' as pc;
+// RSA removed in v2
 import 'package:flutter/services.dart';
 
 import '../../core/providers/auth_provider.dart';
@@ -11,9 +11,8 @@ import '../../core/providers/group_provider.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/services/snackbar_service.dart';
 import '../../core/services/websocket_service.dart';
-import '../../core/crypto/aes_utils.dart';
-import '../../core/crypto/rsa_key_utils.dart';
-import '../../core/crypto/key_manager.dart';
+// Legacy creation via RSA removed in v2
+import 'my_devices_screen.dart';
 import 'join_requests_screen.dart';
 import 'conversation_screen.dart';
 
@@ -34,12 +33,10 @@ class GroupDetailScreen extends StatefulWidget {
 
 class _GroupDetailScreenState extends State<GroupDetailScreen> {
   bool _loading = true;
-  bool _isCreator = false;
+  // bool _isCreator = false; // unused in v2
   final Set<String> _selectedUserIds = {};
 
-  Uint8List? _cachedAESKey;
-  Map<String, String>? _cachedEncryptedSecrets;
-  String? _cachedSignature;
+  // Legacy fields removed
 
   @override
   void initState() {
@@ -59,7 +56,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   Future<void> _loadGroupData() async {
     setState(() => _loading = true);
 
-    final String? currentUserId = context.read<AuthProvider>().userId;
+    // final String? currentUserId = context.read<AuthProvider>().userId; // unused
     final groupProv = context.read<GroupProvider>();
     final convProv  = context.read<ConversationProvider>();
 
@@ -68,9 +65,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       await groupProv.fetchGroupMembers(widget.groupId);
       await convProv.fetchConversations();
 
-      // Détermine si l’utilisateur courant est le créateur
-      final creatorId = groupProv.groupDetail?['creator_id'] as String?;
-      _isCreator = currentUserId != null && creatorId == currentUserId;
+      // v2: creator flag unused
     } catch (error) {
       SnackbarService.showError(
         context,
@@ -94,54 +89,15 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     // 1) Compose la liste des participants
     final participants = Set<String>.from(_selectedUserIds)..add(currentUserId);
 
-    // 2) Prépare l’enveloppe chiffrée
-    if (_cachedAESKey == null || _cachedEncryptedSecrets == null) {
-      // Génère une clé AES
-      _cachedAESKey = AesUtils.generateRandomAESKey();
-      final Map<String, String> secrets = {};
-
-      // Chiffre la clé AES pour chaque participant
-      for (final uid in participants) {
-        final member = groupProv.members.firstWhere(
-          (m) => m['userId'] == uid,
-          orElse: () => <String, dynamic>{},
-        );
-        final String? pem = member['publicKeyGroup'] as String?;
-        if (pem == null) {
-          throw Exception('Clé publique absente pour $uid');
-        }
-        final Uint8List cipherBytes =
-            RsaKeyUtils.encryptAESKeyWithRSAOAEP(pem, _cachedAESKey!);
-        secrets[uid] = base64.encode(cipherBytes);
-      }
-      _cachedEncryptedSecrets = secrets;
-
-      // Récupère la clé privée du groupe pour signer
-      final kp = await KeyManager().getKeyPairForGroup(widget.groupId);
-      if (kp == null) {
-        throw Exception('Clé privée du groupe manquante');
-      }
-      final signer = pc.Signer('SHA-256/RSA')
-        ..init(
-          true,
-          pc.PrivateKeyParameter<pc.RSAPrivateKey>(kp.privateKey as pc.RSAPrivateKey),
-        );
-
-      // Signature de l’enveloppe JSON
-      final String payload = jsonEncode(_cachedEncryptedSecrets);
-      final pc.RSASignature signature = signer
-          .generateSignature(Uint8List.fromList(utf8.encode(payload)))
-        as pc.RSASignature;
-      _cachedSignature = base64.encode(signature.bytes);
-    }
+    // 2) V2: conversation creation rework pending
 
     // 3) Appel à l’API
     try {
       final String newConversationId = await convProv.createConversation(
         widget.groupId,
         participants.toList(),
-        _cachedEncryptedSecrets!,
-        _cachedSignature!,
+        <String,String>{},
+        '',
       );
       SnackbarService.showSuccess(context, 'Conversation créée !');
       Navigator.pushReplacement(
@@ -158,9 +114,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       // Réinitialisation
       setState(() {
         _selectedUserIds.clear();
-        _cachedAESKey = null;
-        _cachedEncryptedSecrets = null;
-        _cachedSignature = null;
       });
     }
   }
@@ -270,6 +223,20 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
             },
           ),
 
+          // Bouton 'Mes appareils'
+          IconButton(
+            icon: const Icon(Icons.devices),
+            tooltip: 'Mes appareils',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MyDevicesScreen(groupId: widget.groupId),
+                ),
+              );
+            },
+          ),
+
           // Bouton demandes d’adhésion
           IconButton(
             icon: const Icon(Icons.how_to_reg),
@@ -336,43 +303,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
 
                 const Divider(height: 1),
 
-                // Sélecteur d’utilisateurs pour créer une conversation
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Text(
-                    'Créer une nouvelle conversation',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: members.length,
-                    itemBuilder: (context, index) {
-                      final member = members[index];
-                      final String userId = member['userId'] as String;
-                      final String username =
-                          member['username'] as String? ?? 'Utilisateur';
-                      final bool isSelf = userId == currentUserId;
-
-                      return CheckboxListTile(
-                        title: Text(username),
-                        subtitle: Text(member['email'] as String? ?? ''),
-                        value: _selectedUserIds.contains(userId),
-                        onChanged: isSelf
-                            ? null
-                            : (bool? selected) {
-                                setState(() {
-                                  if (selected == true) {
-                                    _selectedUserIds.add(userId);
-                                  } else {
-                                    _selectedUserIds.remove(userId);
-                                  }
-                                });
-                              },
-                      );
-                    },
-                  ),
-                ),
+                // V2: conversation creation UI temporarily disabled
               ],
             ),
 

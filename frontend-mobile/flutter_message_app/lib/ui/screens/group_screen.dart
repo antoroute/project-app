@@ -1,12 +1,9 @@
-import 'dart:math';
-import 'dart:typed_data';
+// Legacy RSA-based flow removed in v2
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:pointycastle/export.dart' as pc;
 import 'package:flutter_message_app/core/providers/group_provider.dart';
+import 'package:flutter_message_app/core/services/group_key_service.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
-import 'package:flutter_message_app/core/crypto/key_manager.dart';
-import 'package:flutter_message_app/core/crypto/rsa_key_utils.dart';
 import 'package:flutter_message_app/ui/screens/qr_scan_screen.dart';
 
 class GroupScreen extends StatefulWidget {
@@ -31,40 +28,18 @@ class _GroupScreenState extends State<GroupScreen> {
   Future<void> _createGroup() async {
     setState(() => _loading = true);
     try {
-      // 1. Génération d’un SecureRandom
-      final secureRandom = pc.FortunaRandom();
-      secureRandom.seed(pc.KeyParameter(
-        Uint8List.fromList(
-          List<int>.generate(32, (_) => Random.secure().nextInt(256)),
-        ),
-      ));
-      // 2. Génération de la paire RSA
-      final keyGenerator = pc.RSAKeyGenerator();
-      keyGenerator.init(
-        pc.ParametersWithRandom(
-          pc.RSAKeyGeneratorParameters(
-            BigInt.parse('65537'),
-            4096,
-            64,
-          ),
-          secureRandom,
-        ),
-      );
-      final pc.AsymmetricKeyPair pair = keyGenerator.generateKeyPair();
-      final String publicPem = RsaKeyUtils.encodePublicKeyToPem(
-        pair.publicKey as pc.RSAPublicKey,
-      );
-
-      // 3. Appel au provider
+      // Générer les clés du groupe pour la v2
+      final groupSigningPubKey = await GroupKeyService.instance.getGroupSigningPublicKeyB64(_groupNameController.text.trim());
+      final groupKEMPubKey = await GroupKeyService.instance.getGroupKEMPublicKeyB64(_groupNameController.text.trim());
+      
       final groupProvider =
           Provider.of<GroupProvider>(context, listen: false);
-      final String realGroupId = await groupProvider.createGroup(
-        _groupNameController.text.trim(),
-        publicPem,
+      await groupProvider.createGroupWithMembers(
+        groupName: _groupNameController.text.trim(),
+        memberEmails: [],
+        groupSigningPubKeyB64: groupSigningPubKey,
+        groupKEMPubKeyB64: groupKEMPubKey,
       );
-
-      // 4. Stockage de la paire pour ce groupe
-      await KeyManager().storeKeyPairForGroup(realGroupId, pair);
 
       SnackbarService.showSuccess(
           context, 'Groupe créé avec succès !');
@@ -80,46 +55,22 @@ class _GroupScreenState extends State<GroupScreen> {
   Future<void> _joinGroup() async {
     setState(() => _loading = true);
     final String groupId = _groupIdController.text.trim();
-    final existing = await KeyManager().getKeyPairForGroup(groupId);
-    if (existing != null) {
-      SnackbarService.showInfo(
-        context,
-        "Vous avez déjà une demande ou vous êtes membre",
-      );
-      setState(() => _loading = false);
-      return;
-    }
     try {
-      final secureRandom = pc.FortunaRandom();
-      secureRandom.seed(pc.KeyParameter(
-        Uint8List.fromList(
-          List<int>.generate(32, (_) => Random.secure().nextInt(256)),
-        ),
-      ));
-      final keyGenerator = pc.RSAKeyGenerator();
-      keyGenerator.init(
-        pc.ParametersWithRandom(
-          pc.RSAKeyGeneratorParameters(
-            BigInt.parse('65537'),
-            4096,
-            64,
-          ),
-          secureRandom,
-        ),
-      );
-      final pc.AsymmetricKeyPair pair = keyGenerator.generateKeyPair();
-      final String publicPem = RsaKeyUtils.encodePublicKeyToPem(
-        pair.publicKey as pc.RSAPublicKey,
-      );
-
+      // Générer les clés du groupe pour la v2
+      final groupSigningPubKey = await GroupKeyService.instance.getGroupSigningPublicKeyB64(groupId);
+      final groupKEMPubKey = await GroupKeyService.instance.getGroupKEMPublicKeyB64(groupId);
+      
       final groupProvider =
           Provider.of<GroupProvider>(context, listen: false);
-      await groupProvider.sendJoinRequest(groupId, publicPem);
-
-      await KeyManager().storeKeyPairForGroup(groupId, pair);
+      await groupProvider.sendJoinRequest(
+        groupId, 
+        '', 
+        groupSigningPubKeyB64: groupSigningPubKey,
+        groupKEMPubKeyB64: groupKEMPubKey,
+      );
 
       SnackbarService.showSuccess(
-          context, 'Demande d’adhésion envoyée');
+          context, 'Demande d\'adhésion envoyée');
       Navigator.pop(context, true);
     } catch (e) {
       SnackbarService.showError(

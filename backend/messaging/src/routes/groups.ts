@@ -7,23 +7,38 @@ import { Type } from '@sinclair/typebox';
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
 
-  // POST /api/groups  { name }
+  // POST /api/groups  { name, groupSigningPubKey, groupKEMPubKey }
   app.post('/api/groups', {
-    schema: { body: Type.Object({ name: Type.String({ minLength: 3, maxLength: 64 }) }) }
+    schema: { 
+      body: Type.Object({ 
+        name: Type.String({ minLength: 3, maxLength: 64 }),
+        groupSigningPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
+        groupKEMPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' }))
+      }) 
+    }
   }, async (req, reply) => {
     const userId = (req.user as any).sub;
-    const { name } = req.body as any;
+    const { name, groupSigningPubKey, groupKEMPubKey } = req.body as any;
 
     const g = await app.db.one(
       `INSERT INTO groups(name, creator_id) VALUES($1,$2) RETURNING id`,
       [name, userId]
     );
+    
+    // Ajouter les clés du groupe si fournies
+    if (groupSigningPubKey) {
+      await app.db.none(
+        `INSERT INTO group_keys(group_id, pk_sig, key_version) VALUES($1,decode($2,'base64'),1)`,
+        [g.id, groupSigningPubKey]
+      );
+    }
+    
     await app.db.none(
       `INSERT INTO user_groups(user_id, group_id) VALUES($1,$2)`,
       [userId, g.id]
     );
 
-    return { id: g.id, name };
+    return { groupId: g.id, name };
   });
 
   // GET /api/groups  : groupes dont je suis membre
@@ -40,21 +55,23 @@ export default async function routes(app: FastifyInstance) {
     return rows;
   });
 
-  // POST /api/groups/:id/join  { deviceId, pk_sig, pk_kem }
-  // Crée une join_request (v2) incluant les clés de l'appareil initial
+  // POST /api/groups/:id/join  { deviceId, pk_sig, pk_kem, groupSigningPubKey, groupKEMPubKey }
+  // Crée une join_request (v2) incluant les clés de l'appareil initial et du groupe
   app.post('/api/groups/:id/join', {
     schema: {
       params: Type.Object({ id: Type.String({ format: 'uuid' }) }),
       body: Type.Object({
         deviceId: Type.String({ minLength: 1, maxLength: 128 }),
         pk_sig: Type.String({ contentEncoding: 'base64' }),
-        pk_kem: Type.String({ contentEncoding: 'base64' })
+        pk_kem: Type.String({ contentEncoding: 'base64' }),
+        groupSigningPubKey: Type.String({ contentEncoding: 'base64' }),
+        groupKEMPubKey: Type.String({ contentEncoding: 'base64' })
       })
     }
   }, async (req, reply) => {
     const userId = (req.user as any).sub;
     const { id: groupId } = req.params as any;
-    const { deviceId, pk_sig, pk_kem } = req.body as any;
+    const { deviceId, pk_sig, pk_kem, groupSigningPubKey, groupKEMPubKey } = req.body as any;
 
     // refuse si déjà membre
     const m = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [userId, groupId]);
@@ -102,6 +119,70 @@ export default async function routes(app: FastifyInstance) {
     await app.db.none(`UPDATE join_requests SET status='accepted', handled_by=$1 WHERE id=$2`, [approverId, rid]);
 
     return { ok: true };
+  });
+
+  // POST /api/groups/:id/join-requests { groupSigningPubKey, groupKEMPubKey }
+  // Crée une demande de jointure avec les clés du groupe  
+  app.post('/api/groups/:id/join-requests', {
+    schema: {
+      params: Type.Object({ id: Type.String({ format: 'uuid' }) }),
+      body: Type.Object({
+        groupSigningPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
+        groupKEMPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' }))
+      })
+    }
+  }, async (req, reply) => {
+    const userId = (req.user as any).sub;
+    const { id: groupId } = req.params as any;
+    const { groupSigningPubKey, groupKEMPubKey } = req.body as any;
+
+    // refuse si déjà membre
+    const m = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [userId, groupId]);
+    if (m.length) return reply.code(409).send({ error: 'already_member' });
+
+    // Pour l'instant, on crée une demande simple sans clés de device
+    const jr = await app.db.one(
+      `INSERT INTO join_requests(group_id, user_id, device_id, pk_sig, pk_kem)
+       VALUES($1,$2,$3,'','')
+       RETURNING id`,
+      [groupId, userId, userId + '_tmp_' + Date.now()]
+    );
+    return { requestId: jr.id, status: 'pending' };
+  });
+
+  // GET /api/groups/:id/join-requests
+  // Récupère les demandes de jointure pour un groupe (pour les admins/membres)
+  app.get('/api/groups/:id/join-requests', {
+    schema: {
+      params: Type.Object({ id: Type.String({ format: 'uuid' }) })
+    }
+  }, async (req, reply) => {
+    const userId = (req.user as any).sub;
+    const { id: groupId } = req.params as any;
+
+    // Vérifie que l'utilisateur est membre du groupe
+    const m = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [userId, groupId]);
+    if (!m.length) return reply.code(403).send({ error: 'forbidden' });
+
+    const rows = await app.db.any(
+      `SELECT jr.id, jr.user_id, jr.device_id, jr.status, jr.created_at,
+              u.email, u.username
+         FROM join_requests jr
+         JOIN users u ON u.id = jr.user_id
+        WHERE jr.group_id = $1 AND jr.status = 'pending'
+        ORDER BY jr.created_at DESC`,
+      [groupId]
+    );
+    
+    return rows.map((row: { id: any; user_id: any; device_id: any; status: any; created_at: { toISOString: () => any; }; email: any; username: any; }) => ({
+      id: row.id,
+      userId: row.user_id,
+      deviceId: row.device_id,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+      email: row.email,
+      username: row.username
+    }));
   });
 
   // POST /api/groups/:id/requests/:rid/reject

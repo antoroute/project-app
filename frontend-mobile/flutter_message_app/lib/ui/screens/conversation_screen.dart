@@ -1,22 +1,16 @@
-import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_message_app/core/crypto/encryption_utils.dart';
+// V1 encryption removed
 import 'package:provider/provider.dart';
-import 'package:encrypt/encrypt.dart' as encrypt;
-import 'package:pointycastle/export.dart' as pc;
+// V1 RSA/AES-CBC removed
 
 import '../../core/models/conversation.dart';
 import '../../core/models/message.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/providers/group_provider.dart';
-import '../../core/crypto/aes_utils.dart';
-import '../../core/crypto/rsa_key_utils.dart';
-import '../../core/crypto/key_manager.dart';
-import '../../core/services/snackbar_service.dart';
+// SnackbarService not used here directly
 import '../../core/services/websocket_service.dart';
 import '../helpers/extensions.dart';
 import '../widgets/message_bubble.dart';
@@ -32,6 +26,7 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   late final ConversationProvider _conversationProvider;
+  // auth provider kept for potential future use
   late final AuthProvider _authProvider;
   late final GroupProvider _groupProvider;
 
@@ -45,6 +40,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   bool _initialDecryptDone = false;
   bool _isAtBottom = true;
   bool _showScrollToBottom = false;
+  // cached details no longer used in v2 flow
   Conversation? _conversationDetail;
 
   final TextEditingController _textController = TextEditingController();
@@ -111,6 +107,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
       await _conversationProvider.fetchMessages(
         context, widget.conversationId,
       );
+      // POST read receipt on open
+      await _conversationProvider.postRead(widget.conversationId);
+      // Fetch initial readers
+      await context.read<ConversationProvider>().refreshReaders(widget.conversationId);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _scrollToBottom(animate: false);
       });
@@ -145,31 +145,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   Future<void> _decryptSingleMessage(Message msg) async {
-    if (msg.decryptedText != null) return;
-    final userId = _authProvider.userId;
-    if (userId == null) return;
-    final encKeyB64 = msg.encryptedKeys[userId];
-    if (encKeyB64 == null) {
-      msg.decryptedText = '[Impossible de récupérer la clé AES]';
-      return;
-    }
-    final encryptedKey = base64.decode(encKeyB64);
-    final kp = await KeyManager().getKeyPairForGroup(_conversationDetail!.groupId);
-    if (kp == null) throw Exception('Clé RSA introuvable');
-    final rsaDecoder = pc.OAEPEncoding(pc.RSAEngine())
-      ..init(false, pc.PrivateKeyParameter<pc.RSAPrivateKey>(
-        kp.privateKey as pc.RSAPrivateKey,
-      ));
-    final aesKey = rsaDecoder.process(encryptedKey);
-    final ivBytes = base64.decode(msg.iv!);
-    final encryptedBytes = base64.decode(msg.encrypted!);
-    final encrypter = encrypt.Encrypter(
-      encrypt.AES(encrypt.Key(aesKey), mode: encrypt.AESMode.cbc),
-    );
-    msg.decryptedText = encrypter.decrypt(
-      encrypt.Encrypted(encryptedBytes),
-      iv: encrypt.IV(ivBytes),
-    );
+    // Placeholder: legacy Message model; decryption will be handled when wiring v2 in provider
+    msg.decryptedText ??= '[Chiffré]';
   }
 
   void _onMessagesUpdated() {
@@ -189,70 +166,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   Future<void> _onSendPressed() async {
     final plainText = _textController.text.trim();
-    if (plainText.isEmpty || _conversationDetail == null) return;
+    if (plainText.isEmpty) return;
     _textController.clear();
-    try {
-      final groupId = _conversationDetail!.groupId;
-      await _groupProvider.fetchGroupMembers(groupId);
-      final members = _groupProvider.members;
-      final publicKeysByUserId = <String, String>{};
-      for (final m in members) {
-        final uid = m['userId'] as String;
-        final pem = m['publicKeyGroup'] as String?;
-        if (pem != null) publicKeysByUserId[uid] = pem;
-      }
-      final aesKey = AesUtils.generateRandomAESKey();
-      final iv = encrypt.IV.fromSecureRandom(16);
-      final encrypter = encrypt.Encrypter(
-        encrypt.AES(encrypt.Key(aesKey), mode: encrypt.AESMode.cbc),
-      );
-      final encryptedText = encrypter.encrypt(plainText, iv: iv);
-      final encryptedBase64 = base64.encode(encryptedText.bytes);
-      final ivBase64 = base64.encode(iv.bytes);
-      final encryptedKeys = <String, String>{};
-      for (final entry in publicKeysByUserId.entries) {
-        final key = RsaKeyUtils.parsePublicKeyFromPem(entry.value);
-        final cipher = pc.OAEPEncoding(pc.RSAEngine())
-          ..init(true, pc.PublicKeyParameter<pc.RSAPublicKey>(key));
-        final cipherKey = cipher.process(aesKey);
-        encryptedKeys[entry.key] = base64.encode(cipherKey);
-      }
-      final payloadMap = {'encrypted': encryptedBase64, 'iv': ivBase64};
-      final payloadToSign = EncryptionUtils.canonicalJson(payloadMap);
-      final kp = await KeyManager().getKeyPairForGroup('user_rsa');
-      if (kp == null) throw Exception('Clé privée RSA introuvable.');
-      final signer = pc.Signer('SHA-256/RSA')
-        ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(
-          kp.privateKey as pc.RSAPrivateKey,
-        ));
-      final sig = signer.generateSignature(
-        Uint8List.fromList(utf8.encode(payloadToSign)),
-      ) as pc.RSASignature;
-      final signatureBase64 = base64.encode(sig.bytes);
-      final envelope = jsonEncode({
-        'encrypted': base64.encode(encryptedText.bytes),
-        'iv': ivBase64,
-        'signature': signatureBase64,
-        'senderPublicKey':
-            RsaKeyUtils.encodePublicKeyToPem(kp.publicKey as pc.RSAPublicKey),
-      });
-      await _conversationProvider.sendMessage(
-        context,
-        widget.conversationId,
-        envelope,
-        encryptedKeys,
-      );
-      
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottom();
-      });
-    } catch (e) {
-      debugPrint('Erreur lors de l\'envoi du message : $e');
-      SnackbarService.showError(
-        context,
-        'Erreur lors de l\'envoi du message : $e',
-      );
-    }
+    await _conversationProvider.sendMessage(context, widget.conversationId, plainText);
   }
 
   void _scrollToBottom({bool animate = true}) {
@@ -355,6 +271,24 @@ class _ConversationScreenState extends State<ConversationScreen> {
         children: [
           Column(
             children: [
+              // Presence/readers bar
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Builder(
+                  builder: (context) {
+                    final readers = context.watch<ConversationProvider>().readersFor(widget.conversationId);
+                    if (readers.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    final names = readers.map((r) => r['username'] as String? ?? r['userId'] as String).toList();
+                    return Text(
+                      'Vu par: ${names.join(', ')}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    );
+                  },
+                ),
+              ),
               Expanded(
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())

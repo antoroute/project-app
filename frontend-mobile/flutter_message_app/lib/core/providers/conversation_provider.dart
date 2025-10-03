@@ -5,23 +5,44 @@ import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/services/api_service.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'package:flutter_message_app/core/services/websocket_service.dart';
+import 'package:flutter_message_app/core/services/key_directory_service.dart';
+import 'package:flutter_message_app/core/services/session_device_service.dart';
+import 'dart:typed_data';
+import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
 
 /// Gère l’état des conversations et des messages.
 class ConversationProvider extends ChangeNotifier {
   final ApiService _apiService;
   final WebSocketService _webSocketService;
+  late final KeyDirectoryService _keyDirectory;
+  final AuthProvider _authProvider;
 
   List<Conversation> _conversations = <Conversation>[];
   /// Cache local des messages, par conversationId
   final Map<String, List<Message>> _messages = {};
+  /// Presence: userId -> online
+  final Map<String, bool> _userOnline = <String, bool>{};
+  /// Presence: userId -> device count
+  final Map<String, int> _userDeviceCount = <String, int>{};
+  /// Read receipts per conversation
+  final Map<String, List<Map<String, dynamic>>> _readersByConv = <String, List<Map<String, dynamic>>>{};
 
   ConversationProvider(AuthProvider authProvider)
       : _apiService = ApiService(authProvider),
-        _webSocketService = WebSocketService.instance {
-    // On branche le handler WS dès la construction
-    _webSocketService.onNewMessage = _onWebSocketNewMessage;
+        _webSocketService = WebSocketService.instance,
+        _authProvider = authProvider {
+    _keyDirectory = KeyDirectoryService(_apiService);
+    _webSocketService.onNewMessageV2 = _onWebSocketNewMessageV2;
+    _webSocketService.onPresenceUpdate = _onPresenceUpdate;
+    _webSocketService.onConvRead = _onConvRead;
     _webSocketService.onUserAdded = _onWebSocketUserAdded;
     _webSocketService.onConversationJoined = _onWebSocketConversationJoined;
+  }
+
+  Future<void> postRead(String conversationId) async {
+    try {
+      await _apiService.postConversationRead(conversationId: conversationId);
+    } catch (_) {}
   }
 
   /// Liste des conversations chargées.
@@ -30,6 +51,10 @@ class ConversationProvider extends ChangeNotifier {
   /// Messages en mémoire pour une conversation donnée.
   List<Message> messagesFor(String conversationId) =>
       _messages[conversationId] ?? <Message>[];
+  bool isUserOnline(String userId) => _userOnline[userId] == true;
+  int onlineUsersCount() => _userOnline.values.where((v) => v == true).length;
+  List<Map<String, dynamic>> readersFor(String conversationId) =>
+      _readersByConv[conversationId] ?? const <Map<String, dynamic>>[];
 
   /// Appelle GET /conversations
   Future<void> fetchConversations() async {
@@ -88,19 +113,37 @@ class ConversationProvider extends ChangeNotifier {
       BuildContext context,
       String conversationId,
   ) async {
-    final cached = _messages[conversationId];
-    if (cached != null && cached.isNotEmpty) {
-      return;
-    }
     try {
-      _messages[conversationId] =
-          await _apiService.fetchMessages(conversationId);
+      final items = await _apiService.fetchMessagesV2(conversationId: conversationId);
+      final List<Message> display = items.map((it) => Message(
+        id: it.messageId,
+        conversationId: it.convId,
+        senderId: (it.sender['userId'] as String),
+        encrypted: null,
+        iv: null,
+        encryptedKeys: const {},
+        signatureValid: true,
+        senderPublicKey: null,
+        timestamp: it.sentAt,
+        decryptedText: null,
+      )).toList();
+      _messages[conversationId] = display;
       notifyListeners();
     } on RateLimitException {
       SnackbarService.showRateLimitError(context);
     } catch (e) {
       debugPrint('❌ fetchMessages error: $e');
       // pas de popup ici, on peut juste loguer
+    }
+  }
+
+  Future<void> refreshReaders(String conversationId) async {
+    try {
+      final list = await _apiService.getConversationReaders(conversationId: conversationId);
+      _readersByConv[conversationId] = list;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ refreshReaders error: $e');
     }
   }
 
@@ -133,16 +176,22 @@ class ConversationProvider extends ChangeNotifier {
   Future<void> sendMessage(
     BuildContext context,
     String conversationId,
-    String encryptedPayload,
-    Map<String, String> encryptedKeys,
+    String plaintext,
   ) async {
     try {
-      final sent = await _apiService.sendMessage(
-        conversationId: conversationId,
-        encryptedMessage: encryptedPayload,
-        encryptedKeys: encryptedKeys,
+      final myUserId = _authProvider.userId!;
+      final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
+      final recipients = await _keyDirectory.fetchGroupDevices(groupId);
+      final payload = await MessageCipherV2.encrypt(
+        groupId: groupId,
+        convId: conversationId,
+        senderUserId: myUserId,
+        senderDeviceId: myDeviceId,
+        recipientsDevices: recipients,
+        plaintext: Uint8List.fromList(plaintext.codeUnits),
       );
-      //addLocalMessage(sent);
+      await _apiService.sendMessageV2(payloadV2: payload);
     } on RateLimitException {
       SnackbarService.showRateLimitError(context);
       rethrow;
@@ -170,8 +219,35 @@ class ConversationProvider extends ChangeNotifier {
 
   // ─── Handlers internes pour les événements WS ──────────────────────────────
 
-  void _onWebSocketNewMessage(Message msg) {
-    addLocalMessage(msg);
+  void _onWebSocketNewMessageV2(Map<String, dynamic> payload) async {
+    try {
+      final myUserId = _authProvider.userId;
+      if (myUserId == null) return;
+      final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      final groupId = payload['groupId'] as String;
+      final clear = await MessageCipherV2.decrypt(
+        groupId: groupId,
+        myUserId: myUserId,
+        myDeviceId: myDeviceId,
+        messageV2: payload,
+        keyDirectory: _keyDirectory,
+      );
+      final msg = Message(
+        id: payload['messageId'] as String,
+        conversationId: payload['convId'] as String,
+        senderId: (payload['sender'] as Map)['userId'] as String,
+        encrypted: null,
+        iv: null,
+        encryptedKeys: const {},
+        signatureValid: true,
+        senderPublicKey: null,
+        timestamp: (payload['sentAt'] as num).toInt(),
+        decryptedText: String.fromCharCodes(clear),
+      );
+      addLocalMessage(msg);
+    } catch (e) {
+      debugPrint('❌ decrypt v2 ws message error: $e');
+    }
   }
 
   void _onWebSocketUserAdded(String conversationId, String userId) {
@@ -180,5 +256,18 @@ class ConversationProvider extends ChangeNotifier {
 
   void _onWebSocketConversationJoined() {
     fetchConversations();
+  }
+
+  // Presence + read receipts hooks (UI can observe derived state later)
+  void _onPresenceUpdate(String userId, bool online, int count) {
+    _userOnline[userId] = online;
+    _userDeviceCount[userId] = count;
+    notifyListeners();
+  }
+
+  void _onConvRead(String convId, String userId, String at) {
+    // Refresh readers to fetch usernames and timestamps
+    // ignore: discarded_futures
+    refreshReaders(convId);
   }
 }

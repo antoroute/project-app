@@ -5,9 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:flutter_message_app/core/crypto/key_manager.dart';
+// V2: RSA key management removed
+import 'package:flutter_message_app/config/constants.dart';
 import 'package:flutter_message_app/core/services/biometric_service.dart';
-import 'package:pointycastle/pointycastle.dart' as pc;
+// pointycastle removed in v2
 
 /// Fournit le JWT et gère la mise à jour via biométrie.
 class AuthProvider extends ChangeNotifier {
@@ -34,17 +35,20 @@ class AuthProvider extends ChangeNotifier {
     if (_token == null) return null;
     try {
       final Map<String, dynamic> payload = JwtDecoder.decode(_token!);
-      return payload['id'] as String?;
+      return (payload['sub'] as String?) ?? (payload['id'] as String?);
     } catch (_) {
       return null;
     }
   }
 
-  /// Connexion : récupère accessToken et refreshToken, les stocke, génère la clé RSA utilisateur.
+  /// Connexion : récupère accessToken et refreshToken, les stocke.
   Future<void> login(String email, String password) async {
     final http.Response response = await http.post(
       _loginUri,
-      headers: <String, String>{'Content-Type': 'application/json'},
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+        'X-Client-Version': clientVersion,
+      },
       body: jsonEncode(<String, String>{
         'email': email,
         'password': password,
@@ -56,8 +60,8 @@ class AuthProvider extends ChangeNotifier {
     }
 
     final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
-    final String? accessToken  = data['accessToken']  as String?;
-    final String? refreshToken = data['refreshToken'] as String?;
+    final String? accessToken  = (data['accessToken'] as String?) ?? (data['access'] as String?);
+    final String? refreshToken = (data['refreshToken'] as String?) ?? (data['refresh'] as String?);
 
     if (accessToken == null || refreshToken == null) {
       throw Exception('Réponse invalide du serveur lors du login');
@@ -66,28 +70,22 @@ class AuthProvider extends ChangeNotifier {
     await _storage.write(key: 'accessToken', value: accessToken);
     await _storage.write(key: 'refreshToken', value: refreshToken);
     _token = accessToken;
-
-    await KeyManager().generateUserKeyIfAbsent();
+    
     notifyListeners();
   }
 
-  /// Inscription : génère la paire RSA, puis appelle l’API.
+  /// Inscription v2: enregistre l'utilisateur via /auth/register
   Future<void> register(String email, String password, String username) async {
-    await KeyManager().generateKeyPairForGroup('user_rsa');
-    final pc.AsymmetricKeyPair? keyPair = await KeyManager().getKeyPairForGroup('user_rsa');
-    if (keyPair == null) {
-      throw Exception('Erreur génération clé RSA pour l’inscription');
-    }
-    final String publicKeyPem = encodePublicKeyToPem(keyPair.publicKey as pc.RSAPublicKey);
-
     final http.Response response = await http.post(
       _registerUri,
-      headers: <String, String>{'Content-Type': 'application/json'},
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+        'X-Client-Version': clientVersion,
+      },
       body: jsonEncode(<String, String>{
         'email': email,
         'password': password,
         'username': username,
-        'publicKey': publicKeyPem,
       }),
     );
 
@@ -104,7 +102,6 @@ class AuthProvider extends ChangeNotifier {
     }
     _token = stored;
     notifyListeners();
-    unawaited(KeyManager().generateUserKeyIfAbsent());
   }
 
   /// Rafraîchit le token via biométrie (popup) et l’API /refresh.
@@ -123,14 +120,17 @@ class AuthProvider extends ChangeNotifier {
       }
       final http.Response response = await http.post(
         _refreshUri,
-        headers: <String, String>{'Content-Type': 'application/json'},
-        body: jsonEncode(<String, String>{'refreshToken': storedRefresh}),
+        headers: <String, String>{
+          'Content-Type': 'application/json',
+          'X-Client-Version': clientVersion,
+          'Authorization': 'Bearer $storedRefresh',
+        },
       );
       if (response.statusCode != 200) {
         return false;
       }
       final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
-      final String? newAccessToken = data['accessToken'] as String?;
+      final String? newAccessToken = (data['accessToken'] as String?) ?? (data['access'] as String?);
       if (newAccessToken == null) {
         return false;
       }
@@ -196,6 +196,7 @@ class AuthProvider extends ChangeNotifier {
     return <String, String>{
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $_token',
+      'X-Client-Version': clientVersion,
     };
   }
 }

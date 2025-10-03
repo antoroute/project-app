@@ -4,7 +4,9 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/models/conversation.dart';
 import 'package:flutter_message_app/core/models/message.dart';
+import 'package:flutter_message_app/core/models/message_v2.dart';
 import 'package:flutter_message_app/core/models/group_info.dart';
+import 'package:flutter_message_app/config/constants.dart';
 
 /// Exception levée en cas de rate limit (429).
 class RateLimitException implements Exception {
@@ -17,7 +19,7 @@ class RateLimitException implements Exception {
 /// Service centralisé pour tous les appels HTTP vers l’API.
 class ApiService {
   final AuthProvider _authProvider;
-  static const String _baseUrl = 'https://api.kavalek.fr/api';
+  static const String _baseUrl = messagingBase;
 
   ApiService(this._authProvider);
 
@@ -29,13 +31,15 @@ class ApiService {
   /// Crée un nouveau groupe via POST /groups.
   Future<String> createGroup({
     required String name,
-    required String publicKeyGroup,
+    required String groupSigningPubKeyB64,
+    required String groupKEMPubKeyB64,
   }) async {
     final Map<String, String> headers = await _buildHeaders();
     final Uri uri = Uri.parse('$_baseUrl/groups');
     final String payload = jsonEncode(<String, String>{
       'name': name,
-      'publicKeyGroup': publicKeyGroup,
+      'groupSigningPubKey': groupSigningPubKeyB64,
+      'groupKEMPubKey': groupKEMPubKeyB64,
     });
     final http.Response response = await http.post(uri, headers: headers, body: payload);
 
@@ -91,12 +95,14 @@ class ApiService {
   /// Envoie une demande de jointure via POST /groups/:id/join-requests.
   Future<String> sendJoinRequest({
     required String groupId,
-    required String publicKeyGroup,
+    required String groupSigningPubKeyB64,
+    required String groupKEMPubKeyB64,
   }) async {
     final Map<String, String> headers = await _buildHeaders();
     final Uri uri = Uri.parse('$_baseUrl/groups/$groupId/join-requests');
     final String payload = jsonEncode(<String, String>{
-      'publicKeyGroup': publicKeyGroup,
+      'groupSigningPubKey': groupSigningPubKeyB64,
+      'groupKEMPubKey': groupKEMPubKeyB64,
     });
     final http.Response response = await http.post(uri, headers: headers, body: payload);
 
@@ -184,6 +190,53 @@ class ApiService {
       throw RateLimitException();
     }
     throw Exception('Erreur ${response.statusCode} lors de la récupération des membres du groupe.');
+  }
+
+  // ─── V2: Group Device Keys ────────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> fetchGroupDeviceKeys(String groupId) async {
+    final headers = await _buildHeaders();
+    final uri = Uri.parse('$_baseUrl/keys/group/$groupId');
+    final res = await http.get(uri, headers: headers);
+    if (res.statusCode == 200) {
+      final List<dynamic> body = jsonDecode(res.body) as List<dynamic>;
+      return body.cast<Map<String, dynamic>>();
+    }
+    if (res.statusCode == 429) throw RateLimitException();
+    throw Exception('Erreur ${res.statusCode} lors du fetch des clés devices.');
+  }
+
+  Future<void> publishGroupDeviceKey({
+    required String groupId,
+    required String deviceId,
+    required String pkSigB64,
+    required String pkKemB64,
+    int keyVersion = 1,
+  }) async {
+    final headers = await _buildHeaders();
+    final uri = Uri.parse('$_baseUrl/keys/group/$groupId/devices');
+    final payload = jsonEncode({
+      'deviceId': deviceId,
+      'pk_sig': pkSigB64,
+      'pk_kem': pkKemB64,
+      'key_version': keyVersion,
+    });
+    final res = await http.post(uri, headers: headers, body: payload);
+    if (res.statusCode == 201) return;
+    if (res.statusCode == 429) throw RateLimitException();
+    throw Exception('Erreur ${res.statusCode} lors de la publication clé device.');
+  }
+
+  Future<void> revokeGroupDevice({
+    required String groupId,
+    required String deviceId,
+  }) async {
+    final headers = await _buildHeaders();
+    final uri = Uri.parse('$_baseUrl/keys/group/$groupId/devices/$deviceId');
+    final res = await http.delete(uri, headers: headers);
+    if (res.statusCode == 200) return;
+    if (res.statusCode == 429) throw RateLimitException();
+    throw Exception('Erreur ${res.statusCode} lors de la révocation device.');
   }
 
   /// Crée une nouvelle conversation via POST /conversations.
@@ -312,6 +365,52 @@ class ApiService {
     throw Exception('Erreur ${response.statusCode} lors de l’envoi du message.');
   }
 
+  // ─── V2 Messages ──────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> sendMessageV2({
+    required Map<String, dynamic> payloadV2,
+  }) async {
+    final headers = await _buildHeaders();
+    final uri = Uri.parse('$_baseUrl/messages');
+    final body = jsonEncode(payloadV2);
+    final res = await http.post(uri, headers: headers, body: body);
+    if (res.statusCode == 201) {
+      final Map<String, dynamic> parsed = jsonDecode(res.body) as Map<String, dynamic>;
+      // backend returns { id }
+      return parsed;
+    }
+    if (res.statusCode == 403) {
+      throw Exception('403 forbidden');
+    }
+    if (res.statusCode == 409) {
+      throw Exception('409 duplicate_messageId');
+    }
+    if (res.statusCode == 429) {
+      throw RateLimitException();
+    }
+    throw Exception('Erreur ${res.statusCode} envoi message v2');
+  }
+
+  Future<List<MessageV2Model>> fetchMessagesV2({
+    required String conversationId,
+    String? cursor,
+    int? limit,
+  }) async {
+    final headers = await _buildHeaders();
+    final query = <String, String>{};
+    if (cursor != null) query['cursor'] = cursor;
+    if (limit != null) query['limit'] = '$limit';
+    final uri = Uri.parse('$_baseUrl/conversations/$conversationId/messages').replace(queryParameters: query);
+    final res = await http.get(uri, headers: headers);
+    if (res.statusCode == 200) {
+      final Map<String, dynamic> parsed = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = (parsed['items'] as List).map((e) => MessageV2Model.fromJson(e as Map<String, dynamic>)).toList();
+      return items;
+    }
+    if (res.statusCode == 429) throw RateLimitException();
+    throw Exception('Erreur ${res.statusCode} fetch messages v2');
+  }
+
   /// Ajoute un utilisateur à une conversation via POST /conversations/:convId/users.
   Future<void> addUserToConversation({
     required String conversationId,
@@ -329,5 +428,33 @@ class ApiService {
       throw RateLimitException();
     }
     throw Exception('Erreur ${response.statusCode} lors de l’ajout d’un utilisateur à la conversation.');
+  }
+
+  // ─── Read receipts ────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> postConversationRead({
+    required String conversationId,
+  }) async {
+    final headers = await _buildHeaders();
+    final uri = Uri.parse('$_baseUrl/conversations/$conversationId/read');
+    final res = await http.post(uri, headers: headers);
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    if (res.statusCode == 429) throw RateLimitException();
+    throw Exception('Erreur ${res.statusCode} POST read');
+  }
+
+  Future<List<Map<String, dynamic>>> getConversationReaders({
+    required String conversationId,
+  }) async {
+    final headers = await _buildHeaders();
+    final uri = Uri.parse('$_baseUrl/conversations/$conversationId/readers');
+    final res = await http.get(uri, headers: headers);
+    if (res.statusCode == 200) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return (body['readers'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+    if (res.statusCode == 429) throw RateLimitException();
+    throw Exception('Erreur ${res.statusCode} GET readers');
   }
 }

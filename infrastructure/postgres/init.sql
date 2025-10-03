@@ -11,12 +11,20 @@ CREATE TABLE IF NOT EXISTS users (
   -- plus de public_key globale (RSA) en v2
 );
 
--- Groupes
+-- Groupes (avec leurs clés communes)
 CREATE TABLE IF NOT EXISTS groups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   creator_id UUID REFERENCES users(id),
   name TEXT UNIQUE NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Clés du groupe (Ed25519 pour sig + X25519 pour ECDH)
+CREATE TABLE IF NOT EXISTS group_keys (
+  group_id UUID PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+  pk_sig   BYTEA NOT NULL,        -- 32B Ed25519 public
+  key_version INT NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Appartenance utilisateur↔groupe (sans clé RSA)

@@ -19,7 +19,10 @@ class WebSocketService {
   Stream<SocketStatus> get statusStream => _statusController.stream;
 
   /// Callbacks à brancher depuis vos providers
-  void Function(Message message)? onNewMessage;
+  void Function(Message message)? onNewMessage; // legacy
+  void Function(Map<String, dynamic> payloadV2)? onNewMessageV2; // v2 payload
+  void Function(String userId, bool online, int count)? onPresenceUpdate;
+  void Function(String convId, String userId, String at)? onConvRead;
   void Function(String conversationId, String userId)? onUserAdded;
   VoidCallback? onNotificationNew;
   VoidCallback? onConversationJoined;
@@ -43,7 +46,7 @@ class WebSocketService {
       _socket = IO.io(
         'https://api.kavalek.fr',
         IO.OptionBuilder()
-            .setPath('/socket.io')
+            .setPath('/socket')
             .setTransports(['websocket'])
             .setAuth({'token': token})
             .build(),
@@ -68,12 +71,31 @@ class WebSocketService {
         _updateStatus(SocketStatus.disconnected);
         Future.delayed(const Duration(seconds: 3), () => connect(context));
       })
-      // message:new : on reçoit déjà un JSON `{ id, senderId, conversationId, ... }`
+      // v2 message:new : payload v2 complet (Map<String,dynamic>)
       ..on('message:new', (data) {
-        final Map<String, dynamic> json = data as Map<String, dynamic>;
-        // on utilise la factory qui ne prend qu'un Map
-        final msg = Message.fromJson(json);
-        onNewMessage?.call(msg);
+        if (data is Map) {
+          final map = Map<String, dynamic>.from(data);
+          // Deliver raw v2 payload to providers
+          onNewMessageV2?.call(map);
+        }
+      })
+      ..on('presence:update', (data) {
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final uid = m['userId'] as String;
+          final online = m['online'] as bool;
+          final count = (m['count'] as num?)?.toInt() ?? 0;
+          onPresenceUpdate?.call(uid, online, count);
+        }
+      })
+      ..on('conv:read', (data) {
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final convId = m['convId'] as String;
+          final userId = m['userId'] as String;
+          final at = m['at'] as String;
+          onConvRead?.call(convId, userId, at);
+        }
       })
       ..on('conversation:user_added', (data) {
         final Map<String, dynamic> json = data as Map<String, dynamic>;
@@ -101,8 +123,8 @@ class WebSocketService {
     if (_status != SocketStatus.connected || _socket == null) return;
     _log('Demande d’abonnement à la conversation : $conversationId', level: 'info');
     _socket!.emitWithAck(
-      'conversation:subscribe',
-      conversationId,
+      'conv:subscribe',
+      {'convId': conversationId},
       ack: (resp) {
         final ok = resp is Map && resp['success'] == true;
         _log(ok
@@ -117,7 +139,7 @@ class WebSocketService {
   void unsubscribeConversation(String conversationId) {
     if (_status != SocketStatus.connected || _socket == null) return;
     _log('Désabonnement de la conversation : $conversationId', level: 'info');
-    _socket!.emit('conversation:unsubscribe', conversationId);
+    _socket!.emit('conv:unsubscribe', {'convId': conversationId});
   }
 
   void disconnect() {
