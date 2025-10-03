@@ -53,6 +53,58 @@ export default async function routes(app: FastifyInstance) {
     return rows;
   });
 
+  // GET /api/conversations/:id : détails d'une conversation spécifique
+  app.get('/api/conversations/:id', {
+    schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) }
+  }, async (req, reply) => {
+    const userId = (req.user as any).sub;
+    const { id: convId } = req.params as any;
+
+    // ACL: être membre de la conversation
+    const membership = await app.db.any(
+      `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
+      [convId, userId]
+    );
+    if (membership.length === 0) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
+
+    // Récupérer les détails de la conversation
+    const convs = await app.db.any(
+      `SELECT c.id, c.group_id as "groupId", c.type, c.creator_id as "creatorId", 
+              c.created_at as "createdAt", c.encrypted_secrets as "encryptedSecrets"
+         FROM conversations c 
+        WHERE c.id=$1`,
+      [convId]
+    );
+    
+    if (convs.length === 0) {
+      return reply.code(404).send({ error: 'conversation_not_found' });
+    }
+
+    const conv = convs[0];
+    
+    // Récupérer la liste des membres de la conversation
+    const members = await app.db.any(
+      `SELECT cu.user_id as "userId", u.email, u.username, cu.last_read_at as "lastReadAt"
+         FROM conversation_users cu
+         JOIN users u ON u.id = cu.user_id
+        WHERE cu.conversation_id = $1
+        ORDER BY u.email`,
+      [convId]
+    );
+
+    return {
+      ...conv,
+      members: members.map((member: any) => ({
+        userId: member.userId,
+        email: member.email,
+        username: member.username,
+        lastReadAt: member.lastReadAt ? member.lastReadAt.toISOString() : null
+      }))
+    };
+  });
+
   // POST /api/conversations/:id/read  -> mark as read + WS "conv:read"
   app.post('/api/conversations/:id/read', {
     schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) }

@@ -8,6 +8,9 @@ class Message {
   final bool              signatureValid;
   final String?           senderPublicKey;
   final int               timestamp;
+  
+  // Données V2 pour le déchiffrement (optionnel)
+  final Map<String, dynamic>? v2Data;  // Contient toutes les données MessageV2Model
 
   // Texte déchiffré, mis en cache pour éviter plusieurs décryptions
   String?                  decryptedText;
@@ -22,12 +25,14 @@ class Message {
     required this.signatureValid,
     this.senderPublicKey,
     required this.timestamp,
+    this.v2Data,
     this.decryptedText,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
     // Récupération des clés chiffrées par message
     final rawKeys = json['encrypted_keys'] as Map<String, dynamic>?;
+    final v2Data = json['v2Data'] as Map<String, dynamic>?;
 
     return Message(
       id:               json['id'] as String,
@@ -41,6 +46,7 @@ class Message {
       signatureValid:   json['signatureValid'] as bool,
       senderPublicKey:  json['senderPublicKey'] as String?,
       timestamp:        _parseInt(json['timestamp']),
+      v2Data:           v2Data,
     );
   }
 
