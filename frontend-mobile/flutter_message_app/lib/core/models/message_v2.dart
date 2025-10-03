@@ -26,6 +26,13 @@ class MessageV2Model {
   });
 
   factory MessageV2Model.fromJson(Map<String, dynamic> json) {
+    // Debug des données reçues du backend
+    print('🔍 MessageV2Model.fromJson DEBUG:');
+    print('  - sentAt type: ${json['sentAt'].runtimeType}');
+    print('  - sentAt value: ${json['sentAt']}');
+    print('  - senderUserId: ${json['senderUserId']}');
+    print('  - senderDeviceId: ${json['senderDeviceId']}');
+    
     // Adapter à la structure backend qui retourne senderUserId/senderDeviceId directement
     // au lieu d'un objet sender
     Map<String, dynamic> senderObject;
@@ -47,13 +54,20 @@ class MessageV2Model {
       groupId: json['groupId'] as String? ?? '',
       convId: json['convId'] as String,
       messageId: json['messageId'] as String,
-      sentAt: (json['sentAt'] as num).toInt(),
+      sentAt: _parseInt(json['sentAt']),
       sender: senderObject,
       recipients: (json['recipients'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList(),
       iv: json['iv'] as String,
       ciphertext: json['ciphertext'] as String,
       sig: json['sig'] as String,
     );
+  }
+
+  static int _parseInt(dynamic value) {
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
   }
 
   Map<String, dynamic> toJson() => {

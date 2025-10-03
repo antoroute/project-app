@@ -221,6 +221,7 @@ class ConversationProvider extends ChangeNotifier {
         cursor: cursor,
       );
       final List<Message> display = items.map((it) {
+        debugPrint('📝 Parsing message ${it.messageId}: timestamp=${it.sentAt}');
         final senderUserId = (it.sender['userId'] as String?) ?? '';
         debugPrint('📝 Parsing message ${it.messageId}: sender={$senderUserId}');
         return Message(

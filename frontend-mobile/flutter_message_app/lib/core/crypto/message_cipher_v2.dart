@@ -150,6 +150,7 @@ class MessageCipherV2 {
       'recipients': recipients,
       'iv': _b64(iv),
       'ciphertext': _b64(ciphertext),
+      'salt': _b64(salt), // Ajouter la salt au payload pour le déchiffrement
     };
 
     // sign
@@ -171,17 +172,31 @@ class MessageCipherV2 {
     required Map<String, dynamic> messageV2,
     required KeyDirectoryService keyDirectory,
   }) async {
+    debugPrint('🔓 DECRYPT DEBUG:');
+    debugPrint('  - myUserId: $myUserId');
+    debugPrint('  - myDeviceId: $myDeviceId');
+    debugPrint('  - groupId: $groupId');
+    debugPrint('  - messageV2 keys: ${messageV2.keys.toList()}');
+    
     // select recipient wrap
     final List<dynamic> recips = messageV2['recipients'] as List<dynamic>;
+    debugPrint('  - recipients count: ${recips.length}');
+    for (int i = 0; i < recips.length; i++) {
+      final recip = recips[i] as Map<String, dynamic>;
+      debugPrint('    Recipient $i: ${recip['userId']}/${recip['deviceId']}');
+    }
+    
     Map<String, dynamic>? mine;
     for (final r in recips) {
       final m = r as Map<String, dynamic>;
       if (m['userId'] == myUserId && m['deviceId'] == myDeviceId) {
         mine = m;
+        debugPrint('  - Found my wrap: userId=${m['userId']}, deviceId=${m['deviceId']}');
         break;
       }
     }
     if (mine == null) {
+      debugPrint('  - ❌ No wrap found for this device');
       throw Exception('No wrap for this device');
     }
 
@@ -190,6 +205,9 @@ class MessageCipherV2 {
     final senderUserId = sender['userId'] as String;
     final senderDeviceId = sender['deviceId'] as String;
     final ephPubB64 = sender['eph_pub'] as String;
+    
+    debugPrint('🔑 KEK derivation:');
+    debugPrint('  - sender: $senderUserId/$senderDeviceId');
 
     final x = X25519();
     final myKey = await KeyManagerV2.instance.loadX25519KeyPair(groupId, myDeviceId);
@@ -197,13 +215,24 @@ class MessageCipherV2 {
       keyPair: myKey,
       remotePublicKey: SimplePublicKey(base64.decode(ephPubB64), type: KeyPairType.x25519),
     );
-    final Uint8List salt = Uint8List.fromList(
-      crypto.sha256.convert(utf8.encode('${messageV2['messageId']}:${_b64(_randomBytes(16))}')).bytes,
-    );
+    
+    // Récupérer la salt depuis le payload (ou fallback si pas disponible)
+    final Uint8List salt;
+    if (messageV2.containsKey('salt')) {
+      salt = base64.decode(messageV2['salt'] as String);
+      debugPrint('  - Salt récupérée depuis le payload');
+    } else {
+      // Fallback pour compatibilité avec anciens messages
+      salt = Uint8List.fromList(
+        crypto.sha256.convert(utf8.encode('${messageV2['messageId']}:${_b64(_randomBytes(16))}')).bytes,
+      );
+      debugPrint('  - Salt régénérée (fallback ancien format)');
+    }
+    
     final kek = await _hkdf.deriveKey(
       secretKey: shared,
       nonce: salt,
-      info: utf8.encode('project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId'),
+      info: utf8.encode('project-app/v2 $groupId ${messageV2['convId']} $senderUserId $senderDeviceId'),
     );
     final kekBytes = Uint8List.fromList(await kek.extractBytes());
 

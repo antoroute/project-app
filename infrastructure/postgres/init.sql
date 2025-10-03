@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS messages (
   ciphertext BYTEA NOT NULL,                    -- blob chiffré
   wrapped_keys JSONB NOT NULL,                  -- [{userId,deviceId,wrap,nonce}]
   sig BYTEA NOT NULL,                           -- 64B (Ed25519)
+  salt BYTEA NOT NULL,                          -- 32B HKDF salt (Base64)
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

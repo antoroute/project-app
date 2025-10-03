@@ -23,10 +23,10 @@ export default async function routes(app: FastifyInstance) {
       const row = await app.db.one(`
         INSERT INTO messages(
           conversation_id, sender_id, sender_device_id, v, alg,
-          message_id, sent_at, sender_eph_pub, iv, ciphertext, wrapped_keys, sig
+          message_id, sent_at, sender_eph_pub, iv, ciphertext, wrapped_keys, sig, salt
         )
         VALUES($1,$2,$3,2,$4::jsonb,$5,$6,
-               decode($7,'base64'), decode($8,'base64'), decode($9,'base64'), $10::jsonb, decode($11,'base64'))
+               decode($7,'base64'), decode($8,'base64'), decode($9,'base64'), $10::jsonb, decode($11,'base64'), decode($12,'base64'))
         RETURNING id
       `, [
         b.convId, b.sender.userId, b.sender.deviceId,
@@ -34,7 +34,8 @@ export default async function routes(app: FastifyInstance) {
         b.messageId, new Date(b.sentAt * 1000).toISOString(),
         b.sender.eph_pub, b.iv, b.ciphertext,
         JSON.stringify(b.recipients),
-        b.sig
+        b.sig,
+        b.salt // Ajouter la salt au INSERT
       ]);
 
       // Broadcast WS
@@ -77,18 +78,21 @@ export default async function routes(app: FastifyInstance) {
     }
 
     const rows = await app.db.any(`
-      SELECT id, conversation_id as "convId",
-             encode(sender_eph_pub,'base64') as "sender_eph_pub",
-             encode(iv,'base64') as "iv",
-             encode(ciphertext,'base64') as "ciphertext",
-             wrapped_keys as "recipients",
-             encode(sig,'base64') as "sig",
-             alg, v, sender_id as "senderUserId", sender_device_id as "senderDeviceId",
-             message_id as "messageId", extract(epoch from sent_at)::bigint as "sentAt"
-        FROM messages
-       WHERE conversation_id = $1
-         AND ($2::timestamp IS NULL OR sent_at < $2)
-       ORDER BY sent_at DESC
+      SELECT m.id, m.conversation_id as "convId",
+             encode(m.sender_eph_pub,'base64') as "sender_eph_pub",
+             encode(m.iv,'base64') as "iv",
+             encode(m.ciphertext,'base64') as "ciphertext",
+             m.wrapped_keys as "recipients",
+             encode(m.sig,'base64') as "sig",
+             encode(m.salt,'base64') as "salt",
+             m.alg, m.v, m.sender_id as "senderUserId", m.sender_device_id as "senderDeviceId",
+             m.message_id as "messageId", extract(epoch from m.sent_at)::bigint as "sentAt",
+             c.group_id as "groupId"
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.conversation_id = $1
+         AND ($2::timestamp IS NULL OR m.sent_at < $2)
+       ORDER BY m.sent_at DESC
        LIMIT $3
     `, [id, cursor ? new Date(Number(cursor)) : null, limit]);
     console.log(`📥 Messages found for conversation ${id}: ${rows.length} messages`);
