@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_v2.dart';
 
 /// Gère l’état des conversations et des messages.
 class ConversationProvider extends ChangeNotifier {
@@ -316,6 +317,10 @@ class ConversationProvider extends ChangeNotifier {
       final myUserId = _authProvider.userId!;
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
+      
+      // Vérifier et publier nos clés si nécessaire
+      await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
+      
       final recipients = await _keyDirectory.fetchGroupDevices(groupId);
       final payload = await MessageCipherV2.encrypt(
         groupId: groupId,
@@ -331,7 +336,54 @@ class ConversationProvider extends ChangeNotifier {
       rethrow;
     } catch (e) {
       debugPrint('❌ sendMessage error: $e');
-      SnackbarService.showError(context, 'Impossible d’envoyer le message : $e');
+      
+      // Si c'est une erreur de clés manquantes, essayer de les publier automatiquement
+      if (e.toString().contains('length=0') || e.toString().contains('Failed assertion')) {
+        try {
+          debugPrint('🔧 Tentative de publication automatique des clés...');
+          final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+          final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
+          await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
+          
+          // Retry l'envoi du message
+          SnackbarService.showSuccess(context, 'Clés publiées, message renvoyé automatiquement');
+          await sendMessage(context, conversationId, plaintext);
+          return;
+        } catch (retryError) {
+          debugPrint('❌ Retry failed: $retryError');
+        }
+      }
+      
+      SnackbarService.showError(context, 'Impossible d\'envoyer le message : $e');
+      rethrow;
+    }
+  }
+
+  /// S'assurer que les clés de notre device sont publiées pour le groupe
+  Future<void> _ensureMyDeviceKeysArePublished(String groupId, String deviceId) async {
+    try {
+      final recipients = await _keyDirectory.getGroupDevices(groupId);
+      final myKeysInGroup = recipients.where((r) => r.deviceId == deviceId).toList();
+      
+      if (myKeysInGroup.isEmpty) {
+        debugPrint('🔑 Publication automatique des clés manquantes pour le groupe $groupId');
+        final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+        final sigPub = pubKeys['pk_sig']!;
+        final kemPub = pubKeys['pk_kem']!;
+        
+        await _apiService.publishGroupDeviceKey(
+          groupId: groupId,
+          deviceId: deviceId,
+          pkSigB64: sigPub,
+          pkKemB64: kemPub,
+        );
+        
+        // Invalider le cache pour que les nouvelles clés soient récupérées
+        await _keyDirectory.fetchGroupDevices(groupId); // Force refresh du cache
+        debugPrint('✅ Clés publiées et cache mis à jour');
+      }
+    } catch (e) {
+      debugPrint('❌ Erreur publication automatique clés: $e');
       rethrow;
     }
   }

@@ -269,24 +269,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Conversation'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.bug_report),
-            onPressed: () {
-              context.read<ConversationProvider>().debugDecryptionStatus(widget.conversationId);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Debug déchiffrement ajouté aux logs'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
-            tooltip: 'Debug déchiffrement',
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Conversation')),
       body: Stack(
         children: [
           Column(
