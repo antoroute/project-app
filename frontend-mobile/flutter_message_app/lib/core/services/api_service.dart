@@ -43,7 +43,7 @@ class ApiService {
     });
     final http.Response response = await http.post(uri, headers: headers, body: payload);
 
-    if (response.statusCode == 201) {
+    if (response.statusCode == 201 || response.statusCode == 200) {
       return (jsonDecode(response.body) as Map<String, dynamic>)['groupId'] as String;
     }
     if (response.statusCode == 429) {

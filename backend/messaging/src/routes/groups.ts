@@ -38,6 +38,7 @@ export default async function routes(app: FastifyInstance) {
       [userId, g.id]
     );
 
+    reply.code(201); // Explicitement retourner le code 201 Created
     return { groupId: g.id, name };
   });
 
