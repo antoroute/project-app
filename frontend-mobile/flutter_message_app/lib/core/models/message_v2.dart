@@ -25,19 +25,36 @@ class MessageV2Model {
     required this.sig,
   });
 
-  factory MessageV2Model.fromJson(Map<String, dynamic> json) => MessageV2Model(
-        v: json['v'] as int,
-        alg: Map<String, String>.from(json['alg'] as Map),
-        groupId: json['groupId'] as String,
-        convId: json['convId'] as String,
-        messageId: json['messageId'] as String,
-        sentAt: (json['sentAt'] as num).toInt(),
-        sender: Map<String, dynamic>.from(json['sender'] as Map),
-        recipients: (json['recipients'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList(),
-        iv: json['iv'] as String,
-        ciphertext: json['ciphertext'] as String,
-        sig: json['sig'] as String,
-      );
+  factory MessageV2Model.fromJson(Map<String, dynamic> json) {
+    // Adapter à la structure backend qui retourne senderUserId/senderDeviceId directement
+    // au lieu d'un objet sender
+    Map<String, dynamic> senderObject;
+    if (json.containsKey('sender')) {
+      senderObject = Map<String, dynamic>.from(json['sender'] as Map);
+    } else {
+      // Construction depuis les champs backend
+      senderObject = {
+        'userId': json['senderUserId'] as String? ?? '',
+        'deviceId': json['senderDeviceId'] as String? ?? '',
+        'eph_pub': json['sender_eph_pub'] as String? ?? '',
+        'key_version': 1,
+      };
+    }
+    
+    return MessageV2Model(
+      v: json['v'] as int,
+      alg: Map<String, String>.from(json['alg'] as Map),
+      groupId: json['groupId'] as String? ?? '',
+      convId: json['convId'] as String,
+      messageId: json['messageId'] as String,
+      sentAt: (json['sentAt'] as num).toInt(),
+      sender: senderObject,
+      recipients: (json['recipients'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList(),
+      iv: json['iv'] as String,
+      ciphertext: json['ciphertext'] as String,
+      sig: json['sig'] as String,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'v': v,
