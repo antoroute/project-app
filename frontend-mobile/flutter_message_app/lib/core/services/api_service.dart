@@ -100,7 +100,7 @@ class ApiService {
     });
     final http.Response response = await http.post(uri, headers: headers, body: payload);
 
-    if (response.statusCode == 201) {
+    if (response.statusCode == 201 || response.statusCode == 200) {
       final Map<String, dynamic> body = jsonDecode(response.body) as Map<String, dynamic>;
       return body['requestId'] as String;
     }

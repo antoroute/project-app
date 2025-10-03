@@ -225,6 +225,8 @@ export default async function routes(app: FastifyInstance) {
        RETURNING id`,
       [groupId, userId, userId + '_tmp_' + Date.now()]
     );
+    
+    reply.code(201); // Explicitement retourner le code 201 Created
     return { requestId: jr.id, status: 'pending' };
   });
 
