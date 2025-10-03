@@ -43,7 +43,7 @@ export default async function routes(app: FastifyInstance) {
   app.get('/api/conversations', async (req, reply) => {
     const userId = (req.user as any).sub;
     const rows = await app.db.any(
-      `SELECT c.id, c.group_id as "groupId", c.type, c.created_at as "createdAt"
+      `SELECT c.id, c.group_id as "groupId", c.type, c.creator_id as "creatorId", c.created_at as "createdAt"
          FROM conversations c
          JOIN conversation_users cu ON cu.conversation_id=c.id
         WHERE cu.user_id=$1

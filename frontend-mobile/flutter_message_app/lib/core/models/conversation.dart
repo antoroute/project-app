@@ -16,10 +16,10 @@ class Conversation {
   });
 
   factory Conversation.fromJson(Map<String, dynamic> json) {
-    final id = (json['conversationId'] ?? json['id']) as String;
-    final groupId = (json['groupId'] ?? json['group_id']) as String;
-    final type = json['type'] as String;
-    final creatorId = (json['creatorId'] ?? json['creator_id']) as String;
+    final id = (json['conversationId'] ?? json['id']) as String? ?? '';
+    final groupId = (json['groupId'] ?? json['group_id']) as String? ?? '';
+    final type = (json['type'] as String? ?? 'subset');
+    final creatorId = (json['creatorId'] ?? json['creator_id']) as String? ?? '';
 
     // On normalise encryptedSecrets en Map<String,String>
     final rawSecrets = json['encryptedSecrets'] ?? json['encrypted_secrets'];
