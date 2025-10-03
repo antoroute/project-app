@@ -70,15 +70,13 @@ class ConversationProvider extends ChangeNotifier {
   /// Appelle POST /conversations
   Future<String> createConversation(
     String groupId,
-    List<String> userIds,
-    Map<String, String> encryptedSecrets,
-    String creatorSignature,
+    List<String> memberIds,
+    String type,
   ) =>
       _apiService.createConversation(
         groupId: groupId,
-        userIds: userIds,
-        encryptedSecrets: encryptedSecrets,
-        creatorSignature: creatorSignature,
+        memberIds: memberIds,
+        type: type,
       );
 
   /// Appelle GET /conversations/:id et met à jour la liste.

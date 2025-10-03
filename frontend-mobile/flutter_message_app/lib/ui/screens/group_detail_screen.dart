@@ -91,18 +91,18 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
 
     final convProv = context.read<ConversationProvider>();
 
-    // 1) Compose la liste des participants
-    final participants = Set<String>.from(_selectedUserIds)..add(currentUserId);
+    // 1) Compose la liste des participants (sans l'utilisateur courant, automatiquement inclus côté backend)
+    final selectedUserIdsWithoutMe = _selectedUserIds.where((id) => id != currentUserId).toList();
 
-    // 2) V2: conversation creation rework pending
+    // 2) V2: conversation creation simple pour l'instant
+    const String conversationType = 'subset'; // ou 'private' selon les besoins
 
-    // 3) Appel à l’API
+    // 3) Appel à l'API
     try {
       final String newConversationId = await convProv.createConversation(
         widget.groupId,
-        participants.toList(),
-        <String,String>{},
-        '',
+        selectedUserIdsWithoutMe,
+        conversationType,
       );
       SnackbarService.showSuccess(context, 'Conversation créée !');
       Navigator.pushReplacement(
@@ -132,13 +132,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     // Debug info
     debugPrint('🔄 Group Detail - Members: ${groupProv.members.length}, Conversations: ${convProv.conversations.length}');
 
-    // Trie : place l’utilisateur courant en dernier
-    final members = List<Map<String, dynamic>>.from(groupProv.members);
-    members.sort((a, b) {
-      if (a['userId'] == currentUserId) return 1;
-      if (b['userId'] == currentUserId) return -1;
-      return 0;
-    });
+    // Filtre : exclut l'utilisateur courant de la liste des sélectionnables
+    final members = List<Map<String, dynamic>>.from(groupProv.members)
+        .where((member) => member['userId'] != currentUserId)
+        .toList();
+    members.sort((a, b) => (a['username'] as String).compareTo(b['username'] as String));
 
     // Filtre des conversations du groupe
     final convs = convProv.conversations
@@ -274,40 +272,105 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               children: [
                 const Divider(height: 1),
 
-                // Section des membres + création de conversation
-                if (members.isNotEmpty) ...[
-                  const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Text(
-                      'Membres du groupe',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                // Section de création de conversation  
+                Card(
+                  margin: const EdgeInsets.all(8.0),
+                  child: ExpansionTile(
+                    title: Row(
+                      children: [
+                        const Icon(Icons.add_circle_outline, color: Colors.blue),
+                        const SizedBox(width: 8),
+                        const Text('💬 Créer une conversation', 
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                        if (_selectedUserIds.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.blue,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text('${_selectedUserIds.length}', 
+                              style: const TextStyle(color: Colors.white, fontSize: 12)),
+                          ),
+                        ],
+                      ],
                     ),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Sélectionnez les participants :', 
+                              style: TextStyle(fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 4),
+                            const Text('(Vous êtes automatiquement inclus)', 
+                              style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            const SizedBox(height: 12),
+                            if (members.isEmpty)
+                              const Card(
+                                child: Padding(
+                                  padding: EdgeInsets.all(16.0),
+                                  child: Text('Aucun autre membre dans ce groupe', 
+                                    style: TextStyle(color: Colors.grey)),
+                                ),
+                              )
+                            else ...[
+                              Container(
+                                constraints: const BoxConstraints(maxHeight: 200),
+                                child: ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: members.length,
+                                  itemBuilder: (context, index) {
+                                    final member = members[index];
+                                    final isSelected = _selectedUserIds.contains(member['userId']);
+                                    return CheckboxListTile(
+                                      dense: true,
+                                      title: Text(member['username'] ?? member['email'] ?? 'Utilisateur',
+                                        style: const TextStyle(fontSize: 14)),
+                                      subtitle: Text(member['email'] ?? '', 
+                                        style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                      value: isSelected,
+                                      onChanged: (bool? checked) {
+                                        setState(() {
+                                          if (checked == true) {
+                                            _selectedUserIds.add(member['userId']);
+                                          } else {
+                                            _selectedUserIds.remove(member['userId']);
+                                          }
+                                        });
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  TextButton.icon(
+                                    onPressed: () => setState(() => _selectedUserIds.clear()),
+                                    icon: const Icon(Icons.clear, size: 16),
+                                    label: const Text('Effacer'),
+                                  ),
+                                  const Spacer(),
+                                  TextButton.icon(
+                                    onPressed: () => setState(() {
+                                      _selectedUserIds.clear();
+                                      _selectedUserIds.addAll(members.map((m) => m['userId'] as String));
+                                    }),
+                                    icon: const Icon(Icons.select_all, size: 16),
+                                    label: const Text('Tout sélectionner'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  Container(
-                    height: 200, // Hauteur fixe pour la liste des membres
-                    child: ListView.builder(
-                      itemCount: members.length,
-                      itemBuilder: (context, index) {
-                        final member = members[index];
-                        final isSelected = _selectedUserIds.contains(member['userId']);
-                        return CheckboxListTile(
-                          title: Text(member['username'] ?? member['email'] ?? 'Utilisateur'),
-                          subtitle: Text(member['email'] ?? ''),
-                          value: isSelected,
-                          onChanged: (bool? checked) {
-                            setState(() {
-                              if (checked == true) {
-                                _selectedUserIds.add(member['userId']);
-                              } else {
-                                _selectedUserIds.remove(member['userId']);
-                              }
-                            });
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
+                ),
 
                 const Divider(height: 1),
 

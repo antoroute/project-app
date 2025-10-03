@@ -236,22 +236,20 @@ class ApiService {
   /// Crée une nouvelle conversation via POST /conversations.
   Future<String> createConversation({
     required String groupId,
-    required List<String> userIds,
-    required Map<String, String> encryptedSecrets,
-    required String creatorSignature,
+    required List<String> memberIds,
+    required String type,
   }) async {
     final Map<String, String> headers = await _buildHeaders();
     final Uri uri = Uri.parse('$_baseUrl/conversations');
     final String payload = jsonEncode(<String, dynamic>{
       'groupId': groupId,
-      'userIds': userIds,
-      'encryptedSecrets': encryptedSecrets,
-      'creatorSignature': creatorSignature,
+      'type': type,
+      'memberIds': memberIds,
     });
     final http.Response response = await http.post(uri, headers: headers, body: payload);
 
     if (response.statusCode == 201 || response.statusCode == 200) {
-      return (jsonDecode(response.body) as Map<String, dynamic>)['conversationId'] as String;
+      return (jsonDecode(response.body) as Map<String, dynamic>)['id'] as String;
     }
     if (response.statusCode == 429) {
       throw RateLimitException();
