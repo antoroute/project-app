@@ -56,6 +56,81 @@ export default async function routes(app: FastifyInstance) {
     return rows;
   });
 
+  // GET /api/groups/:id : détails d'un groupe spécifique
+  app.get('/api/groups/:id', {
+    schema: {
+      params: Type.Object({ id: Type.String({ format: 'uuid' }) })
+    }
+  }, async (req, reply) => {
+    const userId = (req.user as any).sub;
+    const { id: groupId } = req.params as any;
+
+    // Vérifie que l'utilisateur est membre du groupe
+    const membership = await app.db.oneOrNone(
+      `SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`,
+      [userId, groupId]
+    );
+    
+    if (!membership) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
+
+    // Récupère les détails du groupe
+    const group = await app.db.oneOrNone(
+      `SELECT g.id, g.name, g.creator_id, g.created_at
+        FROM groups g WHERE g.id=$1`,
+      [groupId]
+    );
+
+    if (!group) {
+      return reply.code(404).send({ error: 'group_not_found' });
+    }
+
+    return {
+      id: group.id,
+      name: group.name,
+      creatorId: group.creator_id,
+      createdAt: group.created_at.toISOString()
+    };
+  });
+
+  // GET /api/groups/:id/members : membres d'un groupe
+  app.get('/api/groups/:id/members', {
+    schema: {
+      params: Type.Object({ id: Type.String({ format: 'uuid' }) })
+    }
+  }, async (req, reply) => {
+    const userId = (req.user as any).sub;
+    const { id: groupId } = req.params as any;
+
+    // Vérifie que l'utilisateur est membre du groupe
+    const membership = await app.db.oneOrNone(
+      `SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`,
+      [userId, groupId]
+    );
+    
+    if (!membership) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
+
+    // Récupère les membres du groupe
+    const members = await app.db.any(
+      `SELECT u.id, u.email, u.username, u.created_at
+        FROM users u
+        JOIN user_groups ug ON ug.user_id = u.id
+        WHERE ug.group_id = $1
+        ORDER BY u.username`,
+      [groupId]
+    );
+
+    return members.map((member: any) => ({
+      userId: member.id,
+      email: member.email,
+      username: member.username,
+      joinedAt: member.created_at.toISOString()
+    }));
+  });
+
   // POST /api/groups/:id/join  { deviceId, pk_sig, pk_kem, groupSigningPubKey, groupKEMPubKey }
   // Crée une join_request (v2) incluant les clés de l'appareil initial et du groupe
   app.post('/api/groups/:id/join', {
