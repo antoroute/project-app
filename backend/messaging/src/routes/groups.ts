@@ -46,7 +46,7 @@ export default async function routes(app: FastifyInstance) {
   app.get('/api/groups', async (req, reply) => {
     const userId = (req.user as any).sub;
     const rows = await app.db.any(
-      `SELECT g.id, g.name, g.created_at as "createdAt"
+      `SELECT g.id, g.name, g.creator_id, g.created_at as "createdAt"
          FROM groups g
          JOIN user_groups ug ON ug.group_id=g.id
         WHERE ug.user_id=$1

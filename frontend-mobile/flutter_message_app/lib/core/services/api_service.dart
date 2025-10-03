@@ -61,13 +61,7 @@ class ApiService {
     if (res.statusCode == 200) {
       final List<dynamic> body = jsonDecode(res.body) as List<dynamic>;
       return body.map((dynamic e) {
-        final Map<String, dynamic> m = e as Map<String, dynamic>;
-        return GroupInfo(
-          groupId:    m['groupId']   as String,
-          name:       m['name']      as String,
-          creatorId:  m['creatorId'] as String,
-          createdAt:  DateTime.parse(m['createdAt'] as String),
-        );
+        return GroupInfo.fromJson(e as Map<String, dynamic>);
       }).toList();
     }
     if (res.statusCode == 429) {
