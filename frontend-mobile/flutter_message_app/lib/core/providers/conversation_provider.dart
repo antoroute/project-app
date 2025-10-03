@@ -325,6 +325,16 @@ class ConversationProvider extends ChangeNotifier {
       await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
       
       final recipients = await _keyDirectory.fetchGroupDevices(groupId);
+      
+      // Debug: vérifier les clés des destinataires
+      debugPrint('🔍 Debug clés destinataires:');
+      for (final recipient in recipients) {
+        debugPrint('  📱 Device ${recipient.deviceId}:');
+        debugPrint('    - pk_sig length: ${recipient.pkSigB64.length}');
+        debugPrint('    - pk_kem length: ${recipient.pkKemB64.length}');
+        debugPrint('    - pk_sig: ${recipient.pkSigB64.substring(0, math.min(10, recipient.pkSigB64.length))}...');
+      }
+      
       final payload = await MessageCipherV2.encrypt(
         groupId: groupId,
         convId: conversationId,

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_v2.dart';
@@ -86,6 +87,10 @@ class MessageCipherV2 {
     // wrap mk per recipient
     final List<Map<String, String>> recipients = [];
     for (final entry in recipientsDevices) {
+      debugPrint('🔐 Processing recipient ${entry.userId}/${entry.deviceId}:');
+      debugPrint('  - pkKemB64 length: ${entry.pkKemB64.length}');
+      debugPrint('  - pkKemB64: ${entry.pkKemB64.substring(0, math.min(10, entry.pkKemB64.length))}...');
+      
       final recipientPub = SimplePublicKey(
         base64.decode(entry.pkKemB64),
         type: KeyPairType.x25519,
@@ -132,9 +137,12 @@ class MessageCipherV2 {
     };
 
     // sign
+    debugPrint('📝 Signature pour sender $senderDeviceId:');
     final edKey = await KeyManagerV2.instance.loadEd25519KeyPair(groupId, senderDeviceId);
+    debugPrint('  - Ed25519 keypair obtenu: ${edKey != null ? "✅" : "❌"}');
     final ed = Ed25519();
     final signature = await ed.sign(_concatCanonical(payload), keyPair: edKey);
+    debugPrint('  - Signature créée: ${signature.bytes.length} bytes');
     payload['sig'] = _b64(Uint8List.fromList(signature.bytes));
 
     return payload;

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -48,6 +49,19 @@ class KeyManagerV2 {
   Future<Map<String, String>> publicKeysBase64(String groupId, String deviceId) async {
     final ed = await _storage.read(key: _ns(groupId, deviceId, 'ed25519', 'pub'));
     final x = await _storage.read(key: _ns(groupId, deviceId, 'x25519', 'pub'));
+    
+    debugPrint('🔍 publicKeysBase64 pour group=$groupId, device=$deviceId:');
+    debugPrint('  - ed25519 clé trouvée: ${ed != null ? "✅" : "❌"}');
+    debugPrint('  - x25519 clé trouvée: ${x != null ? "✅" : "❌"}');
+    if (ed != null) debugPrint('  - ed25519 length: ${ed.length}');
+    if (x != null) debugPrint('  - x25519 length: ${x.length}');
+    
+    // Debug additional storage keys
+    final edPriv = await _storage.read(key: _ns(groupId, deviceId, 'ed25519', 'priv'));
+    final xPriv = await _storage.read(key: _ns(groupId, deviceId, 'x25519', 'priv'));
+    debugPrint('  - ed25519 priv trouvée: ${edPriv != null ? "✅" : "❌"}');
+    debugPrint('  - x25519 priv trouvée: ${xPriv != null ? "✅" : "❌"}');
+    
     if (ed == null || x == null) {
       throw Exception('Missing public keys for $groupId/$deviceId');
     }
