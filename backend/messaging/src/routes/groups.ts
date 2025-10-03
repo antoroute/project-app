@@ -265,6 +265,53 @@ export default async function routes(app: FastifyInstance) {
     }));
   });
 
+  // POST /api/groups/:id/join-requests/:reqId/handle
+  // Route pour accepter/rejeter une demande de jointure (compatibilité frontend)
+  app.post('/api/groups/:id/join-requests/:reqId/handle', {
+    schema: {
+      params: Type.Object({ 
+        id: Type.String({ format: 'uuid' }),
+        reqId: Type.String({ format: 'uuid' })
+      }),
+      body: Type.Object({
+        action: Type.String({ enum: ['accept', 'reject'] })
+      })
+    }
+  }, async (req, reply) => {
+    const approverId = (req.user as any).sub;
+    const { id: groupId, reqId } = req.params as any;
+    const { action } = req.body as any;
+
+    // Vérifie que l'approver est membre du groupe
+    const membership = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [approverId, groupId]);
+    if (membership.length === 0) return reply.code(403).send({ error: 'forbidden' });
+
+    if (action === 'accept') {
+      // Code pour accepter la demande (identique à la route /accept)
+      const jr = await app.db.one(`SELECT * FROM join_requests WHERE id=$1 AND group_id=$2 AND status='pending'`, [reqId, groupId]);
+      
+      // Ajoute le user
+      await app.db.none(`INSERT INTO user_groups(user_id, group_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [jr.user_id, groupId]);
+      
+      // Publie la clé device initiale comme active
+      await app.db.none(
+        `INSERT INTO group_device_keys(group_id, user_id, device_id, pk_sig, pk_kem, key_version, status)
+         VALUES($1,$2,$3,$4,$5,1,'active')
+         ON CONFLICT (group_id,user_id,device_id) DO NOTHING`,
+        [groupId, jr.user_id, jr.device_id, jr.pk_sig, jr.pk_kem]
+      );
+      
+      // Marque la requête comme acceptée
+      await app.db.none(`UPDATE join_requests SET status='accepted', handled_by=$1 WHERE id=$2`, [approverId, reqId]);
+    } else if (action === 'reject') {
+      // Code pour rejeter la demande (identique à la route /reject)
+      await app.db.none(`UPDATE join_requests SET status='rejected', handled_by=$1 WHERE id=$2`, [approverId, reqId]);
+    }
+
+    reply.code(200); // Explicitement retourner le code 200 OK
+    return { ok: true };
+  });
+
   // POST /api/groups/:id/requests/:rid/reject
   app.post('/api/groups/:id/requests/:rid/reject', {
     schema: {

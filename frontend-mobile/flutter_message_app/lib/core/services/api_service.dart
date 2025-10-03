@@ -161,7 +161,7 @@ class ApiService {
     final String payload = jsonEncode(<String, String>{ 'action': action });
     final http.Response response = await http.post(uri, headers: headers, body: payload);
 
-    if (response.statusCode == 200) {
+    if (response.statusCode == 200 || response.statusCode == 201) {
       return;
     }
     if (response.statusCode == 429) {
@@ -216,7 +216,7 @@ class ApiService {
       'key_version': keyVersion,
     });
     final res = await http.post(uri, headers: headers, body: payload);
-    if (res.statusCode == 201) return;
+    if (res.statusCode == 201 || res.statusCode == 200) return;
     if (res.statusCode == 429) throw RateLimitException();
     throw Exception('Erreur ${res.statusCode} lors de la publication clé device.');
   }
@@ -250,7 +250,7 @@ class ApiService {
     });
     final http.Response response = await http.post(uri, headers: headers, body: payload);
 
-    if (response.statusCode == 201) {
+    if (response.statusCode == 201 || response.statusCode == 200) {
       return (jsonDecode(response.body) as Map<String, dynamic>)['conversationId'] as String;
     }
     if (response.statusCode == 429) {
@@ -349,7 +349,7 @@ class ApiService {
     });
     final http.Response response = await http.post(uri, headers: headers, body: payload);
 
-    if (response.statusCode == 201) {
+    if (response.statusCode == 201 || response.statusCode == 200) {
       final Map<String, dynamic> body = jsonDecode(response.body)['message'] as Map<String, dynamic>;
       return Message.fromJson(body);
     }
@@ -368,7 +368,7 @@ class ApiService {
     final uri = Uri.parse('$_baseUrl/messages');
     final body = jsonEncode(payloadV2);
     final res = await http.post(uri, headers: headers, body: body);
-    if (res.statusCode == 201) {
+    if (res.statusCode == 201 || res.statusCode == 200) {
       final Map<String, dynamic> parsed = jsonDecode(res.body) as Map<String, dynamic>;
       // backend returns { id }
       return parsed;
