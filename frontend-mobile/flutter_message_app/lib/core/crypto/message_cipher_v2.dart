@@ -104,10 +104,12 @@ class MessageCipherV2 {
         type: KeyPairType.x25519,
       );
       final shared = await x.sharedSecretKey(keyPair: eph, remotePublicKey: recipientPub);
+      final infoData = 'project-app/v2 $groupId $convId ${entry.userId} ${entry.deviceId}';
+      debugPrint('🔐 HKDF Info encryption for ${entry.userId}/${entry.deviceId}: $infoData');
       final kek = await _hkdf.deriveKey(
         secretKey: shared,
         nonce: salt,
-        info: utf8.encode('project-app/v2 $groupId $convId ${entry.userId} ${entry.deviceId}'),
+        info: utf8.encode(infoData),
       );
       final kekBytes = Uint8List.fromList(await kek.extractBytes());
       final wrapNonce = _randomBytes(12);
@@ -160,7 +162,12 @@ class MessageCipherV2 {
     final ed = Ed25519();
     final signature = await ed.sign(_concatCanonical(payload), keyPair: edKey);
     debugPrint('  - Signature créée: ${signature.bytes.length} bytes');
-    payload['sig'] = _b64(Uint8List.fromList(signature.bytes));
+    
+    final sigB64 = _b64(Uint8List.fromList(signature.bytes));
+    debugPrint('  - Signature encoded length: ${sigB64.length} chars');
+    debugPrint('  - Signature encoded preview: ${sigB64.substring(0, math.min(20, sigB64.length))}...');
+    
+    payload['sig'] = sigB64;
 
     return payload;
   }
@@ -229,10 +236,12 @@ class MessageCipherV2 {
       debugPrint('  - Salt régénérée (fallback ancien format)');
     }
     
+    final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
+    debugPrint('🔓 HKDF Info decryption for $myUserId/$myDeviceId: $infoData');
     final kek = await _hkdf.deriveKey(
       secretKey: shared,
       nonce: salt,
-      info: utf8.encode('project-app/v2 $groupId ${messageV2['convId']} $senderUserId $senderDeviceId'),
+      info: utf8.encode(infoData),
     );
     final kekBytes = Uint8List.fromList(await kek.extractBytes());
 
@@ -278,7 +287,18 @@ class MessageCipherV2 {
     debugPrint('  - sigPubBytes length après decode: ${sigPubBytes.length}');
     
     final pub = SimplePublicKey(sigPubBytes, type: KeyPairType.ed25519);
-    final sigBytes = base64.decode(messageV2['sig'] as String);
+    
+    // Debug de la signature avant décodage
+    final sigString = messageV2['sig'] as String;
+    debugPrint('🔍 Debug signature AVANT décodage:');
+    debugPrint('  - sigString length: ${sigString.length}');
+    debugPrint('  - sigString preview: ${sigString.substring(0, math.min(20, sigString.length))}...');
+    debugPrint('  - Expected ~88 chars for 64-byte signature');
+    
+    final sigBytes = base64.decode(sigString);
+    debugPrint('  - sigBytes decoded length: ${sigBytes.length}');
+    debugPrint('  - Expected 64 bytes for Ed25519 signature');
+    
     final verified = await ed.verify(
       _concatCanonical(messageV2),
       signature: Signature(sigBytes, publicKey: pub),

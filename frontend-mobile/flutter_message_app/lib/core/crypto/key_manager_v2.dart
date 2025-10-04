@@ -16,9 +16,12 @@ class KeyManagerV2 {
   String _ns(String groupId, String deviceId, String kind, String part) =>
       'v2:$groupId:$deviceId:$kind:$part';
 
-  // Cache des KeyPair en mémoire pour éviter les reconstructions
+  // Cache persistant des KeyPair en mémoire pour garantir la cohérence 
   final Map<String, SimpleKeyPair> _ed25519Cache = <String, SimpleKeyPair>{};
   final Map<String, SimpleKeyPair> _x25519Cache = <String, SimpleKeyPair>{};
+  
+  // Flag pour savoir si les clés ont été chargées depuis le stockage
+  final Set<String> _loadedFromStorage = <String>{};
   
   String _cacheKey(String groupId, String deviceId) => '$groupId:$deviceId';
 
@@ -94,16 +97,20 @@ class KeyManagerV2 {
       return _ed25519Cache[cacheKey]!;
     }
     
-    // Ensure keys exist (this will cache them)
-    await ensureKeysFor(groupId, deviceId);
-    
-    // Should now be in cache
-    if (_ed25519Cache.containsKey(cacheKey)) {
-      debugPrint('✅ Ed25519 keypair loaded from cached generation');
-      return _ed25519Cache[cacheKey]!;
+    // If we've never loaded from storage for this group/device, ensure keys exist
+    if (!_loadedFromStorage.contains(cacheKey)) {
+      debugPrint('📦 First access to Ed25519 keys for $groupId/$deviceId - ensuring they exist');
+      await ensureKeysFor(groupId, deviceId);
+      _loadedFromStorage.add(cacheKey);
+      
+      // Should now be in cache
+      if (_ed25519Cache.containsKey(cacheKey)) {
+        debugPrint('✅ Ed25519 keypair loaded from initial generation');
+        return _ed25519Cache[cacheKey]!;
+      }
     }
     
-    throw Exception('Failed to generate/cache Ed25519 keys for $groupId/$deviceId');
+    throw Exception('Failed to access Ed25519 keypair for $groupId/$deviceId');
   }
 
   Future<SimpleKeyPair> loadX25519KeyPair(String groupId, String deviceId) async {
@@ -115,16 +122,20 @@ class KeyManagerV2 {
       return _x25519Cache[cacheKey]!;
     }
     
-    // Ensure keys exist (this will cache them)
-    await ensureKeysFor(groupId, deviceId);
-    
-    // Should now be in cache
-    if (_x25519Cache.containsKey(cacheKey)) {
-      debugPrint('✅ X25519 keypair loaded from cached generation');
-      return _x25519Cache[cacheKey]!;
+    // If we've never loaded from storage for this group/device, ensure keys exist
+    if (!_loadedFromStorage.contains(cacheKey)) {
+      debugPrint('📦 First access to X25519 keys for $groupId/$deviceId - ensuring they exist');
+      await ensureKeysFor(groupId, deviceId);
+      _loadedFromStorage.add(cacheKey);
+      
+      // Should now be in cache
+      if (_x25519Cache.containsKey(cacheKey)) {
+        debugPrint('✅ X25519 keypair loaded from initial generation');
+        return _x25519Cache[cacheKey]!;
+      }
     }
     
-    throw Exception('Failed to generate/cache X25519 keys for $groupId/$deviceId');
+    throw Exception('Failed to access X25519 keypair for $groupId/$deviceId');
   }
 
   /// Clear cache when needed (e.g., on logout)
@@ -134,14 +145,14 @@ class KeyManagerV2 {
     debugPrint('🗑️ KeyManagerV2 cache cleared');
   }
 
-  /// Clear cache for specific group/device
+  /// Clear cache for specific group/device (logout/cleanup)
   void clearCacheFor(String groupId, String deviceId) {
     final cacheKey = _cacheKey(groupId, deviceId);
     _ed25519Cache.remove(cacheKey);
     _x25519Cache.remove(cacheKey);
+    _loadedFromStorage.remove(cacheKey);
     debugPrint('🗑️ KeyManagerV2 cache cleared for $groupId:$deviceId');
   }
-
 }
 
 

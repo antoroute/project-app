@@ -77,14 +77,11 @@ export default async function routes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
-    const rows = await app.db.any(`
+    const rawRows = await app.db.any(`
       SELECT m.id, m.conversation_id as "convId",
-             encode(m.sender_eph_pub,'base64') as "sender_eph_pub",
-             encode(m.iv,'base64') as "iv",
-             encode(m.ciphertext,'base64') as "ciphertext",
+             m.sender_eph_pub, m.iv, m.ciphertext,
              m.wrapped_keys as "recipients",
-             encode(m.sig,'base64') as "sig",
-             encode(m.salt,'base64') as "salt",
+             m.sig, m.salt,
              m.alg, m.v, m.sender_id as "senderUserId", m.sender_device_id as "senderDeviceId",
              m.message_id as "messageId", extract(epoch from m.sent_at)::bigint as "sentAt",
              c.group_id as "groupId"
@@ -95,6 +92,16 @@ export default async function routes(app: FastifyInstance) {
        ORDER BY m.sent_at DESC
        LIMIT $3
     `, [id, cursor ? new Date(Number(cursor)) : null, limit]);
+    
+    // Convertir les bytes PostgreSQL en Base64 standard Node.js
+    const rows = rawRows.map(row => ({
+      ...row,
+      sender_eph_pub: row.sender_eph_pub.toString('base64'),
+      iv: row.iv.toString('base64'),
+      ciphertext: row.ciphertext.toString('base64'),
+      sig: row.sig.toString('base64'), // Fix Base64 encoding
+      salt: row.salt.toString('base64')
+    }));
     console.log(`📥 Messages found for conversation ${id}: ${rows.length} messages`);
     return { items: rows, nextCursor: rows.length ? rows[rows.length-1].sentAt : null };
   });

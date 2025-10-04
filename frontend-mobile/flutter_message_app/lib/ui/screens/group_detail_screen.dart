@@ -11,6 +11,8 @@ import '../../core/providers/group_provider.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/services/snackbar_service.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/session_device_service.dart';
+import '../../core/crypto/key_manager_v2.dart';
 // Legacy creation via RSA removed in v2
 import 'my_devices_screen.dart';
 import 'join_requests_screen.dart';
@@ -82,6 +84,58 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     }
   }
 
+  Future<void> _regenerateKeys() async {
+    try {
+      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      
+      // Afficher dialog de confirmation
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Régénérer les clés'),
+            content: const Text(
+              'Cette action va supprimer vos anciennes clés de chiffrement et en générer de nouvelles. '
+              'Vous ne pourrez plus déchiffrer vos anciens messages.\n\n'
+              'Continuer?'
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Annuler'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Continuer', style: TextStyle(color: Colors.red)),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (confirmed == true) {
+        // Simply clear cache and reload - clés seront regénérées automatiquement si nécessaire
+        KeyManagerV2.instance.clearCacheFor(widget.groupId, deviceId);
+        
+        // Clear the key inconsistency flag 
+        final convProv = Provider.of<ConversationProvider>(context, listen: false);
+        convProv.clearKeyInconsistency(widget.groupId);
+        
+        SnackbarService.showSuccess(
+          context, 
+          'Cache des clés vidé ! Les clés seront regénérées automatiquement.'
+        );
+        
+        // Reload data to reflect changes
+        _loadGroupData();
+      }
+    } catch (error) {
+      SnackbarService.showError(
+        context, 
+        'Erreur lors de la régénération des clés : $error'
+      );
+    }
+  }
 
   Future<void> _createConversation() async {
     final String? currentUserId = context.read<AuthProvider>().userId;
@@ -303,7 +357,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 const Text(
-                                  'Vos messages ne peuvent pas être déchiffrés. Vos clés sont incohérentes.',
+                                  'Vos messages ne peuvent pas être déchiffré. Cliquez sur 🔒 pour régénérer les clés.',
                                   style: TextStyle(fontSize: 12),
                                 ),
                               ],
@@ -433,6 +487,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                         const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.security),
+                          onPressed: () => _regenerateKeys(),
+                          tooltip: 'Régénérer les clés',
+                        ),
                         IconButton(
                           icon: const Icon(Icons.refresh),
                           onPressed: _loadGroupData,
