@@ -111,6 +111,17 @@ class ConversationProvider extends ChangeNotifier {
       
     } catch (e) {
       debugPrint('❌ Erreur déchiffrement message $msgId: $e');
+      
+      // Détecter spécifiquement les erreurs MAC = clés incohérentes
+      if (e.toString().contains('SecretBoxAuthenticationError') || e.toString().contains('MAC')) {
+        // Proposer la régénération des clés
+        _handleKeyInconsistencyDetected(message.v2Data!['groupId'] as String);
+        const errorText = '[❌ Erreur MAC - Clés incohérentes]';
+        _decryptedCache[msgId] = errorText;
+        message.decryptedText = errorText;
+        return errorText;
+      }
+      
       final errorText = '[Erreur déchiffrement: ${e.toString().substring(0, e.toString().length > 50 ? 50 : e.toString().length)}]';
       _decryptedCache[msgId] = errorText;
       message.decryptedText = errorText;
@@ -375,6 +386,29 @@ class ConversationProvider extends ChangeNotifier {
       SnackbarService.showError(context, 'Impossible d\'envoyer le message : $e');
       rethrow;
     }
+  }
+
+  /// Gère la détection d'incohérence des clés (MAC errors)
+  void _handleKeyInconsistencyDetected(String groupId) {
+    debugPrint('🚨 Key inconsistency detected for group $groupId');
+    
+    // Forcer la notification en permanence jusqu'à résolution
+    _keyInconsistencyGroups.add(groupId);
+    notifyListeners();
+    
+    debugPrint('🔧 Key inconsistency groups: $_keyInconsistencyGroups');
+  }
+
+  // Set des groupes avec des clés incohérentes
+  final Set<String> _keyInconsistencyGroups = <String>{};
+
+  /// Vérifier s'il y a des incohérences de clés
+  bool hasKeyInconsistency(String groupId) => _keyInconsistencyGroups.contains(groupId);
+  
+  /// Réinitialiser l'état d'incohérence pour un groupe
+  void clearKeyInconsistency(String groupId) {
+    _keyInconsistencyGroups.remove(groupId);
+    notifyListeners();
   }
 
   /// S'assurer que les clés de notre device sont publiées pour le groupe
