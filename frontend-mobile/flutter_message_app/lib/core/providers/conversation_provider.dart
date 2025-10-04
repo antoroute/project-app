@@ -10,6 +10,7 @@ import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_v2.dart';
 
@@ -25,6 +26,10 @@ class ConversationProvider extends ChangeNotifier {
   final Map<String, List<Message>> _messages = {};
   /// Messages déchiffrés (cache des textes en clair)
   final Map<String, String> _decryptedCache = {};
+  final FlutterSecureStorage _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
   /// Presence: userId -> online
   final Map<String, bool> _userOnline = <String, bool>{};
   /// Presence: userId -> device count
@@ -42,6 +47,8 @@ class ConversationProvider extends ChangeNotifier {
     _webSocketService.onConvRead = _onConvRead;
     _webSocketService.onUserAdded = _onWebSocketUserAdded;
     _webSocketService.onConversationJoined = _onWebSocketConversationJoined;
+    // Charger le cache de déchiffrement au démarrage
+    _loadDecryptedCache();
   }
 
   Future<void> postRead(String conversationId) async {
@@ -56,6 +63,34 @@ class ConversationProvider extends ChangeNotifier {
   /// Messages en mémoire pour une conversation donnée.
   List<Message> messagesFor(String conversationId) =>
       _messages[conversationId] ?? <Message>[];
+
+  /// Charge le cache de déchiffrement depuis le stockage sécurisé
+  Future<void> _loadDecryptedCache() async {
+    try {
+      final cacheData = await _storage.read(key: 'decrypted_cache');
+      if (cacheData != null) {
+        final Map<String, dynamic> cache = jsonDecode(cacheData);
+        _decryptedCache.clear();
+        cache.forEach((key, value) {
+          _decryptedCache[key] = value as String;
+        });
+        debugPrint('📱 Cache de déchiffrement chargé: ${_decryptedCache.length} messages');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Erreur chargement cache déchiffrement: $e');
+    }
+  }
+
+  /// Sauvegarde le cache de déchiffrement dans le stockage sécurisé
+  Future<void> _saveDecryptedCache() async {
+    try {
+      final cacheData = jsonEncode(_decryptedCache);
+      await _storage.write(key: 'decrypted_cache', value: cacheData);
+      debugPrint('💾 Cache de déchiffrement sauvegardé: ${_decryptedCache.length} messages');
+    } catch (e) {
+      debugPrint('⚠️ Erreur sauvegarde cache déchiffrement: $e');
+    }
+  }
 
   /// Déchiffre un message à la demande et le met en cache
   Future<String?> decryptMessageIfNeeded(Message message) async {
@@ -105,6 +140,9 @@ class ConversationProvider extends ChangeNotifier {
       // Enregistrer en cache et dans l'objet message
       _decryptedCache[msgId] = decryptedText;
       message.decryptedText = decryptedText;
+      
+      // Sauvegarder le cache
+      await _saveDecryptedCache();
       
       debugPrint('✅ Message $msgId déchiffré avec succès');
       return decryptedText;
@@ -167,6 +205,9 @@ class ConversationProvider extends ChangeNotifier {
       debugPrint('    - V2Data: ${msg.v2Data != null ? "✅" : "❌"}');
       debugPrint('    - Déchiffré: ${msg.decryptedText != null ? "✅" : "❌"}');
       debugPrint('    - Cache: ${_decryptedCache.containsKey(msg.id) ? "✅" : "❌"}');
+      if (msg.decryptedText != null) {
+        debugPrint('    - Texte: ${msg.decryptedText!.substring(0, math.min(20, msg.decryptedText!.length))}...');
+      }
     }
   }
   bool isUserOnline(String userId) => _userOnline[userId] == true;
@@ -256,13 +297,38 @@ class ConversationProvider extends ChangeNotifier {
         );
       }).toList();
       
-      // Pour le chargement initial, remplacer complètement
+      // Trier les messages par timestamp (plus récent en premier)
+      display.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      
+      // Pour le chargement initial, remplacer complètement mais préserver les textes déchiffrés
       if (cursor == null) {
+        // Sauvegarder les textes déchiffrés existants
+        final existingMessages = _messages[conversationId] ?? [];
+        final decryptedTexts = <String, String>{};
+        for (final msg in existingMessages) {
+          if (msg.decryptedText != null) {
+            decryptedTexts[msg.id] = msg.decryptedText!;
+          }
+        }
+        
+        // Restaurer les textes déchiffrés dans les nouveaux messages
+        for (final msg in display) {
+          if (decryptedTexts.containsKey(msg.id)) {
+            msg.decryptedText = decryptedTexts[msg.id];
+            _decryptedCache[msg.id] = decryptedTexts[msg.id]!;
+          } else if (_decryptedCache.containsKey(msg.id)) {
+            // Restaurer depuis le cache persistant
+            msg.decryptedText = _decryptedCache[msg.id];
+          }
+        }
+        
         _messages[conversationId] = display;
       } else {
         // Pour la pagination, ajouter au début (messages plus anciens)
         final existing = _messages[conversationId] ?? [];
         _messages[conversationId] = [...display, ...existing];
+        // Re-trier après ajout
+        _messages[conversationId]!.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       }
       
       notifyListeners();

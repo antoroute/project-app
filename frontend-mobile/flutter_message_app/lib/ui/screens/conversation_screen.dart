@@ -55,12 +55,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
     if (!_scrollController.hasClients) return;
     final offset = _scrollController.offset;
     final maxExtent = _scrollController.position.maxScrollExtent;
-    final atBottom = offset < _nearBottomThreshold;
-    final showButton = offset > _showButtonThreshold;
+    final atBottom = (maxExtent - offset) < _nearBottomThreshold;
+    final showButton = (maxExtent - offset) > _showButtonThreshold;
 
     // Déclencher le chargement de messages plus anciens quand on approche du haut
     const loadMoreThreshold = 200.0;
-    if (offset > (maxExtent - loadMoreThreshold) && !_isLoading && _initialDecryptDone) {
+    if (offset < loadMoreThreshold && !_isLoading && _initialDecryptDone) {
       _loadOlderMessages();
     }
 
@@ -176,7 +176,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   void _scrollToBottom({bool animate = true}) {
     if (!_scrollController.hasClients) return;
-    final target = 0.0;
+    final target = _scrollController.position.maxScrollExtent;
     if (animate) {
       _scrollController.animateTo(
         target,
@@ -295,10 +295,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
               Expanded(
                 child: ListView(
                   controller: _scrollController,
-                  reverse: true,
+                  reverse: false,
                   physics: const ClampingScrollPhysics(),
                   children: [
-                    // Indicateur de chargement pour pagination (en haut de la liste inversée)
+                    // Indicateur de chargement pour pagination (en haut de la liste)
                     if (_isLoading) 
                       const Padding(
                         padding: EdgeInsets.all(16.0),
@@ -306,7 +306,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           child: CircularProgressIndicator(),
                         ),
                       ),
-                    ...chatItems.reversed.toList(),
+                    ...chatItems,
                   ],
                 ),
               ),
