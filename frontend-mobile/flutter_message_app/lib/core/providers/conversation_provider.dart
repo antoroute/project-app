@@ -116,7 +116,16 @@ class ConversationProvider extends ChangeNotifier {
       if (e.toString().contains('SecretBoxAuthenticationError') || e.toString().contains('MAC')) {
         // Proposer la régénération des clés
         _handleKeyInconsistencyDetected(message.v2Data!['groupId'] as String);
-        const errorText = '[❌ Erreur MAC - Clés incohérentes]';
+        
+        // Si c'est un message ancien (avant régénération des clés), utiliser un message différent
+        final messageTimestamp = message.timestamp;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final ageHours = (now - messageTimestamp) / (1000 * 60 * 60);
+        
+        final errorText = ageHours > 1 
+            ? '[📅 Message ancien - Clés régénérées]' 
+            : '[❌ Erreur MAC - Clés incohérentes]';
+        
         _decryptedCache[msgId] = errorText;
         message.decryptedText = errorText;
         return errorText;

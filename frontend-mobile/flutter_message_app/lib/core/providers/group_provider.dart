@@ -263,6 +263,22 @@ class GroupProvider extends ChangeNotifier {
       rethrow;
     }
   }
+
+  /// Publish device keys for a group (public interface)
+  Future<void> publishDeviceKeys(String groupId, String deviceId, String pkSigB64, String pkKemB64) async {
+    try {
+      await _apiService.publishGroupDeviceKey(
+        groupId: groupId,
+        deviceId: deviceId,
+        pkSigB64: pkSigB64,
+        pkKemB64: pkKemB64,
+      );
+      debugPrint('✅ Device keys published via GroupProvider.publishDeviceKeys');
+    } catch (e) {
+      debugPrint('❌ GroupProvider.publishDeviceKeys error: $e');
+      rethrow;
+    }
+  }
     
   void _onWebSocketGroupJoined() {
     fetchUserGroups();

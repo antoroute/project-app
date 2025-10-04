@@ -115,41 +115,16 @@ class KeyManagerV2 {
       return _x25519Cache[cacheKey]!;
     }
     
-    // Ensure keys exist for this device/group combination
+    // Ensure keys exist (this will cache them)
     await ensureKeysFor(groupId, deviceId);
     
-    // Load stored keys
-    final privB64 = await _storage.read(key: _ns(groupId, deviceId, 'x25519', 'priv'));
-    final pubB64 = await _storage.read(key: _ns(groupId, deviceId, 'x25519', 'pub'));
-    if (privB64 == null || pubB64 == null) {
-      // Regenerer les clés si absentes (cas improbable)
-      await ensureKeysFor(groupId, deviceId);
-      return loadX25519KeyPair(groupId, deviceId); // Retry once
+    // Should now be in cache
+    if (_x25519Cache.containsKey(cacheKey)) {
+      debugPrint('✅ X25519 keypair loaded from cached generation');
+      return _x25519Cache[cacheKey]!;
     }
     
-    final x = X25519();
-    final storeKeyPair = await x.newKeyPair();
-    
-    // CRITICAL: Replace the generated public key with ours and ensure private key matches
-    // We need to make sure this exact public key was published to the directory
-    final storedPublicKey = await storeKeyPair.extractPublicKey();
-    final storedPublicB64 = base64Encode(storedPublicKey.bytes);
-    
-    debugPrint('🔐 loadX25519KeyPair verification:');
-    debugPrint('  - Generated pub key: ${storedPublicB64.substring(0, 10)}...');
-    debugPrint('  - Stored pub key: ${pubB64.substring(0, 10)}...');
-    
-    // Verify the generated public key matches what we stored
-    if (storedPublicB64 != pubB64) {
-      debugPrint('⚠️ WARNING: Generated X25519 public key != stored public key');
-      debugPrint('  This might cause decryption failures if key was used for encryption');
-    }
-    
-    // Cache the keypair for future use
-    _x25519Cache[cacheKey] = storeKeyPair;
-    
-    debugPrint('✅ X25519 keypair loaded and cached (public key consistency checked)');
-    return storeKeyPair;
+    throw Exception('Failed to generate/cache X25519 keys for $groupId/$deviceId');
   }
 
   /// Clear cache when needed (e.g., on logout)
@@ -167,24 +142,6 @@ class KeyManagerV2 {
     debugPrint('🗑️ KeyManagerV2 cache cleared for $groupId:$deviceId');
   }
 
-  /// Force regenerate keys for group/device (fixes corruption)
-  Future<void> forceRegenerateKeys(String groupId, String deviceId) async {
-    debugPrint('🔄 Force regenerating keys for $groupId/$deviceId');
-    
-    // Clear cache first
-    clearCacheFor(groupId, deviceId);
-    
-    // Delete stored keys
-    await _storage.delete(key: _ns(groupId, deviceId, 'ed25519', 'priv'));
-    await _storage.delete(key: _ns(groupId, deviceId, 'ed25519', 'pub'));
-    await _storage.delete(key: _ns(groupId, deviceId, 'x25519', 'priv'));
-    await _storage.delete(key: _ns(groupId, deviceId, 'x25519', 'pub'));
-    
-    // Regenerate and cache
-    await ensureKeysFor(groupId, deviceId);
-    
-    debugPrint('✅ Keys force regenerated for $groupId/$deviceId');
-  }
 }
 
 
