@@ -233,7 +233,7 @@ class MessageCipherV2 {
       salt = Uint8List.fromList(
         crypto.sha256.convert(utf8.encode('${messageV2['messageId']}:${_b64(_randomBytes(16))}')).bytes,
       );
-      debugPrint('  - Salt régénérée (fallback ancien format)');
+      debugPrint('  - Salt générée (fallback ancien format)');
     }
     
     final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';

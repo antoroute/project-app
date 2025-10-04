@@ -138,21 +138,6 @@ class KeyManagerV2 {
     throw Exception('Failed to access X25519 keypair for $groupId/$deviceId');
   }
 
-  /// Clear cache when needed (e.g., on logout)
-  void clearCache() {
-    _ed25519Cache.clear();
-    _x25519Cache.clear();
-    debugPrint('🗑️ KeyManagerV2 cache cleared');
-  }
-
-  /// Clear cache for specific group/device (logout/cleanup)
-  void clearCacheFor(String groupId, String deviceId) {
-    final cacheKey = _cacheKey(groupId, deviceId);
-    _ed25519Cache.remove(cacheKey);
-    _x25519Cache.remove(cacheKey);
-    _loadedFromStorage.remove(cacheKey);
-    debugPrint('🗑️ KeyManagerV2 cache cleared for $groupId:$deviceId');
-  }
 }
 
 
