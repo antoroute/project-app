@@ -185,13 +185,25 @@ export default async function routes(app: FastifyInstance) {
     // Ajoute le user
     await app.db.none(`INSERT INTO user_groups(user_id, group_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [jr.user_id, groupId]);
 
-    // Publie la clé device initiale comme active
-    await app.db.none(
-      `INSERT INTO group_device_keys(group_id, user_id, device_id, pk_sig, pk_kem, key_version, status)
-       VALUES($1,$2,$3,$4,$5,1,'active')
-       ON CONFLICT (group_id,user_id,device_id) DO NOTHING`,
-      [groupId, jr.user_id, jr.device_id, jr.pk_sig, jr.pk_kem]
-    );
+    // 🚀 NOUVEAU: Publie la clé device initiale comme active SEULEMENT si elle n'est pas vide/vide
+    if (jr.pk_sig && jr.pk_kem && jr.device_id && jr.pk_sig.length > 0 && jr.pk_kem.length > 0) {
+      app.log.info({ 
+        groupId, 
+        userId: jr.user_id, 
+        deviceId: jr.device_id,
+        sigLen: jr.pk_sig.length,
+        kemLen: jr.pk_kem.length
+      }, 'Activation des clés device existantes');
+      
+      await app.db.none(
+        `INSERT INTO group_device_keys(group_id, user_id, device_id, pk_sig, pk_kem, key_version, status)
+         VALUES($1,$2,$3,$4,$5,1,'active')
+         ON CONFLICT (group_id,user_id,device_id) DO NOTHING`,
+        [groupId, jr.user_id, jr.device_id, jr.pk_sig, jr.pk_kem]
+      );
+    } else {
+      app.log.info({ groupId, userId: jr.user_id }, 'Pas de clés device valides à activer - utilisateur devra publier ses clés plus tard');
+    }
 
     // Marque la requête comme acceptée
     await app.db.none(`UPDATE join_requests SET status='accepted', handled_by=$1 WHERE id=$2`, [approverId, rid]);
@@ -206,25 +218,52 @@ export default async function routes(app: FastifyInstance) {
       params: Type.Object({ id: Type.String({ format: 'uuid' }) }),
       body: Type.Object({
         groupSigningPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
-        groupKEMPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' }))
+        groupKEMPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
+        deviceId: Type.Optional(Type.String()),
+        deviceSigPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
+        deviceKemPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' }))
       })
     }
   }, async (req, reply) => {
     const userId = (req.user as any).sub;
     const { id: groupId } = req.params as any;
-    const { groupSigningPubKey, groupKEMPubKey } = req.body as any;
+    const { groupSigningPubKey, groupKEMPubKey, deviceId, deviceSigPubKey, deviceKemPubKey } = req.body as any;
 
     // refuse si déjà membre
     const m = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [userId, groupId]);
     if (m.length) return reply.code(409).send({ error: 'already_member' });
 
-    // Pour l'instant, on crée une demande simple sans clés de device
-    const jr = await app.db.one(
-      `INSERT INTO join_requests(group_id, user_id, device_id, pk_sig, pk_kem)
-       VALUES($1,$2,$3,'','')
-       RETURNING id`,
-      [groupId, userId, userId + '_tmp_' + Date.now()]
-    );
+    // 🚀 NOUVEAU: Utiliser les vraies clés device si fournies, sinon créer des placeholders
+    let actualDeviceId = deviceId || '';
+    let actualSigKey = deviceSigPubKey || '';
+    let actualKemKey = deviceKemPubKey || '';
+    
+    // Si des clés device sont fournies, décoder en base64 pour PostgreSQL
+    if (deviceSigPubKey && deviceKemPubKey && deviceId) {
+      app.log.info({ groupId, userId, deviceId, sigLen: deviceSigPubKey.length, kemLen: deviceKemPubKey.length }, 'Demande avec clés device');
+    } else {
+      app.log.info({ groupId, userId }, 'Demande sans clés device (mode compatibilité)');
+    }
+
+    // Gérer le cas où les clés sont vides ou valides
+    let jr;
+    if (deviceSigPubKey && deviceKemPubKey && deviceId) {
+      // Clés device valides fournies
+      jr = await app.db.one(
+        `INSERT INTO join_requests(group_id, user_id, device_id, pk_sig, pk_kem)
+         VALUES($1,$2,$3,decode($4,'base64'),decode($5,'base64'))
+         RETURNING id`,
+        [groupId, userId, actualDeviceId, actualSigKey, actualKemKey]
+      );
+    } else {
+      // Mode compatibilité avec clés vides
+      jr = await app.db.one(
+        `INSERT INTO join_requests(group_id, user_id, device_id, pk_sig, pk_kem)
+         VALUES($1,$2,$3,E'\\x0000000000000000000000000000000000000000000000000000000000000000',E'\\x0000000000000000000000000000000000000000000000000000000000000000')
+         RETURNING id`,
+        [groupId, userId, actualDeviceId]
+      );
+    }
     
     reply.code(201); // Explicitement retourner le code 201 Created
     return { requestId: jr.id, status: 'pending' };

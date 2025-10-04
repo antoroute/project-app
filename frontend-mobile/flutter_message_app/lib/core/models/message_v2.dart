@@ -10,6 +10,7 @@ class MessageV2Model {
   final String iv;
   final String ciphertext;
   final String sig;
+  final String salt;
 
   MessageV2Model({
     required this.v,
@@ -23,6 +24,7 @@ class MessageV2Model {
     required this.iv,
     required this.ciphertext,
     required this.sig,
+    required this.salt,
   });
 
   factory MessageV2Model.fromJson(Map<String, dynamic> json) {
@@ -32,7 +34,8 @@ class MessageV2Model {
     print('  - sentAt value: ${json['sentAt']}');
     print('  - senderUserId: ${json['senderUserId']}');
     print('  - senderDeviceId: ${json['senderDeviceId']}');
-    
+    print('  - salt present: ${json.containsKey('salt')}');
+    print('  - salt length: ${json['salt'] != null ? (json['salt'] as String).length : 'null'}');
     // Adapter à la structure backend qui retourne senderUserId/senderDeviceId directement
     // au lieu d'un objet sender
     Map<String, dynamic> senderObject;
@@ -60,6 +63,7 @@ class MessageV2Model {
       iv: json['iv'] as String,
       ciphertext: json['ciphertext'] as String,
       sig: json['sig'] as String,
+      salt: json['salt'] as String? ?? '',
     );
   }
 
@@ -82,6 +86,7 @@ class MessageV2Model {
         'iv': iv,
         'ciphertext': ciphertext,
         'sig': sig,
+        'salt': salt,
       };
 }
 

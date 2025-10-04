@@ -125,7 +125,7 @@ class GroupProvider extends ChangeNotifier {
     }
   }
 
-  /// Envoie une demande de jointure.
+  /// Envoie une demande de jointure avec génération des clés device.
   Future<void> sendJoinRequest(
     String groupId,
     String publicKeyGroup, {
@@ -133,11 +133,28 @@ class GroupProvider extends ChangeNotifier {
     required String groupKEMPubKeyB64,
   }) async {
     try {
-      await _apiService.sendJoinRequest(
+      // 🚀 NOUVEAU: Générer les clés device lors de la demande
+      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      
+      debugPrint('🔑 Génération des clés device pour la demande de jointure: group=$groupId, device=$deviceId');
+      await KeyManagerV2.instance.ensureKeysFor(groupId, deviceId);
+      
+      final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+      final deviceSigPub = pubKeys['pk_sig']!;
+      final deviceKemPub = pubKeys['pk_kem']!;
+      
+      debugPrint('🔑 Clés device générées pour la demande - Sig: ${deviceSigPub.substring(0, 10)}..., KEM: ${deviceKemPub.substring(0, 10)}...');
+      
+      await _apiService.sendJoinRequestWithDeviceKeys(
         groupId: groupId,
         groupSigningPubKeyB64: groupSigningPubKeyB64,
         groupKEMPubKeyB64: groupKEMPubKeyB64,
+        deviceId: deviceId,
+        deviceSigPubKeyB64: deviceSigPub,
+        deviceKemPubKeyB64: deviceKemPub,
       );
+      
+      debugPrint('✅ Demande de jointure envoyée avec clés device');
     } catch (error) {
       debugPrint('❌ GroupProvider.sendJoinRequest error: $error');
       rethrow;

@@ -36,7 +36,11 @@ export default async function routes(app: FastifyInstance) {
               key_version as "key_version",
               status
          FROM group_device_keys
-        WHERE group_id = $1 AND status = 'active'`,
+         WHERE group_id = $1 AND status = 'active' 
+           AND pk_sig IS NOT NULL 
+           AND pk_kem IS NOT NULL
+           AND length(pk_sig) = 32 
+           AND length(pk_kem) = 32`,
       [groupId]
     );
     return rows;

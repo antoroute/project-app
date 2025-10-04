@@ -61,6 +61,16 @@ class KeyDirectoryService {
   /// Récupère et met en cache la liste (user,device,keys) d'un groupe
   Future<List<GroupDeviceKeyEntry>> fetchGroupDevices(String groupId) async {
     final raw = await _api.fetchGroupDeviceKeys(groupId);
+    debugPrint('🔍 fetchGroupDevices DEBUG pour group $groupId:');
+    debugPrint('  - raw devices count: ${raw.length}');
+    for (int i = 0; i < raw.length; i++) {
+      final device = raw[i];
+      debugPrint('    Device $i: ${device['userId']}/${device['deviceId']}');
+      debugPrint('      - pk_sig length: ${(device['pk_sig'] as String).length}');
+      debugPrint('      - pk_kem length: ${(device['pk_kem'] as String).length}');
+      debugPrint('      - status: ${device['status']}');
+    }
+    
     final entries = raw.map((e) => GroupDeviceKeyEntry.fromJson(e)).toList();
     _cache[groupId] = entries;
     debugPrint('🔐 KeyDirectory cache updated for group $groupId: ${entries.length} devices');

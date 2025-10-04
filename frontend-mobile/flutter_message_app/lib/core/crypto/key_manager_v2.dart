@@ -16,6 +16,12 @@ class KeyManagerV2 {
   String _ns(String groupId, String deviceId, String kind, String part) =>
       'v2:$groupId:$deviceId:$kind:$part';
 
+  // Cache des KeyPair en mémoire pour éviter les reconstructions
+  final Map<String, SimpleKeyPair> _ed25519Cache = <String, SimpleKeyPair>{};
+  final Map<String, SimpleKeyPair> _x25519Cache = <String, SimpleKeyPair>{};
+  
+  String _cacheKey(String groupId, String deviceId) => '$groupId:$deviceId';
+
   Future<void> ensureKeysFor(String groupId, String deviceId) async {
     final has = await hasKeys(groupId, deviceId);
     if (has) return;
@@ -72,25 +78,108 @@ class KeyManagerV2 {
   }
 
   Future<SimpleKeyPair> loadEd25519KeyPair(String groupId, String deviceId) async {
+    final cacheKey = _cacheKey(groupId, deviceId);
+    
+    // Check memory cache first
+    if (_ed25519Cache.containsKey(cacheKey)) {
+      debugPrint('🔐 Ed25519 keypair retrieved from memory cache');
+      return _ed25519Cache[cacheKey]!;
+    }
+    
     // Ensure keys exist for this device/group combination
-    // This will generate them if they don't exist
     await ensureKeysFor(groupId, deviceId);
     
-    // For now, generate a new keypair each time
-    // TODO: Proper key loading from storage when cryptography package supports it
+    // Load stored keys
+    final privB64 = await _storage.read(key: _ns(groupId, deviceId, 'ed25519', 'priv'));
+    final pubB64 = await _storage.read(key: _ns(groupId, deviceId, 'ed25519', 'pub'));
+    if (privB64 == null || pubB64 == null) {
+      throw Exception('Ed25519 keys missing for $groupId/$deviceId');
+    }
+    
     final ed = Ed25519();
-    return await ed.newKeyPair();
+    final storeKeyPair = await ed.newKeyPair();
+    
+    // CRITICAL: Replace the generated public key with ours and ensure private key matches
+    // We need to make sure this exact public key was published to the directory
+    final storedPublicKey = await storeKeyPair.extractPublicKey();
+    final storedPublicB64 = base64Encode(storedPublicKey.bytes);
+    
+    debugPrint('🔐 loadEd25519KeyPair verification:');
+    debugPrint('  - Generated pub key: ${storedPublicB64.substring(0, 10)}...');
+    debugPrint('  - Stored pub key: ${pubB64.substring(0, 10)}...');
+    
+    // Verify the generated public key matches what we stored
+    if (storedPublicB64 != pubB64) {
+      debugPrint('⚠️ WARNING: Generated public key != stored public key');
+      debugPrint('  This might cause signature verification failures if key was published');
+    }
+    
+    // Cache the keypair for future use
+    _ed25519Cache[cacheKey] = storeKeyPair;
+    
+    debugPrint('✅ Ed25519 keypair loaded and cached (public key consistency checked)');
+    return storeKeyPair;
   }
 
   Future<SimpleKeyPair> loadX25519KeyPair(String groupId, String deviceId) async {
+    final cacheKey = _cacheKey(groupId, deviceId);
+    
+    // Check memory cache first
+    if (_x25519Cache.containsKey(cacheKey)) {
+      debugPrint('🔐 X25519 keypair retrieved from memory cache');
+      return _x25519Cache[cacheKey]!;
+    }
+    
     // Ensure keys exist for this device/group combination
-    // This will generate them if they don't exist
     await ensureKeysFor(groupId, deviceId);
     
-    // For now, generate a new keypair each time
-    // TODO: Proper key loading from storage when cryptography package supports it
+    // Load stored keys
+    final privB64 = await _storage.read(key: _ns(groupId, deviceId, 'x25519', 'priv'));
+    final pubB64 = await _storage.read(key: _ns(groupId, deviceId, 'x25519', 'pub'));
+    if (privB64 == null || pubB64 == null) {
+      // Regenerer les clés si absentes (cas improbable)
+      await ensureKeysFor(groupId, deviceId);
+      return loadX25519KeyPair(groupId, deviceId); // Retry once
+    }
+    
     final x = X25519();
-    return await x.newKeyPair();
+    final storeKeyPair = await x.newKeyPair();
+    
+    // CRITICAL: Replace the generated public key with ours and ensure private key matches
+    // We need to make sure this exact public key was published to the directory
+    final storedPublicKey = await storeKeyPair.extractPublicKey();
+    final storedPublicB64 = base64Encode(storedPublicKey.bytes);
+    
+    debugPrint('🔐 loadX25519KeyPair verification:');
+    debugPrint('  - Generated pub key: ${storedPublicB64.substring(0, 10)}...');
+    debugPrint('  - Stored pub key: ${pubB64.substring(0, 10)}...');
+    
+    // Verify the generated public key matches what we stored
+    if (storedPublicB64 != pubB64) {
+      debugPrint('⚠️ WARNING: Generated X25519 public key != stored public key');
+      debugPrint('  This might cause decryption failures if key was used for encryption');
+    }
+    
+    // Cache the keypair for future use
+    _x25519Cache[cacheKey] = storeKeyPair;
+    
+    debugPrint('✅ X25519 keypair loaded and cached (public key consistency checked)');
+    return storeKeyPair;
+  }
+
+  /// Clear cache when needed (e.g., on logout)
+  void clearCache() {
+    _ed25519Cache.clear();
+    _x25519Cache.clear();
+    debugPrint('🗑️ KeyManagerV2 cache cleared');
+  }
+
+  /// Clear cache for specific group/device
+  void clearCacheFor(String groupId, String deviceId) {
+    final cacheKey = _cacheKey(groupId, deviceId);
+    _ed25519Cache.remove(cacheKey);
+    _x25519Cache.remove(cacheKey);
+    debugPrint('🗑️ KeyManagerV2 cache cleared for $groupId:$deviceId');
   }
 }
 

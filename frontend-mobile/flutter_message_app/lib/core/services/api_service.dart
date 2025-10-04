@@ -111,6 +111,44 @@ class ApiService {
     throw Exception('Erreur ${response.statusCode} lors de la demande de jointure.');
   }
 
+  /// 🚀 NOUVEAU: Envoie une demande de jointure avec clés device via POST /groups/:id/join-requests.
+  Future<String> sendJoinRequestWithDeviceKeys({
+    required String groupId,
+    required String groupSigningPubKeyB64,
+    required String groupKEMPubKeyB64,
+    required String deviceId,
+    required String deviceSigPubKeyB64,
+    required String deviceKemPubKeyB64,
+  }) async {
+    final Map<String, String> headers = await _buildHeaders();
+    final Uri uri = Uri.parse('$_baseUrl/groups/$groupId/join-requests');
+    
+    debugPrint('📤 sendJoinRequestWithDeviceKeys DEBUG:');
+    debugPrint('  - groupId: $groupId');
+    debugPrint('  - deviceId: $deviceId');
+    debugPrint('  - deviceSig length: ${deviceSigPubKeyB64.length}');
+    debugPrint('  - deviceKem length: ${deviceKemPubKeyB64.length}');
+    
+    final String payload = jsonEncode(<String, dynamic>{
+      'groupSigningPubKey': groupSigningPubKeyB64,
+      'groupKEMPubKey': groupKEMPubKeyB64,
+      'deviceId': deviceId,
+      'deviceSigPubKey': deviceSigPubKeyB64,
+      'deviceKemPubKey': deviceKemPubKeyB64,
+    });
+    
+    final http.Response response = await http.post(uri, headers: headers, body: payload);
+
+    if (response.statusCode == 201 || response.statusCode == 200) {
+      final Map<String, dynamic> body = jsonDecode(response.body) as Map<String, dynamic>;
+      return body['requestId'] as String;
+    }
+    if (response.statusCode == 429) {
+      throw RateLimitException();
+    }
+    throw Exception('Erreur ${response.statusCode} lors de la demande de jointure avec clés.');
+  }
+
   /// Récupère les demandes de jointure via GET /groups/:id/join-requests.
   Future<List<Map<String, dynamic>>> fetchJoinRequests(String groupId) async {
     final Map<String, String> headers = await _buildHeaders();

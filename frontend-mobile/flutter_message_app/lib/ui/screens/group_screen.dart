@@ -2,7 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/providers/group_provider.dart';
-import 'package:flutter_message_app/core/services/group_key_service.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_v2.dart';
+import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'package:flutter_message_app/ui/screens/qr_scan_screen.dart';
 
@@ -28,17 +29,21 @@ class _GroupScreenState extends State<GroupScreen> {
   Future<void> _createGroup() async {
     setState(() => _loading = true);
     try {
-      // Générer les clés du groupe pour la v2
-      final groupSigningPubKey = await GroupKeyService.instance.getGroupSigningPublicKeyB64(_groupNameController.text.trim());
-      final groupKEMPubKey = await GroupKeyService.instance.getGroupKEMPublicKeyB64(_groupNameController.text.trim());
+      // 🚀 NOUVEAU: Générer les clés du groupe avec KeyManagerV2 (basé sur le nom du groupe)
+      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      final groupName = _groupNameController.text.trim();
+      
+      // Utiliser le nom du groupe comme identifiant temporaire pour générer les clés groupe
+      await KeyManagerV2.instance.ensureKeysFor(groupName, deviceId);
+      final groupKeys = await KeyManagerV2.instance.publicKeysBase64(groupName, deviceId);
       
       final groupProvider =
           Provider.of<GroupProvider>(context, listen: false);
       await groupProvider.createGroupWithMembers(
-        groupName: _groupNameController.text.trim(),
+        groupName: groupName,
         memberEmails: [],
-        groupSigningPubKeyB64: groupSigningPubKey,
-        groupKEMPubKeyB64: groupKEMPubKey,
+        groupSigningPubKeyB64: groupKeys['pk_sig']!, // Ed25519 pour signature groupe
+        groupKEMPubKeyB64: groupKeys['pk_kem']!,     // X25519 pour échange groupe
       );
 
       SnackbarService.showSuccess(
@@ -56,17 +61,20 @@ class _GroupScreenState extends State<GroupScreen> {
     setState(() => _loading = true);
     final String groupId = _groupIdController.text.trim();
     try {
-      // Générer les clés du groupe pour la v2
-      final groupSigningPubKey = await GroupKeyService.instance.getGroupSigningPublicKeyB64(groupId);
-      final groupKEMPubKey = await GroupKeyService.instance.getGroupKEMPublicKeyB64(groupId);
+      // 🚀 NOUVEAU: Générer les clés du groupe avec KeyManagerV2 (basé sur l'ID du groupe)
+      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      
+      // Utiliser l'ID du groupe pour générer les clés groupe
+      await KeyManagerV2.instance.ensureKeysFor(groupId, deviceId);
+      final groupKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
       
       final groupProvider =
           Provider.of<GroupProvider>(context, listen: false);
       await groupProvider.sendJoinRequest(
         groupId, 
         '', 
-        groupSigningPubKeyB64: groupSigningPubKey,
-        groupKEMPubKeyB64: groupKEMPubKey,
+        groupSigningPubKeyB64: groupKeys['pk_sig']!, // Ed25519 pour signature groupe
+        groupKEMPubKeyB64: groupKeys['pk_kem']!,     // X25519 pour échange groupe
       );
 
       SnackbarService.showSuccess(
