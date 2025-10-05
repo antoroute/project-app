@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter_message_app/core/crypto/key_manager_v2.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_v3.dart';
 import 'package:flutter_message_app/core/services/key_directory_service.dart';
 import 'package:uuid/uuid.dart';
 
@@ -157,7 +157,7 @@ class MessageCipherV2 {
 
     // sign
     debugPrint('📝 Signature pour sender $senderDeviceId:');
-    final edKey = await KeyManagerV2.instance.loadEd25519KeyPair(groupId, senderDeviceId);
+    final edKey = await KeyManagerV3.instance.loadEd25519KeyPair(groupId, senderDeviceId);
     debugPrint('  - Ed25519 keypair obtenu: ✅');
     final ed = Ed25519();
     final signature = await ed.sign(_concatCanonical(payload), keyPair: edKey);
@@ -217,7 +217,7 @@ class MessageCipherV2 {
     debugPrint('  - sender: $senderUserId/$senderDeviceId');
 
     final x = X25519();
-    final myKey = await KeyManagerV2.instance.loadX25519KeyPair(groupId, myDeviceId);
+    final myKey = await KeyManagerV3.instance.loadX25519KeyPair(groupId, myDeviceId);
     final shared = await x.sharedSecretKey(
       keyPair: myKey,
       remotePublicKey: SimplePublicKey(base64.decode(ephPubB64), type: KeyPairType.x25519),

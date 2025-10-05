@@ -11,7 +11,7 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
-import 'package:flutter_message_app/core/crypto/key_manager_v2.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_v3.dart';
 
 /// Gère l’état des conversations et des messages.
 class ConversationProvider extends ChangeNotifier {
@@ -234,11 +234,11 @@ class ConversationProvider extends ChangeNotifier {
           debugPrint('  - DeviceId: $deviceId');
           debugPrint('  - UserId: $currentUserId');
           
-          final hasKeys = await KeyManagerV2.instance.hasKeys(groupId, deviceId);
+          final hasKeys = await KeyManagerV3.instance.hasKeys(groupId, deviceId);
           debugPrint('  - Clés existantes: ${hasKeys ? "✅" : "❌"}');
           
           if (hasKeys) {
-            final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+            final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
             debugPrint('  - Clés publiques disponibles: ${pubKeys.isNotEmpty ? "✅" : "❌"}');
           }
         }
@@ -336,8 +336,8 @@ class ConversationProvider extends ChangeNotifier {
         );
       }).toList();
       
-      // Trier les messages par timestamp (plus récent en premier)
-      display.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      // Trier les messages par timestamp (plus ancien en premier pour affichage chronologique)
+      display.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       
       // Pour le chargement initial, remplacer complètement mais préserver les textes déchiffrés
       if (cursor == null) {
@@ -366,8 +366,8 @@ class ConversationProvider extends ChangeNotifier {
         // Pour la pagination, ajouter au début (messages plus anciens)
         final existing = _messages[conversationId] ?? [];
         _messages[conversationId] = [...display, ...existing];
-        // Re-trier après ajout
-        _messages[conversationId]!.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        // Re-trier après ajout (plus ancien en premier)
+        _messages[conversationId]!.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       }
       
       notifyListeners();
@@ -446,7 +446,7 @@ class ConversationProvider extends ChangeNotifier {
       final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
       
       // S'assurer que nos clés device sont générées
-      await KeyManagerV2.instance.ensureKeysFor(groupId, myDeviceId);
+      await KeyManagerV3.instance.ensureKeysFor(groupId, myDeviceId);
       
       // Vérifier et publier nos clés si nécessaire
       await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
@@ -503,6 +503,30 @@ class ConversationProvider extends ChangeNotifier {
   /// S'assurer que les clés de notre device sont publiées pour le groupe
   Future<void> _ensureMyDeviceKeysArePublished(String groupId, String deviceId) async {
     try {
+      // Vérifier si les clés ont été régénérées et doivent être republiées
+      if (KeyManagerV3.instance.keysNeedRepublishing) {
+        debugPrint('🔑 REPUBLICATION: Les clés ont été régénérées, republication nécessaire');
+        
+        final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
+        final sigPub = pubKeys['pk_sig']!;
+        final kemPub = pubKeys['pk_kem']!;
+        
+        await _apiService.publishGroupDeviceKey(
+          groupId: groupId,
+          deviceId: deviceId,
+          pkSigB64: sigPub,
+          pkKemB64: kemPub,
+        );
+        
+        // Marquer que les clés ont été republiées
+        KeyManagerV3.instance.markKeysRepublished();
+        
+        // Invalider le cache pour que les nouvelles clés soient récupérées
+        await _keyDirectory.fetchGroupDevices(groupId); // Force refresh du cache
+        debugPrint('✅ Clés republiées et cache mis à jour');
+        return;
+      }
+      
       final recipients = await _keyDirectory.getGroupDevices(groupId);
       final myKeysInGroup = recipients.where((r) => r.deviceId == deviceId).toList();
       
@@ -510,9 +534,9 @@ class ConversationProvider extends ChangeNotifier {
         debugPrint('🔑 Publication automatique des clés manquantes pour le groupe $groupId');
         
         // S'assurer que les clés device sont générées
-        await KeyManagerV2.instance.ensureKeysFor(groupId, deviceId);
+        await KeyManagerV3.instance.ensureKeysFor(groupId, deviceId);
         
-        final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+        final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
         final sigPub = pubKeys['pk_sig']!;
         final kemPub = pubKeys['pk_kem']!;
         

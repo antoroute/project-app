@@ -33,7 +33,8 @@ export const SendMessageV2Schema = Type.Object({
   recipients: Type.Array(WrappedKey, { minItems: 1 }),
   iv: Type.String({ contentEncoding: 'base64' }),
   ciphertext: Type.String({ contentEncoding: 'base64' }),
-  sig: Type.String({ contentEncoding: 'base64' })
+  sig: Type.String({ contentEncoding: 'base64' }),
+  salt: Type.String({ contentEncoding: 'base64' }) // 32B HKDF salt
 });
 
 export const SendMessageV2Reply = Type.Object({

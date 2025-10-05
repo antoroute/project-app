@@ -4,7 +4,7 @@ import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/services/api_service.dart';
 import 'package:flutter_message_app/core/services/websocket_service.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
-import 'package:flutter_message_app/core/crypto/key_manager_v2.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_v3.dart';
 
 /// Gère les opérations liées aux groupes et aux demandes de jointure.
 class GroupProvider extends ChangeNotifier {
@@ -75,9 +75,9 @@ class GroupProvider extends ChangeNotifier {
       
       // S'assurer que les clés device sont générées
       debugPrint('🔑 Génération des clés device pour group: $groupId, device: $deviceId');
-      await KeyManagerV2.instance.ensureKeysFor(groupId, deviceId);
+      await KeyManagerV3.instance.ensureKeysFor(groupId, deviceId);
       
-      final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+      final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
       debugPrint('🔑 Clés générées - Sig: ${pubKeys['pk_sig']!.substring(0, 10)}..., KEM: ${pubKeys['pk_kem']!.substring(0, 10)}...');
       debugPrint('🔑 Longueurs: Sig=${pubKeys['pk_sig']!.length}, KEM=${pubKeys['pk_kem']!.length}');
       
@@ -137,9 +137,9 @@ class GroupProvider extends ChangeNotifier {
       final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       
       debugPrint('🔑 Génération des clés device pour la demande de jointure: group=$groupId, device=$deviceId');
-      await KeyManagerV2.instance.ensureKeysFor(groupId, deviceId);
+      await KeyManagerV3.instance.ensureKeysFor(groupId, deviceId);
       
-      final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+      final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
       final deviceSigPub = pubKeys['pk_sig']!;
       final deviceKemPub = pubKeys['pk_kem']!;
       
@@ -213,7 +213,7 @@ class GroupProvider extends ChangeNotifier {
       await fetchJoinRequests(groupId);
       // Publier les clés du device courant après acceptation
       final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
-      final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+      final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
       final sigPub = pubKeys['pk_sig']!;
       final kemPub = pubKeys['pk_kem']!;
       await _apiService.publishGroupDeviceKey(
