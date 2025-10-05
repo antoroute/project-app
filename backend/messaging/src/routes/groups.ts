@@ -212,13 +212,35 @@ export default async function routes(app: FastifyInstance) {
     // Marque la requête comme acceptée
     await app.db.none(`UPDATE join_requests SET status='accepted', handled_by=$1 WHERE id=$2`, [approverId, rid]);
 
+    // CORRECTION: Faire rejoindre l'utilisateur accepté à la room du groupe AVANT d'émettre l'événement
+    app.io.in(`user:${jr.user_id}`).socketsJoin(`group:${groupId}`);
+    app.log.info({ groupId, userId: jr.user_id }, 'User auto-joined group room after acceptance');
+
     // CORRECTION: Notifier tous les utilisateurs du groupe qu'un nouvel utilisateur a rejoint
+    app.log.info({ groupId, userId: jr.user_id, approverId }, 'About to emit group:member_joined event');
     app.io.to(`group:${groupId}`).emit('group:member_joined', { 
       groupId, 
       userId: jr.user_id, 
       approverId 
     });
     app.log.info({ groupId, userId: jr.user_id, approverId }, 'User joined group - broadcasted');
+
+    // CORRECTION: Broadcaster la présence de l'utilisateur accepté aux autres membres du groupe
+    if (app.services.presence && app.services.presence.broadcastUserPresence) {
+      app.services.presence.broadcastUserPresence(jr.user_id, true, 1);
+    } else {
+      // Fallback: broadcaster manuellement
+      app.io.to(`group:${groupId}`).emit('presence:update', { 
+        userId: jr.user_id, 
+        online: true, 
+        count: 1 
+      });
+    }
+    app.log.info({ groupId, userId: jr.user_id }, 'Presence broadcasted for accepted user');
+
+    // CORRECTION: Mettre à jour le service de présence pour l'utilisateur accepté
+    // Note: Le service de présence sera mis à jour automatiquement lors de la prochaine connexion
+    // ou lors d'un événement de présence explicite
 
     return { ok: true };
   });

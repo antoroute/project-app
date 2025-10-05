@@ -18,6 +18,7 @@ class MessageBubble extends StatelessWidget {
   final String senderInitial;
   final String senderUsername;
   final String? senderUserId; // Ajout pour les indicateurs de présence
+  final String? conversationId; // Ajout pour la présence spécifique aux conversations
   final bool sameAsPrevious;
   final bool sameAsNext;
   final double maxWidth;
@@ -31,6 +32,7 @@ class MessageBubble extends StatelessWidget {
     required this.senderInitial,
     this.senderUsername = '',
     this.senderUserId, // Nouveau paramètre
+    this.conversationId, // Nouveau paramètre pour la présence spécifique
     this.sameAsPrevious = false,
     this.sameAsNext = false,
     required this.maxWidth,
@@ -76,7 +78,11 @@ class MessageBubble extends StatelessWidget {
   Widget _buildPresenceIndicator(BuildContext context) {
     return Consumer<ConversationProvider>(
       builder: (context, provider, _) {
-        final isOnline = provider.isUserOnline(senderUserId!);
+        // Utiliser la présence spécifique aux conversations si disponible, sinon la présence générale
+        final isOnline = conversationId != null 
+            ? provider.isUserOnlineInConversation(conversationId!, senderUserId!)
+            : provider.isUserOnline(senderUserId!);
+            
         return Container(
           width: 12,
           height: 12,

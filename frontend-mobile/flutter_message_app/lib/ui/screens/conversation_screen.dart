@@ -370,6 +370,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           senderInitial: isMe ? '' : msg.senderId[0].toUpperCase(),
           senderUsername: senderUsername,
           senderUserId: msg.senderId, // Ajout pour les indicateurs de présence
+          conversationId: widget.conversationId, // Ajout pour la présence spécifique aux conversations
           sameAsPrevious: sameAsPrevious,
           sameAsNext: sameAsNext,
           maxWidth: maxBubbleWidth,

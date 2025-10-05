@@ -35,7 +35,15 @@ export default async function routes(app: FastifyInstance) {
       );
     }
 
+    // CORRECTION: S'assurer que tous les membres du groupe sont dans la room AVANT d'émettre l'événement
+    // Rejoindre tous les membres du groupe à la room du groupe
+    for (const uid of allMembers) {
+      app.io.in(`user:${uid}`).socketsJoin(`group:${groupId}`);
+    }
+    app.log.info({ groupId, memberCount: allMembers.length }, 'All group members joined group room');
+
     // CORRECTION: Émettre uniquement aux membres du groupe (qui peuvent voir la conversation)
+    app.log.info({ convId: conv.id, groupId, userId }, 'About to emit conversation:created event');
     app.io.to(`group:${groupId}`).emit('conversation:created', { convId: conv.id, groupId, creatorId: userId });
     app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created and broadcasted to group members');
 

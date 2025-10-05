@@ -18,14 +18,28 @@ class WebSocketService {
   // Gestion des abonnements persistants
   final Set<String> _subscribedConversations = <String>{};
   final Set<String> _pendingSubscriptions = <String>{};
+  final Set<String> _subscribedGroups = <String>{};
+  
+  // Métriques de performance
+  int _messagesReceived = 0;
+  int _eventsReceived = 0;
+  DateTime? _lastActivity;
 
   SocketStatus get status => _status;
   Stream<SocketStatus> get statusStream => _statusController.stream;
+  
+  // Getters pour les métriques
+  int get messagesReceived => _messagesReceived;
+  int get eventsReceived => _eventsReceived;
+  DateTime? get lastActivity => _lastActivity;
+  Set<String> get subscribedConversations => Set.from(_subscribedConversations);
+  Set<String> get subscribedGroups => Set.from(_subscribedGroups);
 
   /// Callbacks à brancher depuis vos providers
   void Function(Message message)? onNewMessage; // legacy
   void Function(Map<String, dynamic> payloadV2)? onNewMessageV2; // v2 payload
   void Function(String userId, bool online, int count)? onPresenceUpdate;
+  void Function(String userId, bool online, int count, String conversationId)? onPresenceConversation;
   void Function(String convId, String userId, String at)? onConvRead;
   void Function(String conversationId, String userId)? onUserAdded;
   VoidCallback? onNotificationNew;
@@ -88,6 +102,9 @@ class WebSocketService {
       // v2 message:new : payload v2 complet (Map<String,dynamic>)
       ..on('message:new', (data) {
         _log('📨 Événement message:new reçu: ${data.runtimeType}', level: 'info');
+        _updateActivityMetrics();
+        _messagesReceived++;
+        
         if (data is Map) {
           final map = Map<String, dynamic>.from(data);
           _log('📨 Données message:new parsées: ${map.keys}', level: 'info');
@@ -99,6 +116,8 @@ class WebSocketService {
       })
       ..on('presence:update', (data) {
         _log('👥 Événement presence:update reçu: ${data.runtimeType}', level: 'info');
+        _updateActivityMetrics();
+        
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
           final uid = m['userId'] as String;
@@ -108,6 +127,22 @@ class WebSocketService {
           onPresenceUpdate?.call(uid, online, count);
         } else {
           _log('❌ Données presence:update invalides: ${data.runtimeType}', level: 'error');
+        }
+      })
+      ..on('presence:conversation', (data) {
+        _log('💬 Événement presence:conversation reçu: ${data.runtimeType}', level: 'info');
+        _updateActivityMetrics();
+        
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final uid = m['userId'] as String;
+          final online = m['online'] as bool;
+          final count = (m['count'] as num?)?.toInt() ?? 0;
+          final conversationId = m['conversationId'] as String;
+          _log('💬 Présence conversation mise à jour: $uid = $online (count: $count) dans $conversationId', level: 'info');
+          onPresenceConversation?.call(uid, online, count, conversationId);
+        } else {
+          _log('❌ Données presence:conversation invalides: ${data.runtimeType}', level: 'error');
         }
       })
       ..on('conv:read', (data) {
@@ -284,6 +319,34 @@ class WebSocketService {
       subscribeConversation(convId);
     }
     _pendingSubscriptions.clear();
+  }
+  
+  /// Gestion intelligente des abonnements avec métriques
+  void _updateActivityMetrics() {
+    _lastActivity = DateTime.now();
+    _eventsReceived++;
+  }
+  
+  /// Nettoie les abonnements obsolètes
+  void cleanupSubscriptions() {
+    final now = DateTime.now();
+    if (_lastActivity != null && now.difference(_lastActivity!).inMinutes > 30) {
+      _log('🧹 Nettoyage des abonnements obsolètes', level: 'info');
+      _subscribedConversations.clear();
+      _pendingSubscriptions.clear();
+    }
+  }
+  
+  /// Obtient les statistiques de performance
+  Map<String, dynamic> getPerformanceStats() {
+    return {
+      'messagesReceived': _messagesReceived,
+      'eventsReceived': _eventsReceived,
+      'subscribedConversations': _subscribedConversations.length,
+      'subscribedGroups': _subscribedGroups.length,
+      'lastActivity': _lastActivity?.toIso8601String(),
+      'status': _status.name,
+    };
   }
 
   void disconnect() {

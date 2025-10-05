@@ -31,6 +31,8 @@ class ConversationProvider extends ChangeNotifier {
   final Map<String, bool> _userOnline = <String, bool>{};
   /// Presence: userId -> device count
   final Map<String, int> _userDeviceCount = <String, int>{};
+  /// Presence spécifique aux conversations: conversationId -> userId -> online
+  final Map<String, Map<String, bool>> _conversationPresence = <String, Map<String, bool>>{};
   /// Read receipts per conversation
   final Map<String, List<Map<String, dynamic>>> _readersByConv = <String, List<Map<String, dynamic>>>{};
   /// Compteurs de messages non lus par conversation
@@ -82,6 +84,9 @@ class ConversationProvider extends ChangeNotifier {
     }
     if (_webSocketService.onPresenceUpdate == null) {
       _webSocketService.onPresenceUpdate = _onPresenceUpdate;
+    }
+    if (_webSocketService.onPresenceConversation == null) {
+      _webSocketService.onPresenceConversation = _onPresenceConversation;
     }
     if (_webSocketService.onConvRead == null) {
       _webSocketService.onConvRead = _onConvRead;
@@ -371,6 +376,22 @@ class ConversationProvider extends ChangeNotifier {
     final isOnline = _userOnline[userId] == true;
     debugPrint('👥 [Presence] Checking if $userId is online: $isOnline (map: $_userOnline)');
     return isOnline;
+  }
+  
+  /// Vérifie si un utilisateur est en ligne dans une conversation spécifique
+  bool isUserOnlineInConversation(String conversationId, String userId) {
+    return _conversationPresence[conversationId]?[userId] ?? false;
+  }
+  
+  /// Obtient tous les utilisateurs en ligne dans une conversation
+  List<String> getOnlineUsersInConversation(String conversationId) {
+    final presence = _conversationPresence[conversationId];
+    if (presence == null) return [];
+    
+    return presence.entries
+        .where((entry) => entry.value)
+        .map((entry) => entry.key)
+        .toList();
   }
   int onlineUsersCount() => _userOnline.values.where((v) => v == true).length;
   List<Map<String, dynamic>> readersFor(String conversationId) =>
@@ -880,6 +901,26 @@ class ConversationProvider extends ChangeNotifier {
     // CORRECTION: Forcer la mise à jour si le statut a changé
     if (wasOnline != _userOnline[userId]) {
       debugPrint('👥 [Presence] Status changed for $userId: $wasOnline -> ${_userOnline[userId]}');
+      notifyListeners();
+    }
+  }
+  
+  /// Gère la présence spécifique aux conversations
+  void _onPresenceConversation(String userId, bool online, int count, String conversationId) {
+    debugPrint('💬 [Presence] Received conversation presence update: $userId = $online (count: $count) in $conversationId');
+    
+    // Initialiser la map pour cette conversation si elle n'existe pas
+    _conversationPresence.putIfAbsent(conversationId, () => <String, bool>{});
+    
+    // Mettre à jour la présence dans cette conversation
+    final wasOnlineInConv = _conversationPresence[conversationId]![userId] ?? false;
+    _conversationPresence[conversationId]![userId] = online && count > 0;
+    
+    debugPrint('💬 [Presence] Conversation presence updated: $_conversationPresence');
+    
+    // Notifier seulement si le statut a changé dans cette conversation
+    if (wasOnlineInConv != _conversationPresence[conversationId]![userId]) {
+      debugPrint('💬 [Presence] Conversation status changed for $userId in $conversationId: $wasOnlineInConv -> ${_conversationPresence[conversationId]![userId]}');
       notifyListeners();
     }
   }

@@ -90,24 +90,62 @@ async function build() {
     const { userId } = (socket as any).auth;
     socket.join(`user:${userId}`);
     
+    // Métriques de connexion
+    app.log.info({ 
+      userId, 
+      socketId: socket.id, 
+      timestamp: new Date().toISOString(),
+      event: 'user_connected'
+    }, 'User WebSocket connected');
+    
     // CORRECTION: Rejoindre automatiquement les rooms de groupes de l'utilisateur
     app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
       .then((groups: any[]) => {
         groups.forEach((group: any) => {
           socket.join(`group:${group.group_id}`);
-          app.log.debug({ userId, groupId: group.group_id }, 'User auto-joined group room');
+          app.log.info({ 
+            userId, 
+            groupId: group.group_id,
+            socketId: socket.id,
+            event: 'group_room_joined'
+          }, 'User auto-joined group room');
         });
+        app.log.info({ 
+          userId, 
+          groupCount: groups.length,
+          socketId: socket.id,
+          event: 'all_group_rooms_joined'
+        }, 'User auto-joined group rooms');
       })
       .catch((err: any) => {
-        app.log.error({ userId, error: err }, 'Failed to auto-join group rooms');
+        app.log.error({ 
+          userId, 
+          error: err,
+          socketId: socket.id,
+          event: 'group_room_join_failed'
+        }, 'Failed to auto-join group rooms');
       });
     
     // Gestion des abonnements aux conversations
-    socket.on('conv:subscribe', (data: any) => {
+    socket.on('conv:subscribe', async (data: any) => {
       const convId = data.convId || data;
-      socket.join(`conv:${convId}`);
-      socket.emit('conv:subscribe', { success: true, convId });
-      app.log.info({ convId, userId }, 'User subscribed to conversation');
+      
+      // Vérifier que l'utilisateur a accès à cette conversation
+      const hasAccess = await app.db.oneOrNone(
+        `SELECT 1 FROM conversation_users cu 
+         JOIN conversations c ON cu.conversation_id = c.id 
+         WHERE cu.user_id = $1 AND c.id = $2`,
+        [userId, convId]
+      );
+      
+      if (hasAccess) {
+        socket.join(`conv:${convId}`);
+        socket.emit('conv:subscribe', { success: true, convId });
+        app.log.info({ convId, userId }, 'User subscribed to conversation');
+      } else {
+        socket.emit('conv:subscribe', { success: false, error: 'Unauthorized' });
+        app.log.warn({ convId, userId }, 'Unauthorized conversation subscription attempt');
+      }
     });
     
     socket.on('conv:unsubscribe', (data: any) => {
@@ -116,27 +154,59 @@ async function build() {
       app.log.info({ convId, userId }, 'User unsubscribed from conversation');
     });
     
-    // Gestion des indicateurs de frappe
-    socket.on('typing:start', (data: any) => {
+    // Gestion des indicateurs de frappe avec vérification de sécurité
+    socket.on('typing:start', async (data: any) => {
       const convId = data.convId;
       if (convId) {
-        // Broadcaster à tous les autres utilisateurs dans la conversation
-        socket.to(`conv:${convId}`).emit('typing:start', { convId, userId });
-        app.log.debug({ convId, userId }, 'User started typing');
+        // Vérifier que l'utilisateur est dans la conversation
+        const isInConversation = await app.db.oneOrNone(
+          `SELECT 1 FROM conversation_users WHERE user_id = $1 AND conversation_id = $2`,
+          [userId, convId]
+        );
+        
+        if (isInConversation) {
+          // Broadcaster à tous les autres utilisateurs dans la conversation
+          socket.to(`conv:${convId}`).emit('typing:start', { convId, userId });
+          app.log.debug({ convId, userId }, 'User started typing');
+        } else {
+          app.log.warn({ convId, userId }, 'Unauthorized typing event');
+        }
       }
     });
     
-    socket.on('typing:stop', (data: any) => {
+    socket.on('typing:stop', async (data: any) => {
       const convId = data.convId;
       if (convId) {
-        // Broadcaster à tous les autres utilisateurs dans la conversation
-        socket.to(`conv:${convId}`).emit('typing:stop', { convId, userId });
-        app.log.debug({ convId, userId }, 'User stopped typing');
+        // Vérifier que l'utilisateur est dans la conversation
+        const isInConversation = await app.db.oneOrNone(
+          `SELECT 1 FROM conversation_users WHERE user_id = $1 AND conversation_id = $2`,
+          [userId, convId]
+        );
+        
+        if (isInConversation) {
+          // Broadcaster à tous les autres utilisateurs dans la conversation
+          socket.to(`conv:${convId}`).emit('typing:stop', { convId, userId });
+          app.log.debug({ convId, userId }, 'User stopped typing');
+        } else {
+          app.log.warn({ convId, userId }, 'Unauthorized typing event');
+        }
       }
     });
 
     app.services.presence.onConnect(socket);
-    socket.on('disconnect', () => app.services.presence.onDisconnect(socket));
+    
+    // Métriques de déconnexion
+    socket.on('disconnect', (reason) => {
+      app.log.info({ 
+        userId, 
+        socketId: socket.id, 
+        reason,
+        timestamp: new Date().toISOString(),
+        event: 'user_disconnected'
+      }, 'User WebSocket disconnected');
+      
+      app.services.presence.onDisconnect(socket);
+    });
   });
 
   const port = Number(process.env.PORT || 3001);
