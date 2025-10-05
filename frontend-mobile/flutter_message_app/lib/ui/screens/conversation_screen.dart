@@ -223,12 +223,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
   
   /// Construit l'indicateur de frappe
   Widget _buildTypingIndicator() {
-    final typingUsers = _conversationProvider.getTypingUsers(widget.conversationId);
-    if (typingUsers.isEmpty) return const SizedBox.shrink();
+    final typingUsernames = _conversationProvider.getTypingUsernames(widget.conversationId);
+    if (typingUsernames.isEmpty) return const SizedBox.shrink();
     
-    // Filtrer notre propre utilisateur
-    final currentUserId = context.read<AuthProvider>().userId;
-    final otherTypingUsers = typingUsers.where((userId) => userId != currentUserId).toList();
+    // Filtrer notre propre utilisateur (comparer par pseudo)
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final currentUsername = authProvider.username ?? '';
+    final otherTypingUsers = typingUsernames.where((username) => username != currentUsername).toList();
     
     if (otherTypingUsers.isEmpty) return const SizedBox.shrink();
     
@@ -380,6 +381,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 );
               },
             ),
+            const SizedBox(width: 8),
+            // Bouton de test pour la présence
+            IconButton(
+              icon: Icon(Icons.bug_report),
+              onPressed: () {
+                _conversationProvider.debugPresenceState();
+              },
+            ),
           ],
         ),
       ),
@@ -430,11 +439,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 decoration: BoxDecoration(
                   color: Theme.of(context).scaffoldBackgroundColor,
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 4),
-                  ],
+           boxShadow: [
+             BoxShadow(
+                 color: Colors.black.withValues(alpha: 0.2),
+                 blurRadius: 4),
+           ],
                 ),
                 child: Column(
                   children: [
@@ -486,10 +495,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
               right: 16,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(20),
-                ),
+             decoration: BoxDecoration(
+               color: Colors.blue.withValues(alpha: 0.9),
+               borderRadius: BorderRadius.circular(20),
+             ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

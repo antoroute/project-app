@@ -122,6 +122,26 @@ async function build() {
         app.log.debug({ convId, userId }, 'User stopped typing');
       }
     });
+    
+    // Événements pour les nouveaux groupes et conversations
+    socket.on('group:created', (data: any) => {
+      const groupId = data.groupId;
+      if (groupId) {
+        // Broadcaster à tous les utilisateurs du groupe
+        socket.to(`group:${groupId}`).emit('group:created', { groupId, creatorId: userId });
+        app.log.info({ groupId, userId }, 'Group created');
+      }
+    });
+    
+    socket.on('conversation:created', (data: any) => {
+      const convId = data.convId;
+      const groupId = data.groupId;
+      if (convId && groupId) {
+        // Broadcaster à tous les utilisateurs du groupe
+        socket.to(`group:${groupId}`).emit('conversation:created', { convId, groupId, creatorId: userId });
+        app.log.info({ convId, groupId, userId }, 'Conversation created');
+      }
+    });
 
     app.services.presence.onConnect(socket);
     socket.on('disconnect', () => app.services.presence.onDisconnect(socket));

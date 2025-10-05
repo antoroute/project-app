@@ -46,7 +46,7 @@ class AppTheme {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.grey[700],
-      hintStyle: TextStyle(color: colorScheme.onSecondary.withOpacity(0.6)),
+      hintStyle: TextStyle(color: colorScheme.onSecondary.withValues(alpha: 0.6)),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide.none,

@@ -34,6 +34,9 @@ class WebSocketService {
   // Nouveaux callbacks pour les indicateurs de frappe
   void Function(String convId, String userId)? onTypingStart;
   void Function(String convId, String userId)? onTypingStop;
+  // Nouveaux callbacks pour les groupes et conversations
+  void Function(String groupId, String creatorId)? onGroupCreated;
+  void Function(String convId, String groupId, String creatorId)? onConversationCreated;
 
   /// Établit la connexion WS
   Future<void> connect(BuildContext context) async {
@@ -156,6 +159,31 @@ class WebSocketService {
           onTypingStop?.call(convId, userId);
         } else {
           _log('❌ Données typing:stop invalides: ${data.runtimeType}', level: 'error');
+        }
+      })
+      ..on('group:created', (data) {
+        _log('🏗️ Événement group:created reçu: ${data.runtimeType}', level: 'info');
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final groupId = m['groupId'] as String;
+          final creatorId = m['creatorId'] as String;
+          _log('🏗️ Nouveau groupe créé: $groupId par $creatorId', level: 'info');
+          onGroupCreated?.call(groupId, creatorId);
+        } else {
+          _log('❌ Données group:created invalides: ${data.runtimeType}', level: 'error');
+        }
+      })
+      ..on('conversation:created', (data) {
+        _log('💬 Événement conversation:created reçu: ${data.runtimeType}', level: 'info');
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final convId = m['convId'] as String;
+          final groupId = m['groupId'] as String;
+          final creatorId = m['creatorId'] as String;
+          _log('💬 Nouvelle conversation créée: $convId dans $groupId par $creatorId', level: 'info');
+          onConversationCreated?.call(convId, groupId, creatorId);
+        } else {
+          _log('❌ Données conversation:created invalides: ${data.runtimeType}', level: 'error');
         }
       })
       ..onError((err) => _handleError('Erreur WebSocket: $err'))

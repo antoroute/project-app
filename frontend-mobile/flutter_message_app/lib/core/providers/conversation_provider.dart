@@ -49,6 +49,13 @@ class ConversationProvider extends ChangeNotifier {
     
     // Charger le cache de déchiffrement au démarrage de manière synchrone
     _initializeCache();
+    
+    // Initialiser la présence de l'utilisateur actuel comme en ligne
+    final currentUserId = _authProvider.userId;
+    if (currentUserId != null) {
+      _userOnline[currentUserId] = true;
+      debugPrint('👥 [Presence] Initialized current user $currentUserId as online');
+    }
   }
   
   /// Configure les callbacks WebSocket une seule fois
@@ -76,12 +83,19 @@ class ConversationProvider extends ChangeNotifier {
     if (_webSocketService.onTypingStop == null) {
       _webSocketService.onTypingStop = _onTypingStop;
     }
+    // Ajouter les callbacks pour les nouveaux groupes et conversations
+    if (_webSocketService.onGroupCreated == null) {
+      _webSocketService.onGroupCreated = _onWebSocketGroupCreated;
+    }
+    if (_webSocketService.onConversationCreated == null) {
+      _webSocketService.onConversationCreated = _onWebSocketConversationCreated;
+    }
   }
 
-  /// Initialise le cache de déchiffrement (vide au démarrage pour la sécurité)
+  /// Initialise le cache de déchiffrement (préserve les messages déjà déchiffrés)
   Future<void> _initializeCache() async {
-    _decryptedCache.clear();
-    debugPrint('🚀 ConversationProvider initialisé - Cache de déchiffrement vide (sécurité)');
+    // Ne pas vider le cache pour préserver les messages déjà déchiffrés
+    debugPrint('🚀 ConversationProvider initialisé - Cache de déchiffrement préservé (${_decryptedCache.length} messages)');
   }
 
   Future<void> postRead(String conversationId) async {
@@ -288,7 +302,11 @@ class ConversationProvider extends ChangeNotifier {
   }
 
 
-  bool isUserOnline(String userId) => _userOnline[userId] == true;
+  bool isUserOnline(String userId) {
+    final isOnline = _userOnline[userId] == true;
+    debugPrint('👥 [Presence] Checking if $userId is online: $isOnline (map: $_userOnline)');
+    return isOnline;
+  }
   int onlineUsersCount() => _userOnline.values.where((v) => v == true).length;
   List<Map<String, dynamic>> readersFor(String conversationId) =>
       _readersByConv[conversationId] ?? const <Map<String, dynamic>>[];
@@ -305,6 +323,29 @@ class ConversationProvider extends ChangeNotifier {
   /// Obtient la liste des utilisateurs en train de taper pour une conversation
   List<String> getTypingUsers(String conversationId) {
     return _typingUsers[conversationId]?.toList() ?? [];
+  }
+  
+  /// Méthode de debug pour vérifier l'état de la présence
+  void debugPresenceState() {
+    debugPrint('👥 [Presence] Debug - Current presence state:');
+    debugPrint('👥 [Presence] _userOnline: $_userOnline');
+    debugPrint('👥 [Presence] _userDeviceCount: $_userDeviceCount');
+    debugPrint('👥 [Presence] Current user: ${_authProvider.userId}');
+  }
+
+  /// Obtient les pseudos des utilisateurs en train de taper pour une conversation
+  List<String> getTypingUsernames(String conversationId) {
+    final typingUserIds = _typingUsers[conversationId]?.toList() ?? [];
+    final usernames = <String>[];
+    
+    for (final userId in typingUserIds) {
+      // Pour l'instant, utiliser l'ID tronqué comme nom d'affichage
+      // TODO: Implémenter une vraie récupération des noms d'utilisateur
+      final displayName = userId.length > 8 ? '${userId.substring(0, 8)}...' : userId;
+      usernames.add(displayName);
+    }
+    
+    return usernames;
   }
   
   /// Émet un événement de début de frappe
@@ -720,10 +761,23 @@ class ConversationProvider extends ChangeNotifier {
     fetchConversations();
   }
 
+  void _onWebSocketGroupCreated(String groupId, String creatorId) {
+    debugPrint('🏗️ [WebSocket] Nouveau groupe créé: $groupId par $creatorId');
+    fetchConversations();
+  }
+
+  void _onWebSocketConversationCreated(String convId, String groupId, String creatorId) {
+    debugPrint('💬 [WebSocket] Nouvelle conversation créée: $convId dans $groupId par $creatorId');
+    fetchConversations();
+  }
+
   // Presence + read receipts hooks (UI can observe derived state later)
   void _onPresenceUpdate(String userId, bool online, int count) {
+    debugPrint('👥 [Presence] Received presence update: $userId = $online (count: $count)');
     _userOnline[userId] = online;
     _userDeviceCount[userId] = count;
+    debugPrint('👥 [Presence] Updated _userOnline map: $_userOnline');
+    debugPresenceState(); // Debug complet
     notifyListeners();
   }
 

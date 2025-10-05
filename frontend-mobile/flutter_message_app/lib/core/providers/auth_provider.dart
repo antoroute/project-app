@@ -30,12 +30,23 @@ class AuthProvider extends ChangeNotifier {
   final Uri _refreshUri  = Uri.parse('https://auth.kavalek.fr/auth/refresh');
   final Uri _registerUri = Uri.parse('https://auth.kavalek.fr/auth/register');
 
-  /// Retourne l’ID de l’utilisateur extrait du JWT (claim "id").
+  /// Retourne l'ID de l'utilisateur extrait du JWT (claim "id").
   String? get userId {
     if (_token == null) return null;
     try {
       final Map<String, dynamic> payload = JwtDecoder.decode(_token!);
       return (payload['sub'] as String?) ?? (payload['id'] as String?);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Retourne le nom d'utilisateur extrait du JWT (claim "username").
+  String? get username {
+    if (_token == null) return null;
+    try {
+      final Map<String, dynamic> payload = JwtDecoder.decode(_token!);
+      return payload['username'] as String?;
     } catch (_) {
       return null;
     }
