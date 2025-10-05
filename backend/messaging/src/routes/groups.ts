@@ -38,6 +38,10 @@ export default async function routes(app: FastifyInstance) {
       [userId, g.id]
     );
 
+    // Émettre un événement WebSocket pour la création du groupe
+    app.io.emit('group:created', { groupId: g.id, creatorId: userId });
+    app.log.info({ groupId: g.id, userId }, 'Group created and broadcasted');
+
     reply.code(201); // Explicitement retourner le code 201 Created
     return { groupId: g.id, name };
   });

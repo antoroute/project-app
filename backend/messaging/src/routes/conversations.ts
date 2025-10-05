@@ -35,7 +35,10 @@ export default async function routes(app: FastifyInstance) {
       );
     }
 
-    // Abonnement WS côté serveur non nécessaire : les clients s'abonnent
+    // Émettre un événement WebSocket pour la création de la conversation
+    app.io.emit('conversation:created', { convId: conv.id, groupId, creatorId: userId });
+    app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created and broadcasted');
+
     return { id: conv.id };
   });
 

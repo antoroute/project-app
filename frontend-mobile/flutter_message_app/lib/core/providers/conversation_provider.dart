@@ -37,6 +37,9 @@ class ConversationProvider extends ChangeNotifier {
   final Map<String, int> _unreadCounts = <String, int>{};
   /// Utilisateurs en train de taper par conversation
   final Map<String, Set<String>> _typingUsers = <String, Set<String>>{};
+  
+  /// Cache des pseudos des utilisateurs par userId
+  final Map<String, String> _userUsernames = <String, String>{};
 
   ConversationProvider(AuthProvider authProvider)
       : _apiService = ApiService(authProvider),
@@ -147,6 +150,7 @@ class ConversationProvider extends ChangeNotifier {
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       
       // Déchiffrer le message V2
+      debugPrint('🔐 [Decrypt] Déchiffrement message $msgId - groupId: ${message.v2Data!['groupId']}, myUserId: $currentUserId, myDeviceId: $myDeviceId');
       final result = await MessageCipherV2.decrypt(
         groupId: message.v2Data!['groupId'] as String,
         myUserId: currentUserId,
@@ -161,6 +165,7 @@ class ConversationProvider extends ChangeNotifier {
       
       // Mettre à jour le statut de signature du message
       message.signatureValid = signatureValid;
+      debugPrint('🔐 [Decrypt] Message $msgId - Signature: ${signatureValid ? "✅" : "❌"}');
       
       // Enregistrer en cache mémoire uniquement (session courante)
       _decryptedCache[msgId] = decryptedText;
@@ -339,10 +344,10 @@ class ConversationProvider extends ChangeNotifier {
     final usernames = <String>[];
     
     for (final userId in typingUserIds) {
-      // Pour l'instant, utiliser l'ID tronqué comme nom d'affichage
-      // TODO: Implémenter une vraie récupération des noms d'utilisateur
-      final displayName = userId.length > 8 ? '${userId.substring(0, 8)}...' : userId;
-      usernames.add(displayName);
+      // Utiliser le cache des pseudos si disponible, sinon utiliser l'ID tronqué
+      final username = _userUsernames[userId] ?? (userId.length > 8 ? '${userId.substring(0, 8)}...' : userId);
+      usernames.add(username);
+      debugPrint('✏️ [Typing] User $userId typing as: $username');
     }
     
     return usernames;
@@ -388,6 +393,20 @@ class ConversationProvider extends ChangeNotifier {
   ) async {
     try {
       final convo = await _apiService.fetchConversationDetail(conversationId);
+      
+      // Extraire les informations des membres depuis la réponse brute
+      final rawResponse = await _apiService.fetchConversationDetailRaw(conversationId);
+      if (rawResponse['members'] != null) {
+        final members = rawResponse['members'] as List<dynamic>;
+        for (final member in members) {
+          final memberMap = member as Map<String, dynamic>;
+          final userId = memberMap['userId'] as String;
+          final username = memberMap['username'] as String;
+          _userUsernames[userId] = username;
+          debugPrint('👤 [Usernames] Cached username for $userId: $username');
+        }
+      }
+      
       final idx = _conversations
           .indexWhere((c) => c.conversationId == conversationId);
       if (idx >= 0) {
@@ -774,9 +793,10 @@ class ConversationProvider extends ChangeNotifier {
   // Presence + read receipts hooks (UI can observe derived state later)
   void _onPresenceUpdate(String userId, bool online, int count) {
     debugPrint('👥 [Presence] Received presence update: $userId = $online (count: $count)');
+    debugPrint('👥 [Presence] Before update - _userOnline: $_userOnline');
     _userOnline[userId] = online;
     _userDeviceCount[userId] = count;
-    debugPrint('👥 [Presence] Updated _userOnline map: $_userOnline');
+    debugPrint('👥 [Presence] After update - _userOnline: $_userOnline');
     debugPresenceState(); // Debug complet
     notifyListeners();
   }

@@ -325,7 +325,7 @@ class ApiService {
     throw Exception('Erreur ${response.statusCode} lors de la récupération des conversations.');
   }
 
-  /// Récupère les détails d’une conversation via GET /conversations/:id.
+  /// Récupère les détails d'une conversation via GET /conversations/:id.
   Future<Conversation> fetchConversationDetail(String conversationId) async {
     final Map<String, String> headers = await _buildHeaders();
     final Uri uri = Uri.parse('$_baseUrl/conversations/$conversationId');
@@ -343,7 +343,23 @@ class ApiService {
     throw Exception('Erreur ${response.statusCode} lors de la récupération des détails de la conversation.');
   }
 
-  /// Récupère l’historique des messages pour une conversation via GET /conversations/:id/messages.
+  /// Récupère les détails d'une conversation via GET /conversations/:id (version brute).
+  Future<Map<String, dynamic>> fetchConversationDetailRaw(String conversationId) async {
+    final Map<String, String> headers = await _buildHeaders();
+    final Uri uri = Uri.parse('$_baseUrl/conversations/$conversationId');
+    final http.Response response = await http.get(uri, headers: headers);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> body = jsonDecode(response.body) as Map<String, dynamic>;
+      return body;
+    }
+    if (response.statusCode == 429) {
+      throw RateLimitException();
+    }
+    throw Exception('Erreur ${response.statusCode} lors de la récupération des détails de la conversation.');
+  }
+
+  /// Récupère l'historique des messages pour une conversation via GET /conversations/:id/messages.
   Future<List<Message>> fetchMessages(String conversationId) async {
     final Map<String, String> headers = await _buildHeaders();
     final Uri uri = Uri.parse('$_baseUrl/conversations/$conversationId/messages');
