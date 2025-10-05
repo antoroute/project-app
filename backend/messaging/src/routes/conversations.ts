@@ -35,9 +35,9 @@ export default async function routes(app: FastifyInstance) {
       );
     }
 
-    // Émettre un événement WebSocket pour la création de la conversation
-    app.io.emit('conversation:created', { convId: conv.id, groupId, creatorId: userId });
-    app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created and broadcasted');
+    // CORRECTION: Émettre uniquement aux membres du groupe (qui peuvent voir la conversation)
+    app.io.to(`group:${groupId}`).emit('conversation:created', { convId: conv.id, groupId, creatorId: userId });
+    app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created and broadcasted to group members');
 
     return { id: conv.id };
   });

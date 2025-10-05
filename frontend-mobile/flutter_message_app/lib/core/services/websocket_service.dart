@@ -37,6 +37,7 @@ class WebSocketService {
   // Nouveaux callbacks pour les groupes et conversations
   void Function(String groupId, String creatorId)? onGroupCreated;
   void Function(String convId, String groupId, String creatorId)? onConversationCreated;
+  void Function(String groupId, String userId, String approverId)? onGroupMemberJoined;
 
   /// Établit la connexion WS
   Future<void> connect(BuildContext context) async {
@@ -184,6 +185,19 @@ class WebSocketService {
           onConversationCreated?.call(convId, groupId, creatorId);
         } else {
           _log('❌ Données conversation:created invalides: ${data.runtimeType}', level: 'error');
+        }
+      })
+      ..on('group:member_joined', (data) {
+        _log('👥 Événement group:member_joined reçu: ${data.runtimeType}', level: 'info');
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final groupId = m['groupId'] as String;
+          final userId = m['userId'] as String;
+          final approverId = m['approverId'] as String;
+          _log('👥 Nouveau membre dans le groupe: $userId dans $groupId par $approverId', level: 'info');
+          onGroupMemberJoined?.call(groupId, userId, approverId);
+        } else {
+          _log('❌ Données group:member_joined invalides: ${data.runtimeType}', level: 'error');
         }
       })
       ..onError((err) => _handleError('Erreur WebSocket: $err'))

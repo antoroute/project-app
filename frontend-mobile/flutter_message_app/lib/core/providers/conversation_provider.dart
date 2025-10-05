@@ -40,6 +40,19 @@ class ConversationProvider extends ChangeNotifier {
   
   /// Cache des pseudos des utilisateurs par userId
   final Map<String, String> _userUsernames = <String, String>{};
+  
+  /// Obtient le username d'un utilisateur depuis le cache
+  String getUsernameForUser(String userId) {
+    return _userUsernames[userId] ?? '';
+  }
+  
+  /// Met en cache le username d'un utilisateur
+  void cacheUsername(String userId, String username) {
+    if (username.isNotEmpty) {
+      _userUsernames[userId] = username;
+      debugPrint('👤 [Usernames] Cached username for $userId: $username');
+    }
+  }
 
   ConversationProvider(AuthProvider authProvider)
       : _apiService = ApiService(authProvider),
@@ -97,8 +110,55 @@ class ConversationProvider extends ChangeNotifier {
 
   /// Initialise le cache de déchiffrement (préserve les messages déjà déchiffrés)
   Future<void> _initializeCache() async {
+    // CORRECTION: Nettoyer les données obsolètes au démarrage
+    await _cleanupObsoleteData();
+    
     // Ne pas vider le cache pour préserver les messages déjà déchiffrés
     debugPrint('🚀 ConversationProvider initialisé - Cache de déchiffrement préservé (${_decryptedCache.length} messages)');
+  }
+  
+  /// Nettoie les données obsolètes (conversations supprimées, messages anciens, etc.)
+  Future<void> _cleanupObsoleteData() async {
+    try {
+      // Nettoyer les messages des conversations qui n'existent plus
+      final validConvIds = _conversations.map((c) => c.conversationId).toSet();
+      final obsoleteConvIds = _messages.keys.where((id) => !validConvIds.contains(id)).toList();
+      
+      for (final convId in obsoleteConvIds) {
+        debugPrint('🧹 Cleaning up obsolete conversation: $convId');
+        _messages.remove(convId);
+        _readersByConv.remove(convId);
+        _unreadCounts.remove(convId);
+        _typingUsers.remove(convId);
+      }
+      
+      // Nettoyer les messages déchiffrés des conversations supprimées
+      final obsoleteMessageIds = <String>[];
+      for (final msgId in _decryptedCache.keys) {
+        // Vérifier si le message appartient à une conversation valide
+        bool messageExists = false;
+        for (final messages in _messages.values) {
+          if (messages.any((msg) => msg.id == msgId)) {
+            messageExists = true;
+            break;
+          }
+        }
+        if (!messageExists) {
+          obsoleteMessageIds.add(msgId);
+        }
+      }
+      
+      for (final msgId in obsoleteMessageIds) {
+        debugPrint('🧹 Cleaning up obsolete message: $msgId');
+        _decryptedCache.remove(msgId);
+      }
+      
+      if (obsoleteConvIds.isNotEmpty || obsoleteMessageIds.isNotEmpty) {
+        debugPrint('🧹 Cleanup completed: ${obsoleteConvIds.length} conversations, ${obsoleteMessageIds.length} messages');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error during cleanup: $e');
+    }
   }
 
   Future<void> postRead(String conversationId) async {
@@ -444,6 +504,17 @@ class ConversationProvider extends ChangeNotifier {
         debugPrint('📝 Parsing message ${it.messageId}: timestamp=${it.sentAt}');
         final senderUserId = (it.sender['userId'] as String?) ?? '';
         debugPrint('📝 Parsing message ${it.messageId}: sender={$senderUserId}');
+        
+        // CORRECTION: Préserver les données existantes si le message existe déjà
+        Message? existingMessage;
+        try {
+          existingMessage = _messages[conversationId]?.firstWhere(
+            (msg) => msg.id == it.messageId,
+          );
+        } catch (e) {
+          existingMessage = null;
+        }
+        
         return Message(
           id: it.messageId,
           conversationId: it.convId,
@@ -451,11 +522,11 @@ class ConversationProvider extends ChangeNotifier {
           encrypted: null,
           iv: null,
           encryptedKeys: const {},
-          signatureValid: false, // Sera mis à jour lors du déchiffrement
+          signatureValid: existingMessage?.signatureValid ?? false, // Préserver le statut existant
           senderPublicKey: null,
           timestamp: it.sentAt,
           v2Data: it.toJson(), // Stocker toutes les données V2 pour le déchiffrement
-          decryptedText: null,
+          decryptedText: existingMessage?.decryptedText, // Préserver le texte déchiffré existant
         );
       }).toList();
       
@@ -782,23 +853,35 @@ class ConversationProvider extends ChangeNotifier {
 
   void _onWebSocketGroupCreated(String groupId, String creatorId) {
     debugPrint('🏗️ [WebSocket] Nouveau groupe créé: $groupId par $creatorId');
-    fetchConversations();
+    // CORRECTION: Rafraîchir la liste des groupes via le GroupProvider
+    // Note: Le GroupProvider sera notifié via son propre callback WebSocket
   }
 
   void _onWebSocketConversationCreated(String convId, String groupId, String creatorId) {
     debugPrint('💬 [WebSocket] Nouvelle conversation créée: $convId dans $groupId par $creatorId');
+    // CORRECTION: Rafraîchir immédiatement la liste des conversations
     fetchConversations();
+    notifyListeners();
   }
 
   // Presence + read receipts hooks (UI can observe derived state later)
   void _onPresenceUpdate(String userId, bool online, int count) {
     debugPrint('👥 [Presence] Received presence update: $userId = $online (count: $count)');
     debugPrint('👥 [Presence] Before update - _userOnline: $_userOnline');
-    _userOnline[userId] = online;
+    
+    // CORRECTION: Toujours mettre à jour la présence, même si count = 0
+    final wasOnline = _userOnline[userId] ?? false;
+    _userOnline[userId] = online && count > 0;
     _userDeviceCount[userId] = count;
+    
     debugPrint('👥 [Presence] After update - _userOnline: $_userOnline');
     debugPresenceState(); // Debug complet
-    notifyListeners();
+    
+    // CORRECTION: Forcer la mise à jour si le statut a changé
+    if (wasOnline != _userOnline[userId]) {
+      debugPrint('👥 [Presence] Status changed for $userId: $wasOnline -> ${_userOnline[userId]}');
+      notifyListeners();
+    }
   }
 
   void _onConvRead(String convId, String userId, String at) {

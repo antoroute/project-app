@@ -330,15 +330,36 @@ class _ConversationScreenState extends State<ConversationScreen> {
       final isMe = msg.senderId == currentUserId;
       final text = msg.decryptedText ?? '[Chiffré]';
       final time = msgDate.toHm();
-      final senderUsername = isMe
-          ? ''
-          : (_groupProvider.members
-                  .firstWhere(
-                    (m) => m['userId'] == msg.senderId,
-                    orElse: () => <String, dynamic>{},
-                  )['username']
-              as String? ?? '')
-              .trim();
+      
+      // CORRECTION: Utiliser le cache des usernames du ConversationProvider
+      String senderUsername = '';
+      if (!isMe) {
+        // Essayer d'abord le cache des usernames
+        senderUsername = context.read<ConversationProvider>().getUsernameForUser(msg.senderId);
+        
+        // Si pas trouvé, essayer dans les membres du groupe
+        if (senderUsername.isEmpty) {
+          try {
+            final member = _groupProvider.members.firstWhere(
+              (m) => m['userId'] == msg.senderId,
+              orElse: () => <String, dynamic>{},
+            );
+            senderUsername = (member['username'] as String? ?? '').trim();
+            
+            // Mettre en cache pour la prochaine fois
+            if (senderUsername.isNotEmpty) {
+              context.read<ConversationProvider>().cacheUsername(msg.senderId, senderUsername);
+            }
+          } catch (e) {
+            debugPrint('⚠️ Username not found for user ${msg.senderId}: $e');
+          }
+        }
+        
+        // Fallback: utiliser l'ID tronqué
+        if (senderUsername.isEmpty) {
+          senderUsername = msg.senderId.length > 8 ? '${msg.senderId.substring(0, 8)}...' : msg.senderId;
+        }
+      }
 
       chatItems.add(
         MessageBubble(

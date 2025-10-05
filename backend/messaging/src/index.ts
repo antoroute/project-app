@@ -80,7 +80,7 @@ async function build() {
 
   // Services (présence, ACL)
   (app as any).services = {
-    presence: initPresenceService(io),
+    presence: initPresenceService(io, app),
     acl: initAclService(app),
   };
 
@@ -89,6 +89,18 @@ async function build() {
   io.on('connection', (socket) => {
     const { userId } = (socket as any).auth;
     socket.join(`user:${userId}`);
+    
+    // CORRECTION: Rejoindre automatiquement les rooms de groupes de l'utilisateur
+    app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
+      .then((groups: any[]) => {
+        groups.forEach((group: any) => {
+          socket.join(`group:${group.group_id}`);
+          app.log.debug({ userId, groupId: group.group_id }, 'User auto-joined group room');
+        });
+      })
+      .catch((err: any) => {
+        app.log.error({ userId, error: err }, 'Failed to auto-join group rooms');
+      });
     
     // Gestion des abonnements aux conversations
     socket.on('conv:subscribe', (data: any) => {
@@ -120,26 +132,6 @@ async function build() {
         // Broadcaster à tous les autres utilisateurs dans la conversation
         socket.to(`conv:${convId}`).emit('typing:stop', { convId, userId });
         app.log.debug({ convId, userId }, 'User stopped typing');
-      }
-    });
-    
-    // Événements pour les nouveaux groupes et conversations
-    socket.on('group:created', (data: any) => {
-      const groupId = data.groupId;
-      if (groupId) {
-        // Broadcaster à tous les utilisateurs du groupe
-        socket.to(`group:${groupId}`).emit('group:created', { groupId, creatorId: userId });
-        app.log.info({ groupId, userId }, 'Group created');
-      }
-    });
-    
-    socket.on('conversation:created', (data: any) => {
-      const convId = data.convId;
-      const groupId = data.groupId;
-      if (convId && groupId) {
-        // Broadcaster à tous les utilisateurs du groupe
-        socket.to(`group:${groupId}`).emit('conversation:created', { convId, groupId, creatorId: userId });
-        app.log.info({ convId, groupId, userId }, 'Conversation created');
       }
     });
 

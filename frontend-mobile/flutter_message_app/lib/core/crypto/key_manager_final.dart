@@ -113,6 +113,12 @@ class KeyManagerFinal {
         // Charger le seed stocké (32 octets)
         final seedBytes = base64Decode(seedB64);
         
+        // Vérifier que le seed a la bonne taille
+        if (seedBytes.length != 32) {
+          debugPrint('🔐 Invalid seed length: ${seedBytes.length}, expected 32');
+          throw Exception('Invalid seed length');
+        }
+        
         // SOLUTION FINALE: Utiliser newKeyPairFromSeed() pour la vraie reconstruction
         final ed = Ed25519();
         final reconstructedKeyPair = await ed.newKeyPairFromSeed(seedBytes);
@@ -124,6 +130,9 @@ class KeyManagerFinal {
         return reconstructedKeyPair;
       } catch (e) {
         debugPrint('🔐 Error reconstructing Ed25519 from seed: $e');
+        // CORRECTION: Supprimer le seed corrompu et régénérer
+        await _storage.delete(key: _ns(groupId, deviceId, 'ed25519'));
+        await _storage.delete(key: _ns(groupId, deviceId, 'ed25519_pub'));
       }
     }
     
@@ -165,6 +174,12 @@ class KeyManagerFinal {
         // Charger le seed stocké (32 octets)
         final seedBytes = base64Decode(seedB64);
         
+        // Vérifier que le seed a la bonne taille
+        if (seedBytes.length != 32) {
+          debugPrint('🔐 Invalid X25519 seed length: ${seedBytes.length}, expected 32');
+          throw Exception('Invalid X25519 seed length');
+        }
+        
         // SOLUTION FINALE: Utiliser newKeyPairFromSeed() pour la vraie reconstruction
         final x = X25519();
         final reconstructedKeyPair = await x.newKeyPairFromSeed(seedBytes);
@@ -176,6 +191,9 @@ class KeyManagerFinal {
         return reconstructedKeyPair;
       } catch (e) {
         debugPrint('🔐 Error reconstructing X25519 from seed: $e');
+        // CORRECTION: Supprimer le seed corrompu et régénérer
+        await _storage.delete(key: _ns(groupId, deviceId, 'x25519'));
+        await _storage.delete(key: _ns(groupId, deviceId, 'x25519_pub'));
       }
     }
     

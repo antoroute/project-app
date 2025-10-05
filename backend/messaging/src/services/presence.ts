@@ -5,7 +5,7 @@ import { Server, Socket } from 'socket.io';
 
 type PresenceState = Map<string /*userId*/, Set<string /*socket.id*/>>;
 
-export function initPresenceService(io: Server) {
+export function initPresenceService(io: Server, app: any) {
   const state: PresenceState = new Map();
 
   function onConnect(socket: Socket) {
@@ -14,10 +14,36 @@ export function initPresenceService(io: Server) {
     if (!state.has(userId)) state.set(userId, new Set());
     state.get(userId)!.add(socket.id);
 
-    // Émettre à TOUS les sockets connectés (broadcast global)
+    // CORRECTION: Émettre uniquement aux utilisateurs dans les mêmes groupes
     const count = state.get(userId)!.size;
     console.log(`[Presence] Broadcasting presence:update for ${userId} - online: true, count: ${count}`);
-    io.emit('presence:update', { userId, online: true, count });
+    
+    // Récupérer les groupes de l'utilisateur et broadcaster uniquement aux membres de ces groupes
+    app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
+      .then((userGroups: any[]) => {
+        userGroups.forEach((group: any) => {
+          io.to(`group:${group.group_id}`).emit('presence:update', { userId, online: true, count });
+        });
+      })
+      .catch((err: any) => {
+        console.error(`[Presence] Error getting user groups for ${userId}:`, err);
+      });
+    
+    // CORRECTION: Envoyer l'état de présence actuel uniquement aux groupes de l'utilisateur
+    console.log(`[Presence] Broadcasting current presence state to user's groups`);
+    app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
+      .then((userGroups: any[]) => {
+        userGroups.forEach((group: any) => {
+          for (const [uid, socketSet] of state.entries()) {
+            if (socketSet.size > 0) {
+              io.to(`group:${group.group_id}`).emit('presence:update', { userId: uid, online: true, count: socketSet.size });
+            }
+          }
+        });
+      })
+      .catch((err: any) => {
+        console.error(`[Presence] Error broadcasting presence state for ${userId}:`, err);
+      });
   }
 
   function onDisconnect(socket: Socket) {
@@ -28,10 +54,20 @@ export function initPresenceService(io: Server) {
     set.delete(socket.id);
     const online = set.size > 0;
     
-    // Émettre à TOUS les sockets connectés (broadcast global)
+    // CORRECTION: Émettre uniquement aux utilisateurs dans les mêmes groupes
     const count = set.size;
     console.log(`[Presence] Broadcasting presence:update for ${userId} - online: ${online}, count: ${count}`);
-    io.emit('presence:update', { userId, online, count });
+    
+    // Récupérer les groupes de l'utilisateur et broadcaster uniquement aux membres de ces groupes
+    app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
+      .then((userGroups: any[]) => {
+        userGroups.forEach((group: any) => {
+          io.to(`group:${group.group_id}`).emit('presence:update', { userId, online, count });
+        });
+      })
+      .catch((err: any) => {
+        console.error(`[Presence] Error getting user groups for ${userId}:`, err);
+      });
   }
 
   function isOnline(userId: string) {

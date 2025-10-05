@@ -38,9 +38,9 @@ export default async function routes(app: FastifyInstance) {
       [userId, g.id]
     );
 
-    // Émettre un événement WebSocket pour la création du groupe
-    app.io.emit('group:created', { groupId: g.id, creatorId: userId });
-    app.log.info({ groupId: g.id, userId }, 'Group created and broadcasted');
+    // CORRECTION: Émettre uniquement aux membres du groupe (le créateur est déjà membre)
+    app.io.to(`group:${g.id}`).emit('group:created', { groupId: g.id, creatorId: userId });
+    app.log.info({ groupId: g.id, userId }, 'Group created and broadcasted to group members');
 
     reply.code(201); // Explicitement retourner le code 201 Created
     return { groupId: g.id, name };
@@ -211,6 +211,14 @@ export default async function routes(app: FastifyInstance) {
 
     // Marque la requête comme acceptée
     await app.db.none(`UPDATE join_requests SET status='accepted', handled_by=$1 WHERE id=$2`, [approverId, rid]);
+
+    // CORRECTION: Notifier tous les utilisateurs du groupe qu'un nouvel utilisateur a rejoint
+    app.io.to(`group:${groupId}`).emit('group:member_joined', { 
+      groupId, 
+      userId: jr.user_id, 
+      approverId 
+    });
+    app.log.info({ groupId, userId: jr.user_id, approverId }, 'User joined group - broadcasted');
 
     return { ok: true };
   });
