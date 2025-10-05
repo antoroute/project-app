@@ -33,10 +33,9 @@ class KeyManagerFinal {
   
   String _cacheKey(String groupId, String deviceId) => '$groupId:$deviceId';
 
-  /// Initialise cryptography_flutter pour les performances natives
+  /// Initialise cryptography pour les performances
   static void initialize() {
-    // FlutterCryptography.enable(); // Plus nécessaire dans les versions récentes
-    debugPrint('🚀 Cryptography Flutter enabled for native performance');
+    debugPrint('🚀 Cryptography enabled for optimal performance');
   }
 
   /// Génère et stocke de nouvelles clés

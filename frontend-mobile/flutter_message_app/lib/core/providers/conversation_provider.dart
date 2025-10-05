@@ -156,99 +156,61 @@ class ConversationProvider extends ChangeNotifier {
         ? messages.sublist(messages.length - visibleCount)
         : messages;
     
-    // Déchiffrer en parallèle pour optimiser
-    await Future.wait(toDecrypt.map(decryptMessageIfNeeded));
-    notifyListeners();
+    // Déchiffrer en parallèle pour optimiser (max 3 simultanés)
+    final futures = <Future<void>>[];
+    int concurrent = 0;
+    const maxConcurrent = 3;
+    
+    for (final msg in toDecrypt) {
+      if (msg.decryptedText == null && msg.v2Data != null) {
+        if (concurrent >= maxConcurrent) {
+          // Attendre qu'un déchiffrement se termine avant d'en lancer un autre
+          await Future.wait(futures.take(maxConcurrent));
+          futures.clear();
+          concurrent = 0;
+        }
+        
+        futures.add(decryptMessageIfNeeded(msg).then((_) => notifyListeners()));
+        concurrent++;
+      }
+    }
+    
+    // Attendre la fin de tous les déchiffrements
+    if (futures.isNotEmpty) {
+      await Future.wait(futures);
+      notifyListeners();
+    }
   }
 
-  /// Méthode de debug pour diagnostiquer les problèmes de déchiffrement
-  void debugDecryptionStatus(String conversationId) {
+  /// Déchiffre les messages en arrière-plan (pour l'expérience utilisateur)
+  Future<void> decryptMessagesInBackground(String conversationId) async {
     final messages = _messages[conversationId] ?? [];
-    debugPrint('🔍 Debug déchiffrement conversation $conversationId:');
-    debugPrint('  📥 Total messages: ${messages.length}');
-    debugPrint('  🔐 Messages avec données V2: ${messages.where((m) => m.v2Data != null).length}');
-    debugPrint('  ✅ Messages déchiffrés: ${messages.where((m) => m.decryptedText != null).length}');
-    debugPrint('  💾 Cache taille: ${_decryptedCache.length}');
+    if (messages.isEmpty) return;
     
-    for (int i = 0; i < math.min(5, messages.length); i++) {
-      final msg = messages[messages.length - 1 - i]; // Derniers messages
-      debugPrint('  📄 Message ${i + 1}: ${msg.id.substring(0, 8)}...');
-      debugPrint('    - V2Data: ${msg.v2Data != null ? "✅" : "❌"}');
-      debugPrint('    - Déchiffré: ${msg.decryptedText != null ? "✅" : "❌"}');
-      debugPrint('    - Cache: ${_decryptedCache.containsKey(msg.id) ? "✅" : "❌"}');
-      if (msg.decryptedText != null) {
-        debugPrint('    - Texte: ${msg.decryptedText!.substring(0, math.min(20, msg.decryptedText!.length))}...');
+    // Déchiffrer tous les messages non déchiffrés en arrière-plan
+    final futures = <Future<void>>[];
+    int processed = 0;
+    
+    for (final msg in messages) {
+      if (msg.decryptedText == null && msg.v2Data != null) {
+        futures.add(decryptMessageIfNeeded(msg).then((_) {
+          processed++;
+          // Notifier tous les 5 messages déchiffrés pour l'UX
+          if (processed % 5 == 0) {
+            notifyListeners();
+          }
+        }));
       }
+    }
+    
+    // Attendre la fin et notifier une dernière fois
+    if (futures.isNotEmpty) {
+      await Future.wait(futures);
+      notifyListeners();
     }
   }
 
-  /// Méthode de diagnostic complète pour identifier les problèmes
-  Future<void> debugFullDecryptionDiagnostic(String conversationId) async {
-    debugPrint('🔍 === DIAGNOSTIC COMPLET DE DÉCHIFFREMENT ===');
-    
-    // 1. État du cache
-    debugPrint('📱 État du cache de déchiffrement:');
-    debugPrint('  - Taille: ${_decryptedCache.length}');
-    if (_decryptedCache.isNotEmpty) {
-      final sampleKeys = _decryptedCache.keys.take(3).toList();
-      debugPrint('  - Exemples: $sampleKeys');
-    }
-    
-    // 2. Messages de la conversation
-    final messages = _messages[conversationId] ?? [];
-    debugPrint('📥 Messages de la conversation:');
-    debugPrint('  - Total: ${messages.length}');
-    debugPrint('  - Avec V2Data: ${messages.where((m) => m.v2Data != null).length}');
-    debugPrint('  - Déchiffrés: ${messages.where((m) => m.decryptedText != null).length}');
-    
-    // 3. Test de déchiffrement sur un message
-    if (messages.isNotEmpty) {
-      final testMessage = messages.first;
-      debugPrint('🧪 Test de déchiffrement sur message ${testMessage.id.substring(0, 8)}...');
-      debugPrint('  - V2Data présent: ${testMessage.v2Data != null}');
-      debugPrint('  - Déjà déchiffré: ${testMessage.decryptedText != null}');
-      debugPrint('  - En cache: ${_decryptedCache.containsKey(testMessage.id)}');
-      
-      if (testMessage.v2Data != null) {
-        try {
-          final result = await decryptMessageIfNeeded(testMessage);
-          debugPrint('  - Résultat déchiffrement: ${result != null ? "✅ Succès" : "❌ Échec"}');
-          if (result != null) {
-            debugPrint('  - Texte: ${result.substring(0, math.min(30, result.length))}...');
-          }
-        } catch (e) {
-          debugPrint('  - Erreur déchiffrement: $e');
-        }
-      }
-    }
-    
-    // 4. État des clés
-    try {
-      final currentUserId = _authProvider.userId;
-      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
-      if (currentUserId != null && messages.isNotEmpty) {
-        final groupId = messages.first.v2Data?['groupId'] as String?;
-        if (groupId != null) {
-          debugPrint('🔑 État des clés:');
-          debugPrint('  - GroupId: $groupId');
-          debugPrint('  - DeviceId: $deviceId');
-          debugPrint('  - UserId: $currentUserId');
-          
-          final hasKeys = await KeyManagerFinal.instance.hasKeys(groupId, deviceId);
-          debugPrint('  - Clés existantes: ${hasKeys ? "✅" : "❌"}');
-          
-          if (hasKeys) {
-            final pubKeys = await KeyManagerFinal.instance.publicKeysBase64(groupId, deviceId);
-            debugPrint('  - Clés publiques disponibles: ${pubKeys.isNotEmpty ? "✅" : "❌"}');
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('  - Erreur vérification clés: $e');
-    }
-    
-    debugPrint('🔍 === FIN DU DIAGNOSTIC ===');
-  }
+
   bool isUserOnline(String userId) => _userOnline[userId] == true;
   int onlineUsersCount() => _userOnline.values.where((v) => v == true).length;
   List<Map<String, dynamic>> readersFor(String conversationId) =>

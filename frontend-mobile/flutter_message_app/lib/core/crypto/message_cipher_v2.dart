@@ -88,13 +88,8 @@ class MessageCipherV2 {
     final List<Map<String, String>> recipients = [];
     var validRecipientsCount = 0;
     for (final entry in recipientsDevices) {
-      debugPrint('🔐 Processing recipient ${entry.userId}/${entry.deviceId}:');
-      debugPrint('  - pkKemB64 length: ${entry.pkKemB64.length}');
-      debugPrint('  - pkKemB64: ${entry.pkKemB64.substring(0, math.min(10, entry.pkKemB64.length))}...');
-      
       // Skip recipients with empty keys (they haven't published their keys yet)
       if (entry.pkKemB64.isEmpty) {
-        debugPrint('⚠️  Skipping recipient ${entry.userId}/${entry.deviceId} - no keys published');
         continue;
       }
       
@@ -104,7 +99,6 @@ class MessageCipherV2 {
       );
       final shared = await x.sharedSecretKey(keyPair: eph, remotePublicKey: recipientPub);
       final infoData = 'project-app/v2 $groupId $convId ${entry.userId} ${entry.deviceId}';
-      debugPrint('🔐 HKDF Info encryption for ${entry.userId}/${entry.deviceId}: $infoData');
       final kek = await _hkdf.deriveKey(
         secretKey: shared,
         nonce: salt,
@@ -131,8 +125,6 @@ class MessageCipherV2 {
     if (validRecipientsCount == 0) {
       throw Exception('Aucun destinataire valide trouvé - tous les utilisateurs doivent publier leurs clés d\'abord');
     }
-    
-    debugPrint('✅ ${validRecipientsCount} destinataire(s) valide(s) traité(s)');
 
     // assemble payload (without sig)
     final Map<String, dynamic> payload = {
@@ -178,31 +170,18 @@ class MessageCipherV2 {
     required Map<String, dynamic> messageV2,
     required KeyDirectoryService keyDirectory,
   }) async {
-    debugPrint('🔓 DECRYPT DEBUG:');
-    debugPrint('  - myUserId: $myUserId');
-    debugPrint('  - myDeviceId: $myDeviceId');
-    debugPrint('  - groupId: $groupId');
-    debugPrint('  - messageV2 keys: ${messageV2.keys.toList()}');
-    
     // select recipient wrap
     final List<dynamic> recips = messageV2['recipients'] as List<dynamic>;
-    debugPrint('  - recipients count: ${recips.length}');
-    for (int i = 0; i < recips.length; i++) {
-      final recip = recips[i] as Map<String, dynamic>;
-      debugPrint('    Recipient $i: ${recip['userId']}/${recip['deviceId']}');
-    }
     
     Map<String, dynamic>? mine;
     for (final r in recips) {
       final m = r as Map<String, dynamic>;
       if (m['userId'] == myUserId && m['deviceId'] == myDeviceId) {
         mine = m;
-        debugPrint('  - Found my wrap: userId=${m['userId']}, deviceId=${m['deviceId']}');
         break;
       }
     }
     if (mine == null) {
-      debugPrint('  - ❌ No wrap found for this device');
       throw Exception('No wrap for this device');
     }
 
@@ -211,9 +190,6 @@ class MessageCipherV2 {
     final senderUserId = sender['userId'] as String;
     final senderDeviceId = sender['deviceId'] as String;
     final ephPubB64 = sender['eph_pub'] as String;
-    
-    debugPrint('🔑 KEK derivation:');
-    debugPrint('  - sender: $senderUserId/$senderDeviceId');
 
     final x = X25519();
     final myKey = await KeyManagerFinal.instance.loadX25519KeyPair(groupId, myDeviceId);
@@ -226,17 +202,14 @@ class MessageCipherV2 {
     final Uint8List salt;
     if (messageV2.containsKey('salt')) {
       salt = base64.decode(messageV2['salt'] as String);
-      debugPrint('  - Salt récupérée depuis le payload');
     } else {
       // Fallback pour compatibilité avec anciens messages
       salt = Uint8List.fromList(
         crypto.sha256.convert(utf8.encode('${messageV2['messageId']}:${_b64(_randomBytes(16))}')).bytes,
       );
-      debugPrint('  - Salt générée (fallback ancien format)');
     }
     
     final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
-    debugPrint('🔓 HKDF Info decryption for $myUserId/$myDeviceId: $infoData');
     final kek = await _hkdf.deriveKey(
       secretKey: shared,
       nonce: salt,
@@ -262,41 +235,22 @@ class MessageCipherV2 {
     // verify signature with sender Ed25519 public key from directory
     final ed = Ed25519();
     final entries = await keyDirectory.getGroupDevices(groupId);
-    debugPrint('🔍 Debug récupération depuis annuaire:');
-    debugPrint('  - Nombre d\'entrées trouvées: ${entries.length}');
-    for (final entry in entries) {
-      debugPrint('    📱 ${entry.userId}/${entry.deviceId}:');
-      debugPrint('      - pk_sig: ${entry.pkSigB64.length} chars');
-      debugPrint('      - pk_kem: ${entry.pkKemB64.length} chars');
-    }
     
     final senderEntry = entries.firstWhere(
       (e) => e.userId == senderUserId && e.deviceId == senderDeviceId,
       orElse: () => throw Exception('Missing sender public key in directory'),
     );
-    debugPrint('🔍 Debug vérification signature:');
-    debugPrint('  - senderEntry.pkSigB64 length: ${senderEntry.pkSigB64.length}');
-    debugPrint('  - senderEntry.pkSigB64: ${senderEntry.pkSigB64.substring(0, math.min(10, senderEntry.pkSigB64.length))}...');
     
     if (senderEntry.pkSigB64.isEmpty) {
       throw Exception('⛔ senderEntry.pkSigB64 est vide - impossible de vérifier la signature');
     }
     
     final sigPubBytes = base64.decode(senderEntry.pkSigB64);
-    debugPrint('  - sigPubBytes length après decode: ${sigPubBytes.length}');
-    
     final pub = SimplePublicKey(sigPubBytes, type: KeyPairType.ed25519);
     
     // Debug de la signature avant décodage
     final sigString = messageV2['sig'] as String;
-    debugPrint('🔍 Debug signature AVANT décodage:');
-    debugPrint('  - sigString length: ${sigString.length}');
-    debugPrint('  - sigString preview: ${sigString.substring(0, math.min(20, sigString.length))}...');
-    debugPrint('  - Expected ~88 chars for 64-byte signature');
-    
     final sigBytes = base64.decode(sigString);
-    debugPrint('  - sigBytes decoded length: ${sigBytes.length}');
-    debugPrint('  - Expected 64 bytes for Ed25519 signature');
     
     final verified = await ed.verify(
       _concatCanonical(messageV2),

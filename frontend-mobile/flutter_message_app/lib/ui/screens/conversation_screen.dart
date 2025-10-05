@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -22,7 +21,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
   late final ConversationProvider _conversationProvider;
   late final GroupProvider _groupProvider;
 
-  static const int _visibleCount = 15;  // Augmenté pour couvrir plus de messages visibles
   static const int _messagesPerPage = 25;  // Messages chargés par pagination
 
   static const double _nearBottomThreshold = 100.0; 
@@ -32,6 +30,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
   bool _initialDecryptDone = false;
   bool _isAtBottom = true;
   bool _showScrollToBottom = false;
+  bool _isDecrypting = false;
+  int _visibleCount = 20; // Nombre de messages visibles pour l'optimisation
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -155,16 +155,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final messages = _conversationProvider.messagesFor(widget.conversationId);
     if (messages.isEmpty) return;
     
-    // Prendre seulement les X derniers messages
-    final recentMessages = messages.length > _visibleCount 
-        ? messages.sublist(messages.length - _visibleCount) 
-        : messages;
-    
-    // Déchiffrer seulement ceux qui ne le sont pas encore
-    for (final msg in recentMessages) {
-      if (msg.decryptedText == null) {
-        _conversationProvider.decryptMessageIfNeeded(msg).then((_) => setState(() {}));
-      }
+    // Utiliser la méthode optimisée de déchiffrement avec indicateur
+    if (!_isDecrypting) {
+      setState(() => _isDecrypting = true);
+      _conversationProvider.decryptVisibleMessages(
+        widget.conversationId,
+        visibleCount: _visibleCount,
+      ).then((_) {
+        if (mounted) {
+          setState(() => _isDecrypting = false);
+        }
+      });
     }
   }
 
@@ -175,9 +176,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     await _conversationProvider.sendMessage(context, widget.conversationId, plainText);
   }
 
-  Future<void> _runDiagnostic() async {
-    await _conversationProvider.debugFullDecryptionDiagnostic(widget.conversationId);
-  }
 
   void _scrollToBottom({bool animate = true}) {
     if (!_scrollController.hasClients) return;
@@ -361,18 +359,39 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 child: const Icon(Icons.arrow_downward),
               ),
             ),
-            // Bouton de diagnostic (en mode debug)
-            if (kDebugMode)
-              Positioned(
-                bottom: 140,
-                right: 16,
-                child: FloatingActionButton(
-                  mini: true,
-                  backgroundColor: Colors.orange,
-                  onPressed: () => _runDiagnostic(),
-                  child: const Icon(Icons.bug_report, color: Colors.white),
+          
+          // Indicateur de déchiffrement en cours
+          if (_isDecrypting)
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Déchiffrement en cours...',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
                 ),
               ),
+            ),
         ],
       ),
     );
