@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/providers/conversation_provider.dart';
 
 /// Dimensions partagées pour le chat
 class ChatStyles {
@@ -15,6 +17,7 @@ class MessageBubble extends StatelessWidget {
   final bool signatureValid;
   final String senderInitial;
   final String senderUsername;
+  final String? senderUserId; // Ajout pour les indicateurs de présence
   final bool sameAsPrevious;
   final bool sameAsNext;
   final double maxWidth;
@@ -27,32 +30,63 @@ class MessageBubble extends StatelessWidget {
     required this.signatureValid,
     required this.senderInitial,
     this.senderUsername = '',
+    this.senderUserId, // Nouveau paramètre
     this.sameAsPrevious = false,
     this.sameAsNext = false,
     required this.maxWidth,
   }) : super(key: key);
 
-  /// Avatar ou espace réservé
+  /// Avatar ou espace réservé avec indicateur de présence
   Widget _avatarOrSpacer(BuildContext context) {
     final theme = Theme.of(context);
     if (isMe || sameAsNext) {
       return const SizedBox(width: ChatStyles.avatarSpacing);
     }
+    
     return SizedBox(
       width: ChatStyles.avatarSpacing,
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: CircleAvatar(
-          radius: ChatStyles.avatarDiameter / 2,
-          backgroundColor: theme.colorScheme.tertiary,  
-          child: Text(
-            senderUsername.isNotEmpty
-                ? senderUsername[0].toUpperCase()
-                : senderInitial,
-            style: const TextStyle(color: Colors.white),
+      child: Stack(
+        children: [
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: CircleAvatar(
+              radius: ChatStyles.avatarDiameter / 2,
+              backgroundColor: theme.colorScheme.tertiary,  
+              child: Text(
+                senderUsername.isNotEmpty
+                    ? senderUsername[0].toUpperCase()
+                    : senderInitial,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
           ),
-        ),
+          // Indicateur de présence
+          if (senderUserId != null && !isMe)
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: _buildPresenceIndicator(context),
+            ),
+        ],
       ),
+    );
+  }
+  
+  /// Indicateur de présence (cercle vert/gris)
+  Widget _buildPresenceIndicator(BuildContext context) {
+    return Consumer<ConversationProvider>(
+      builder: (context, provider, _) {
+        final isOnline = provider.isUserOnline(senderUserId!);
+        return Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isOnline ? Colors.green : Colors.grey.shade400,
+            border: Border.all(color: Colors.white, width: 2),
+          ),
+        );
+      },
     );
   }
 

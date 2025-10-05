@@ -6,6 +6,7 @@ import 'core/providers/auth_provider.dart';
 import 'core/providers/group_provider.dart';
 import 'core/providers/conversation_provider.dart';
 import 'core/services/websocket_service.dart';
+import 'core/services/notification_service.dart';
 import 'core/crypto/key_manager_final.dart';
 import 'ui/screens/home_screen.dart';
 import 'ui/screens/login_screen.dart';
@@ -16,6 +17,9 @@ Future<void> main() async {
 
   // 🚀 Initialiser cryptography_flutter pour les performances natives
   KeyManagerFinal.initialize();
+  
+  // 🔔 Initialiser le service de notifications
+  await NotificationService.initialize();
 
   await initializeDateFormatting('fr_FR', null);
 
@@ -54,6 +58,7 @@ class _SecureChatAppState extends State<SecureChatApp> {
     final auth = context.watch<AuthProvider>();
     if (auth.isAuthenticated && !_socketInitialized) {
       _socketInitialized = true;
+      // Initialiser la connexion WebSocket une seule fois au niveau de l'app
       WebSocketService.instance.connect(context);
     }
   }

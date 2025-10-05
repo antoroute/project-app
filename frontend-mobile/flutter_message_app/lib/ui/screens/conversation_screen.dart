@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:math' as math;
+import 'dart:async';
 
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/conversation_provider.dart';
@@ -33,6 +34,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   bool _showScrollToBottom = false;
   bool _isDecrypting = false;
   int _visibleCount = 20; // Nombre de messages visibles pour l'optimisation
+  
+  // Timer pour les indicateurs de frappe
+  Timer? _typingTimer;
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -46,7 +50,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     // Écoute la position
     _scrollController.addListener(_onScroll);
 
-    WebSocketService.instance.connect(context);
+    // WebSocket déjà connecté au niveau de l'app, juste s'abonner à la conversation
     _conversationProvider.subscribe(widget.conversationId);
     _conversationProvider.addListener(_onMessagesUpdated);
 
@@ -190,8 +194,67 @@ class _ConversationScreenState extends State<ConversationScreen> {
   Future<void> _onSendPressed() async {
     final plainText = _textController.text.trim();
     if (plainText.isEmpty) return;
+    
+    // Arrêter l'indicateur de frappe avant d'envoyer
+    _conversationProvider.stopTyping(widget.conversationId);
+    _typingTimer?.cancel();
+    
     _textController.clear();
     await _conversationProvider.sendMessage(context, widget.conversationId, plainText);
+  }
+  
+  /// Gère les événements de frappe
+  void _onTextChanged(String text) {
+    if (text.isNotEmpty) {
+      // Démarrer l'indicateur de frappe
+      _conversationProvider.startTyping(widget.conversationId);
+      
+      // Programmer l'arrêt de l'indicateur après 2 secondes d'inactivité
+      _typingTimer?.cancel();
+      _typingTimer = Timer(const Duration(seconds: 2), () {
+        _conversationProvider.stopTyping(widget.conversationId);
+      });
+    } else {
+      // Arrêter l'indicateur si le champ est vide
+      _conversationProvider.stopTyping(widget.conversationId);
+      _typingTimer?.cancel();
+    }
+  }
+  
+  /// Construit l'indicateur de frappe
+  Widget _buildTypingIndicator() {
+    final typingUsers = _conversationProvider.getTypingUsers(widget.conversationId);
+    if (typingUsers.isEmpty) return const SizedBox.shrink();
+    
+    // Filtrer notre propre utilisateur
+    final currentUserId = context.read<AuthProvider>().userId;
+    final otherTypingUsers = typingUsers.where((userId) => userId != currentUserId).toList();
+    
+    if (otherTypingUsers.isEmpty) return const SizedBox.shrink();
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            otherTypingUsers.length == 1 
+                ? '${otherTypingUsers.first} tape...'
+                : '${otherTypingUsers.length} personnes tapent...',
+            style: TextStyle(
+              fontStyle: FontStyle.italic,
+              color: Theme.of(context).colorScheme.onSecondary,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
 
@@ -211,10 +274,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   @override
   void dispose() {
-    WebSocketService.instance.unsubscribeConversation(widget.conversationId);
+    // Se désabonner de la conversation (mais garder la connexion WebSocket active)
+    _conversationProvider.unsubscribe(widget.conversationId);
     _conversationProvider.removeListener(_onMessagesUpdated);
     _textController.dispose();
     _scrollController.dispose();
+    _typingTimer?.cancel(); // Annuler le timer de frappe
     super.dispose();
   }
 
@@ -282,6 +347,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           signatureValid: msg.signatureValid,
           senderInitial: isMe ? '' : msg.senderId[0].toUpperCase(),
           senderUsername: senderUsername,
+          senderUserId: msg.senderId, // Ajout pour les indicateurs de présence
           sameAsPrevious: sameAsPrevious,
           sameAsNext: sameAsNext,
           maxWidth: maxBubbleWidth,
@@ -290,7 +356,33 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Conversation')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const Text('Conversation'),
+            const SizedBox(width: 8),
+            // Indicateur de statut WebSocket
+            StreamBuilder<SocketStatus>(
+              stream: WebSocketService.instance.statusStream,
+              builder: (context, snapshot) {
+                final status = snapshot.data ?? SocketStatus.disconnected;
+                return Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: status == SocketStatus.connected 
+                        ? Colors.green 
+                        : status == SocketStatus.connecting 
+                            ? Colors.orange 
+                            : Colors.red,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
       body: Stack(
         children: [
           Column(
@@ -344,22 +436,30 @@ class _ConversationScreenState extends State<ConversationScreen> {
                         blurRadius: 4),
                   ],
                 ),
-                child: Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _textController,
-                        decoration: const InputDecoration(
-                          hintText: 'Écrire un message…',
-                          border: InputBorder.none,
+                    // Indicateur de frappe
+                    _buildTypingIndicator(),
+                    // Champ de saisie
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _textController,
+                            onChanged: _onTextChanged, // Connecter le gestionnaire de frappe
+                            decoration: const InputDecoration(
+                              hintText: 'Écrire un message…',
+                              border: InputBorder.none,
+                            ),
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => _onSendPressed(),
+                          ),
                         ),
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _onSendPressed(),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.send),
-                      onPressed: _onSendPressed,
+                        IconButton(
+                          icon: const Icon(Icons.send),
+                          onPressed: _onSendPressed,
+                        ),
+                      ],
                     ),
                   ],
                 ),

@@ -7,6 +7,7 @@ import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'package:flutter_message_app/core/services/websocket_service.dart';
 import 'package:flutter_message_app/core/services/key_directory_service.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
+import 'package:flutter_message_app/core/services/notification_service.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -32,19 +33,49 @@ class ConversationProvider extends ChangeNotifier {
   final Map<String, int> _userDeviceCount = <String, int>{};
   /// Read receipts per conversation
   final Map<String, List<Map<String, dynamic>>> _readersByConv = <String, List<Map<String, dynamic>>>{};
+  /// Compteurs de messages non lus par conversation
+  final Map<String, int> _unreadCounts = <String, int>{};
+  /// Utilisateurs en train de taper par conversation
+  final Map<String, Set<String>> _typingUsers = <String, Set<String>>{};
 
   ConversationProvider(AuthProvider authProvider)
       : _apiService = ApiService(authProvider),
         _webSocketService = WebSocketService.instance,
         _authProvider = authProvider {
     _keyDirectory = KeyDirectoryService(_apiService);
-    _webSocketService.onNewMessageV2 = _onWebSocketNewMessageV2;
-    _webSocketService.onPresenceUpdate = _onPresenceUpdate;
-    _webSocketService.onConvRead = _onConvRead;
-    _webSocketService.onUserAdded = _onWebSocketUserAdded;
-    _webSocketService.onConversationJoined = _onWebSocketConversationJoined;
+    
+    // S'assurer que les callbacks WebSocket sont définis une seule fois
+    _setupWebSocketCallbacks();
+    
     // Charger le cache de déchiffrement au démarrage de manière synchrone
     _initializeCache();
+  }
+  
+  /// Configure les callbacks WebSocket une seule fois
+  void _setupWebSocketCallbacks() {
+    // Ne définir les callbacks que s'ils ne sont pas déjà définis
+    if (_webSocketService.onNewMessageV2 == null) {
+      _webSocketService.onNewMessageV2 = _onWebSocketNewMessageV2;
+    }
+    if (_webSocketService.onPresenceUpdate == null) {
+      _webSocketService.onPresenceUpdate = _onPresenceUpdate;
+    }
+    if (_webSocketService.onConvRead == null) {
+      _webSocketService.onConvRead = _onConvRead;
+    }
+    if (_webSocketService.onUserAdded == null) {
+      _webSocketService.onUserAdded = _onWebSocketUserAdded;
+    }
+    if (_webSocketService.onConversationJoined == null) {
+      _webSocketService.onConversationJoined = _onWebSocketConversationJoined;
+    }
+    // Ajouter les callbacks pour les indicateurs de frappe
+    if (_webSocketService.onTypingStart == null) {
+      _webSocketService.onTypingStart = _onTypingStart;
+    }
+    if (_webSocketService.onTypingStop == null) {
+      _webSocketService.onTypingStop = _onTypingStop;
+    }
   }
 
   /// Initialise le cache de déchiffrement (vide au démarrage pour la sécurité)
@@ -56,6 +87,8 @@ class ConversationProvider extends ChangeNotifier {
   Future<void> postRead(String conversationId) async {
     try {
       await _apiService.postConversationRead(conversationId: conversationId);
+      // Marquer la conversation comme lue localement
+      markConversationAsRead(conversationId);
     } catch (_) {}
   }
 
@@ -259,6 +292,30 @@ class ConversationProvider extends ChangeNotifier {
   int onlineUsersCount() => _userOnline.values.where((v) => v == true).length;
   List<Map<String, dynamic>> readersFor(String conversationId) =>
       _readersByConv[conversationId] ?? const <Map<String, dynamic>>[];
+  
+  /// Obtient le nombre de messages non lus pour une conversation
+  int getUnreadCount(String conversationId) => _unreadCounts[conversationId] ?? 0;
+  
+  /// Marque une conversation comme lue (remet le compteur à zéro)
+  void markConversationAsRead(String conversationId) {
+    _unreadCounts[conversationId] = 0;
+    notifyListeners();
+  }
+  
+  /// Obtient la liste des utilisateurs en train de taper pour une conversation
+  List<String> getTypingUsers(String conversationId) {
+    return _typingUsers[conversationId]?.toList() ?? [];
+  }
+  
+  /// Émet un événement de début de frappe
+  void startTyping(String conversationId) {
+    _webSocketService.emitTypingStart(conversationId);
+  }
+  
+  /// Émet un événement de fin de frappe
+  void stopTyping(String conversationId) {
+    _webSocketService.emitTypingStop(conversationId);
+  }
 
   /// Appelle GET /conversations
   Future<void> fetchConversations() async {
@@ -587,6 +644,8 @@ class ConversationProvider extends ChangeNotifier {
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       final groupId = payload['groupId'] as String;
       final messageId = payload['messageId'] as String;
+      final convId = payload['convId'] as String;
+      final senderId = (payload['sender'] as Map)['userId'] as String;
       
       debugPrint('📨 Message WebSocket reçu: $messageId');
       
@@ -603,11 +662,20 @@ class ConversationProvider extends ChangeNotifier {
       final signatureValid = result['signatureValid'] as bool;
       debugPrint('✅ Message WebSocket déchiffré: ${decryptedText.substring(0, math.min(20, decryptedText.length))}... - Signature: ${signatureValid ? "✅" : "❌"}');
       
+      // Incrémenter le compteur de messages non lus si ce n'est pas notre message
+      if (senderId != myUserId) {
+        _unreadCounts[convId] = (_unreadCounts[convId] ?? 0) + 1;
+        notifyListeners();
+        
+        // Afficher une notification si l'utilisateur n'est pas dans cette conversation
+        await _showNotificationIfNeeded(convId, senderId, decryptedText);
+      }
+      
       // Création du message avec texte déchiffré
       final msg = Message(
         id: messageId,
-        conversationId: payload['convId'] as String,
-        senderId: (payload['sender'] as Map)['userId'] as String,
+        conversationId: convId,
+        senderId: senderId,
         encrypted: null,
         iv: null,
         encryptedKeys: const {},
@@ -663,5 +731,68 @@ class ConversationProvider extends ChangeNotifier {
     // Refresh readers to fetch usernames and timestamps
     // ignore: discarded_futures
     refreshReaders(convId);
+  }
+  
+  // Handlers pour les indicateurs de frappe
+  void _onTypingStart(String convId, String userId) {
+    _typingUsers.putIfAbsent(convId, () => <String>{});
+    _typingUsers[convId]!.add(userId);
+    notifyListeners();
+  }
+  
+  void _onTypingStop(String convId, String userId) {
+    _typingUsers[convId]?.remove(userId);
+    notifyListeners();
+  }
+  
+  /// Affiche une notification si nécessaire
+  Future<void> _showNotificationIfNeeded(String conversationId, String senderId, String messageText) async {
+    try {
+      // Vérifier si l'utilisateur est actuellement dans cette conversation
+      final isInCurrentConversation = _isUserInCurrentConversation(conversationId);
+      
+      if (!isInCurrentConversation) {
+        // Obtenir le nom de l'expéditeur
+        final senderName = await _getSenderName(senderId);
+        
+        // Tronquer le message pour la notification
+        final truncatedMessage = messageText.length > 50 
+            ? '${messageText.substring(0, 50)}...'
+            : messageText;
+        
+        await NotificationService.showMessageNotification(
+          title: senderName.isNotEmpty ? senderName : 'Nouveau message',
+          body: truncatedMessage,
+          conversationId: conversationId,
+          senderName: senderName,
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Erreur affichage notification: $e');
+    }
+  }
+  
+  /// Vérifie si l'utilisateur est actuellement dans la conversation spécifiée
+  bool _isUserInCurrentConversation(String conversationId) {
+    // Cette méthode devrait être implémentée pour vérifier l'état de l'UI
+    // Pour l'instant, on retourne false pour toujours afficher les notifications
+    return false;
+  }
+  
+  /// Obtient le nom d'un utilisateur par son ID
+  Future<String> _getSenderName(String userId) async {
+    try {
+      // Chercher dans les membres des groupes
+      for (final conversation in _conversations) {
+        // Cette logique devrait être améliorée pour récupérer le vrai nom
+        // Pour l'instant, on retourne l'ID tronqué
+        if (conversation.conversationId.isNotEmpty) {
+          return userId.length > 8 ? '${userId.substring(0, 8)}...' : userId;
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Erreur récupération nom expéditeur: $e');
+    }
+    return userId.length > 8 ? '${userId.substring(0, 8)}...' : userId;
   }
 }

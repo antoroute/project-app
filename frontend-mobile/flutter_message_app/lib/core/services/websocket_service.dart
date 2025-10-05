@@ -14,6 +14,10 @@ class WebSocketService {
   IO.Socket? _socket;
   SocketStatus _status = SocketStatus.disconnected;
   final StreamController<SocketStatus> _statusController = StreamController.broadcast();
+  
+  // Gestion des abonnements persistants
+  final Set<String> _subscribedConversations = <String>{};
+  final Set<String> _pendingSubscriptions = <String>{};
 
   SocketStatus get status => _status;
   Stream<SocketStatus> get statusStream => _statusController.stream;
@@ -27,6 +31,9 @@ class WebSocketService {
   VoidCallback? onNotificationNew;
   VoidCallback? onConversationJoined;
   VoidCallback? onGroupJoined;
+  // Nouveaux callbacks pour les indicateurs de frappe
+  void Function(String convId, String userId)? onTypingStart;
+  void Function(String convId, String userId)? onTypingStop;
 
   /// Établit la connexion WS
   Future<void> connect(BuildContext context) async {
@@ -65,6 +72,9 @@ class WebSocketService {
       ..onConnect((_) {
         _log('WebSocket connecté', level: 'info');
         _updateStatus(SocketStatus.connected);
+        
+        // Réabonner automatiquement aux conversations précédemment souscrites
+        _resubscribeToConversations();
       })
       ..onDisconnect((_) {
         _log('WebSocket déconnecté', level: 'warn');
@@ -115,21 +125,47 @@ class WebSocketService {
           level: 'info',
         );
       })
+      // Nouveaux événements pour les indicateurs de frappe
+      ..on('typing:start', (data) {
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final convId = m['convId'] as String;
+          final userId = m['userId'] as String;
+          onTypingStart?.call(convId, userId);
+        }
+      })
+      ..on('typing:stop', (data) {
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final convId = m['convId'] as String;
+          final userId = m['userId'] as String;
+          onTypingStop?.call(convId, userId);
+        }
+      })
       ..onError((err) => _handleError('Erreur WebSocket: $err'))
       ..on('connect_error', (err) => _handleError('Erreur de connexion: $err'));
   }
 
   void subscribeConversation(String conversationId) {
-    if (_status != SocketStatus.connected || _socket == null) return;
-    _log('Demande d’abonnement à la conversation : $conversationId', level: 'info');
+    // Ajouter à la liste des abonnements persistants
+    _subscribedConversations.add(conversationId);
+    
+    if (_status != SocketStatus.connected || _socket == null) {
+      // Si pas connecté, ajouter aux abonnements en attente
+      _pendingSubscriptions.add(conversationId);
+      _log('Abonnement en attente pour la conversation : $conversationId', level: 'info');
+      return;
+    }
+    
+    _log('Demande d\'abonnement a la conversation : $conversationId', level: 'info');
     _socket!.emitWithAck(
       'conv:subscribe',
       {'convId': conversationId},
       ack: (resp) {
         final ok = resp is Map && resp['success'] == true;
         _log(ok
-            ? 'Abonnement réussi à $conversationId'
-            : 'Échec abonnement à $conversationId (ack: $resp)',
+            ? 'Abonnement reussi a $conversationId'
+            : 'Echec abonnement a $conversationId (ack: $resp)',
           level: ok ? 'info' : 'warn'
         );
       },
@@ -137,9 +173,50 @@ class WebSocketService {
   }
 
   void unsubscribeConversation(String conversationId) {
+    // Retirer de la liste des abonnements persistants
+    _subscribedConversations.remove(conversationId);
+    _pendingSubscriptions.remove(conversationId);
+    
     if (_status != SocketStatus.connected || _socket == null) return;
-    _log('Désabonnement de la conversation : $conversationId', level: 'info');
+    _log('Desabonnement de la conversation : $conversationId', level: 'info');
     _socket!.emit('conv:unsubscribe', {'convId': conversationId});
+  }
+  
+  /// Émet un événement de début de frappe
+  void emitTypingStart(String conversationId) {
+    if (_status != SocketStatus.connected || _socket == null) return;
+    _socket!.emit('typing:start', {'convId': conversationId});
+  }
+  
+  /// Émet un événement de fin de frappe
+  void emitTypingStop(String conversationId) {
+    if (_status != SocketStatus.connected || _socket == null) return;
+    _socket!.emit('typing:stop', {'convId': conversationId});
+  }
+  
+  /// Réabonne automatiquement aux conversations lors de la reconnexion
+  void _resubscribeToConversations() {
+    for (final convId in _subscribedConversations) {
+      _log('Reabonnement automatique a la conversation : $convId', level: 'info');
+      _socket!.emitWithAck(
+        'conv:subscribe',
+        {'convId': convId},
+        ack: (resp) {
+          final ok = resp is Map && resp['success'] == true;
+          _log(ok
+              ? 'Reabonnement reussi a $convId'
+              : 'Echec reabonnement a $convId (ack: $resp)',
+            level: ok ? 'info' : 'warn'
+          );
+        },
+      );
+    }
+    
+    // Traiter les abonnements en attente
+    for (final convId in _pendingSubscriptions) {
+      subscribeConversation(convId);
+    }
+    _pendingSubscriptions.clear();
   }
 
   void disconnect() {
