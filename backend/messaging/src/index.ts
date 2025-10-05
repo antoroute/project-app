@@ -89,8 +89,39 @@ async function build() {
   io.on('connection', (socket) => {
     const { userId } = (socket as any).auth;
     socket.join(`user:${userId}`);
-    socket.on('conv:subscribe', (convId: string) => socket.join(`conv:${convId}`));
-    socket.on('conv:unsubscribe', (convId: string) => socket.leave(`conv:${convId}`));
+    
+    // Gestion des abonnements aux conversations
+    socket.on('conv:subscribe', (data: any) => {
+      const convId = data.convId || data;
+      socket.join(`conv:${convId}`);
+      socket.emit('conv:subscribe', { success: true, convId });
+      app.log.info({ convId, userId }, 'User subscribed to conversation');
+    });
+    
+    socket.on('conv:unsubscribe', (data: any) => {
+      const convId = data.convId || data;
+      socket.leave(`conv:${convId}`);
+      app.log.info({ convId, userId }, 'User unsubscribed from conversation');
+    });
+    
+    // Gestion des indicateurs de frappe
+    socket.on('typing:start', (data: any) => {
+      const convId = data.convId;
+      if (convId) {
+        // Broadcaster à tous les autres utilisateurs dans la conversation
+        socket.to(`conv:${convId}`).emit('typing:start', { convId, userId });
+        app.log.debug({ convId, userId }, 'User started typing');
+      }
+    });
+    
+    socket.on('typing:stop', (data: any) => {
+      const convId = data.convId;
+      if (convId) {
+        // Broadcaster à tous les autres utilisateurs dans la conversation
+        socket.to(`conv:${convId}`).emit('typing:stop', { convId, userId });
+        app.log.debug({ convId, userId }, 'User stopped typing');
+      }
+    });
 
     app.services.presence.onConnect(socket);
     socket.on('disconnect', () => app.services.presence.onDisconnect(socket));

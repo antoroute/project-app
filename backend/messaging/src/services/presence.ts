@@ -13,7 +13,8 @@ export function initPresenceService(io: Server) {
     if (!state.has(userId)) state.set(userId, new Set());
     state.get(userId)!.add(socket.id);
 
-    io.to(`user:${userId}`).emit('presence:update', { userId, online: true, count: state.get(userId)!.size });
+    // Émettre à TOUS les sockets connectés (broadcast global)
+    io.emit('presence:update', { userId, online: true, count: state.get(userId)!.size });
   }
 
   function onDisconnect(socket: Socket) {
@@ -22,7 +23,9 @@ export function initPresenceService(io: Server) {
     if (!set) return;
     set.delete(socket.id);
     const online = set.size > 0;
-    io.to(`user:${userId}`).emit('presence:update', { userId, online, count: set.size });
+    
+    // Émettre à TOUS les sockets connectés (broadcast global)
+    io.emit('presence:update', { userId, online, count: set.size });
   }
 
   function isOnline(userId: string) {

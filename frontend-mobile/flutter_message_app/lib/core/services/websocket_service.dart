@@ -83,19 +83,27 @@ class WebSocketService {
       })
       // v2 message:new : payload v2 complet (Map<String,dynamic>)
       ..on('message:new', (data) {
+        _log('📨 Événement message:new reçu: ${data.runtimeType}', level: 'info');
         if (data is Map) {
           final map = Map<String, dynamic>.from(data);
+          _log('📨 Données message:new parsées: ${map.keys}', level: 'info');
           // Deliver raw v2 payload to providers
           onNewMessageV2?.call(map);
+        } else {
+          _log('❌ Données message:new invalides: ${data.runtimeType}', level: 'error');
         }
       })
       ..on('presence:update', (data) {
+        _log('👥 Événement presence:update reçu: ${data.runtimeType}', level: 'info');
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
           final uid = m['userId'] as String;
           final online = m['online'] as bool;
           final count = (m['count'] as num?)?.toInt() ?? 0;
+          _log('👥 Présence mise à jour: $uid = $online (count: $count)', level: 'info');
           onPresenceUpdate?.call(uid, online, count);
+        } else {
+          _log('❌ Données presence:update invalides: ${data.runtimeType}', level: 'error');
         }
       })
       ..on('conv:read', (data) {
@@ -127,19 +135,27 @@ class WebSocketService {
       })
       // Nouveaux événements pour les indicateurs de frappe
       ..on('typing:start', (data) {
+        _log('✏️ Événement typing:start reçu: ${data.runtimeType}', level: 'info');
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
           final convId = m['convId'] as String;
           final userId = m['userId'] as String;
+          _log('✏️ Frappe démarrée: $userId dans $convId', level: 'info');
           onTypingStart?.call(convId, userId);
+        } else {
+          _log('❌ Données typing:start invalides: ${data.runtimeType}', level: 'error');
         }
       })
       ..on('typing:stop', (data) {
+        _log('✏️ Événement typing:stop reçu: ${data.runtimeType}', level: 'info');
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
           final convId = m['convId'] as String;
           final userId = m['userId'] as String;
+          _log('✏️ Frappe arrêtée: $userId dans $convId', level: 'info');
           onTypingStop?.call(convId, userId);
+        } else {
+          _log('❌ Données typing:stop invalides: ${data.runtimeType}', level: 'error');
         }
       })
       ..onError((err) => _handleError('Erreur WebSocket: $err'))
@@ -153,9 +169,10 @@ class WebSocketService {
     if (_status != SocketStatus.connected || _socket == null) {
       // Si pas connecté, ajouter aux abonnements en attente
       _pendingSubscriptions.add(conversationId);
-      _log('Abonnement en attente pour la conversation : $conversationId', level: 'info');
+      _log('⏳ Abonnement en attente pour la conversation : $conversationId', level: 'info');
       return;
     }
+    _log('📡 Socket status: connected, emitting conv:subscribe for $conversationId', level: 'info');
     
     _log('Demande d\'abonnement a la conversation : $conversationId', level: 'info');
     _socket!.emitWithAck(
@@ -184,13 +201,21 @@ class WebSocketService {
   
   /// Émet un événement de début de frappe
   void emitTypingStart(String conversationId) {
-    if (_status != SocketStatus.connected || _socket == null) return;
+    if (_status != SocketStatus.connected || _socket == null) {
+      _log('❌ Impossible d\'émettre typing:start: socket non connecté', level: 'warn');
+      return;
+    }
+    _log('✏️ Émission typing:start pour $conversationId', level: 'info');
     _socket!.emit('typing:start', {'convId': conversationId});
   }
   
   /// Émet un événement de fin de frappe
   void emitTypingStop(String conversationId) {
-    if (_status != SocketStatus.connected || _socket == null) return;
+    if (_status != SocketStatus.connected || _socket == null) {
+      _log('❌ Impossible d\'émettre typing:stop: socket non connecté', level: 'warn');
+      return;
+    }
+    _log('✏️ Émission typing:stop pour $conversationId', level: 'info');
     _socket!.emit('typing:stop', {'convId': conversationId});
   }
   
