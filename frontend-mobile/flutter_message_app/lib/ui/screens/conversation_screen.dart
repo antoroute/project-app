@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:math' as math;
 
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/conversation_provider.dart';
@@ -65,6 +66,23 @@ class _ConversationScreenState extends State<ConversationScreen> {
       _loadOlderMessages();
     }
 
+    // Déchiffrer les messages autour de la position de scroll pour les messages anciens
+    if (_initialDecryptDone && !_isDecrypting) {
+      final messages = _conversationProvider.messagesFor(widget.conversationId);
+      if (messages.isNotEmpty) {
+        // Estimer l'index du message visible au centre de l'écran
+        final estimatedIndex = (offset / (maxExtent / messages.length)).round();
+        final clampedIndex = math.max(0, math.min(messages.length - 1, estimatedIndex));
+        
+        // Déchiffrer les messages autour de cette position
+        _conversationProvider.decryptMessagesAroundScrollPosition(
+          widget.conversationId,
+          scrollIndex: clampedIndex,
+          visibleCount: _visibleCount,
+        );
+      }
+    }
+
     if (atBottom != _isAtBottom || showButton != _showScrollToBottom) {
       setState(() {
         _isAtBottom = atBottom;
@@ -101,14 +119,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
       
       setState(() => _isLoading = false);
       
-      // 6) Déchiffrer UNIQUEMENT les messages visibles (optimisation)
-      await _conversationProvider.decryptVisibleMessages(
+      _initialDecryptDone = true;
+      setState(() {});
+      
+      // 6) Déchiffrer UNIQUEMENT les messages visibles en arrière-plan (éviter le freeze)
+      _conversationProvider.decryptVisibleMessages(
         widget.conversationId, 
         visibleCount: _visibleCount,
       );
-      
-      _initialDecryptDone = true;
-      setState(() {});
       
     } catch (e) {
       debugPrint('❌ Erreur chargement conversation : $e');
@@ -128,8 +146,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
         limit: _messagesPerPage,
       );
       
-      // Déchiffrer les nouveaux messages chargés
-      await _conversationProvider.decryptVisibleMessages(
+      // Déchiffrer les nouveaux messages chargés en arrière-plan
+      _conversationProvider.decryptVisibleMessages(
         widget.conversationId, 
         visibleCount: _visibleCount,
       );

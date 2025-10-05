@@ -5,7 +5,7 @@ class Message {
   final String?           encrypted;
   final String?           iv;
   final Map<String, String> encryptedKeys;  // Clés AES chiffrées par destinataire
-  final bool              signatureValid;
+  bool                    signatureValid;
   final String?           senderPublicKey;
   final int               timestamp;
   

@@ -100,7 +100,7 @@ class ConversationProvider extends ChangeNotifier {
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       
       // Déchiffrer le message V2
-      final decryptedBytes = await MessageCipherV2.decrypt(
+      final result = await MessageCipherV2.decrypt(
         groupId: message.v2Data!['groupId'] as String,
         myUserId: currentUserId,
         myDeviceId: myDeviceId,
@@ -109,13 +109,17 @@ class ConversationProvider extends ChangeNotifier {
       );
       
       // Convertir les bytes en String UTF-8
-      final decryptedText = utf8.decode(decryptedBytes);
+      final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
+      final signatureValid = result['signatureValid'] as bool;
+      
+      // Mettre à jour le statut de signature du message
+      message.signatureValid = signatureValid;
       
       // Enregistrer en cache mémoire uniquement (session courante)
       _decryptedCache[msgId] = decryptedText;
       message.decryptedText = decryptedText;
       
-      debugPrint('✅ Message $msgId déchiffré avec succès');
+      debugPrint('✅ Message $msgId déchiffré avec succès - Signature: ${signatureValid ? "✅" : "❌"}');
       return decryptedText;
       
     } catch (e) {
@@ -160,6 +164,46 @@ class ConversationProvider extends ChangeNotifier {
     final futures = <Future<void>>[];
     int concurrent = 0;
     const maxConcurrent = 3;
+    
+    for (final msg in toDecrypt) {
+      if (msg.decryptedText == null && msg.v2Data != null) {
+        if (concurrent >= maxConcurrent) {
+          // Attendre qu'un déchiffrement se termine avant d'en lancer un autre
+          await Future.wait(futures.take(maxConcurrent));
+          futures.clear();
+          concurrent = 0;
+        }
+        
+        futures.add(decryptMessageIfNeeded(msg).then((_) => notifyListeners()));
+        concurrent++;
+      }
+    }
+    
+    // Attendre la fin de tous les déchiffrements
+    if (futures.isNotEmpty) {
+      await Future.wait(futures);
+      notifyListeners();
+    }
+  }
+
+  /// Déchiffre les messages autour de la position de scroll (pour les messages anciens)
+  Future<void> decryptMessagesAroundScrollPosition(String conversationId, {
+    required int scrollIndex,
+    required int visibleCount,
+  }) async {
+    final messages = _messages[conversationId] ?? [];
+    if (messages.isEmpty) return;
+    
+    // Calculer la plage de messages à déchiffrer autour de la position de scroll
+    final startIndex = math.max(0, scrollIndex - visibleCount ~/ 2);
+    final endIndex = math.min(messages.length, scrollIndex + visibleCount ~/ 2);
+    
+    final toDecrypt = messages.sublist(startIndex, endIndex);
+    
+    // Déchiffrer en parallèle pour optimiser (max 2 simultanés pour éviter le freeze)
+    final futures = <Future<void>>[];
+    int concurrent = 0;
+    const maxConcurrent = 2;
     
     for (final msg in toDecrypt) {
       if (msg.decryptedText == null && msg.v2Data != null) {
@@ -290,7 +334,7 @@ class ConversationProvider extends ChangeNotifier {
           encrypted: null,
           iv: null,
           encryptedKeys: const {},
-          signatureValid: true,
+          signatureValid: false, // Sera mis à jour lors du déchiffrement
           senderPublicKey: null,
           timestamp: it.sentAt,
           v2Data: it.toJson(), // Stocker toutes les données V2 pour le déchiffrement
@@ -547,7 +591,7 @@ class ConversationProvider extends ChangeNotifier {
       debugPrint('📨 Message WebSocket reçu: $messageId');
       
       // Déchiffrement immédiat
-      final clear = await MessageCipherV2.decrypt(
+      final result = await MessageCipherV2.decrypt(
         groupId: groupId,
         myUserId: myUserId,
         myDeviceId: myDeviceId,
@@ -555,8 +599,9 @@ class ConversationProvider extends ChangeNotifier {
         keyDirectory: _keyDirectory,
       );
       
-      final decryptedText = String.fromCharCodes(clear);
-      debugPrint('✅ Message WebSocket déchiffré: ${decryptedText.substring(0, math.min(20, decryptedText.length))}...');
+      final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
+      final signatureValid = result['signatureValid'] as bool;
+      debugPrint('✅ Message WebSocket déchiffré: ${decryptedText.substring(0, math.min(20, decryptedText.length))}... - Signature: ${signatureValid ? "✅" : "❌"}');
       
       // Création du message avec texte déchiffré
       final msg = Message(
@@ -566,7 +611,7 @@ class ConversationProvider extends ChangeNotifier {
         encrypted: null,
         iv: null,
         encryptedKeys: const {},
-        signatureValid: true,
+        signatureValid: signatureValid, // Utiliser le vrai statut de signature
         senderPublicKey: null,
         timestamp: (payload['sentAt'] as num).toInt(),
         v2Data: payload, // Stocker les données V2 pour cohérence

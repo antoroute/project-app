@@ -163,7 +163,7 @@ class MessageCipherV2 {
     return payload;
   }
 
-  static Future<Uint8List> decrypt({
+  static Future<Map<String, dynamic>> decrypt({
     required String groupId,
     required String myUserId,
     required String myDeviceId,
@@ -256,9 +256,6 @@ class MessageCipherV2 {
       _concatCanonical(messageV2),
       signature: Signature(sigBytes, publicKey: pub),
     );
-    if (!verified) {
-      throw Exception('Signature verification failed');
-    }
 
     // decrypt content
     final iv = base64.decode(messageV2['iv'] as String);
@@ -274,6 +271,10 @@ class MessageCipherV2 {
       contentBox,
       secretKey: SecretKey(mkBytes),
     );
-    return Uint8List.fromList(clear);
+    
+    return {
+      'decryptedText': Uint8List.fromList(clear),
+      'signatureValid': verified,
+    };
   }
 }
