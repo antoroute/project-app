@@ -10,7 +10,6 @@ import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_v2.dart';
 
@@ -24,12 +23,9 @@ class ConversationProvider extends ChangeNotifier {
   List<Conversation> _conversations = <Conversation>[];
   /// Cache local des messages, par conversationId
   final Map<String, List<Message>> _messages = {};
-  /// Messages déchiffrés (cache des textes en clair)
+  /// Cache mémoire des messages déchiffrés (session courante uniquement)
+  /// ⚠️ IMPORTANT: Ce cache n'est PAS persisté pour des raisons de sécurité
   final Map<String, String> _decryptedCache = {};
-  final FlutterSecureStorage _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-  );
   /// Presence: userId -> online
   final Map<String, bool> _userOnline = <String, bool>{};
   /// Presence: userId -> device count
@@ -47,8 +43,14 @@ class ConversationProvider extends ChangeNotifier {
     _webSocketService.onConvRead = _onConvRead;
     _webSocketService.onUserAdded = _onWebSocketUserAdded;
     _webSocketService.onConversationJoined = _onWebSocketConversationJoined;
-    // Charger le cache de déchiffrement au démarrage
-    _loadDecryptedCache();
+    // Charger le cache de déchiffrement au démarrage de manière synchrone
+    _initializeCache();
+  }
+
+  /// Initialise le cache de déchiffrement (vide au démarrage pour la sécurité)
+  Future<void> _initializeCache() async {
+    _decryptedCache.clear();
+    debugPrint('🚀 ConversationProvider initialisé - Cache de déchiffrement vide (sécurité)');
   }
 
   Future<void> postRead(String conversationId) async {
@@ -63,34 +65,6 @@ class ConversationProvider extends ChangeNotifier {
   /// Messages en mémoire pour une conversation donnée.
   List<Message> messagesFor(String conversationId) =>
       _messages[conversationId] ?? <Message>[];
-
-  /// Charge le cache de déchiffrement depuis le stockage sécurisé
-  Future<void> _loadDecryptedCache() async {
-    try {
-      final cacheData = await _storage.read(key: 'decrypted_cache');
-      if (cacheData != null) {
-        final Map<String, dynamic> cache = jsonDecode(cacheData);
-        _decryptedCache.clear();
-        cache.forEach((key, value) {
-          _decryptedCache[key] = value as String;
-        });
-        debugPrint('📱 Cache de déchiffrement chargé: ${_decryptedCache.length} messages');
-      }
-    } catch (e) {
-      debugPrint('⚠️ Erreur chargement cache déchiffrement: $e');
-    }
-  }
-
-  /// Sauvegarde le cache de déchiffrement dans le stockage sécurisé
-  Future<void> _saveDecryptedCache() async {
-    try {
-      final cacheData = jsonEncode(_decryptedCache);
-      await _storage.write(key: 'decrypted_cache', value: cacheData);
-      debugPrint('💾 Cache de déchiffrement sauvegardé: ${_decryptedCache.length} messages');
-    } catch (e) {
-      debugPrint('⚠️ Erreur sauvegarde cache déchiffrement: $e');
-    }
-  }
 
   /// Déchiffre un message à la demande et le met en cache
   Future<String?> decryptMessageIfNeeded(Message message) async {
@@ -137,12 +111,9 @@ class ConversationProvider extends ChangeNotifier {
       // Convertir les bytes en String UTF-8
       final decryptedText = utf8.decode(decryptedBytes);
       
-      // Enregistrer en cache et dans l'objet message
+      // Enregistrer en cache mémoire uniquement (session courante)
       _decryptedCache[msgId] = decryptedText;
       message.decryptedText = decryptedText;
-      
-      // Sauvegarder le cache
-      await _saveDecryptedCache();
       
       debugPrint('✅ Message $msgId déchiffré avec succès');
       return decryptedText;
@@ -209,6 +180,74 @@ class ConversationProvider extends ChangeNotifier {
         debugPrint('    - Texte: ${msg.decryptedText!.substring(0, math.min(20, msg.decryptedText!.length))}...');
       }
     }
+  }
+
+  /// Méthode de diagnostic complète pour identifier les problèmes
+  Future<void> debugFullDecryptionDiagnostic(String conversationId) async {
+    debugPrint('🔍 === DIAGNOSTIC COMPLET DE DÉCHIFFREMENT ===');
+    
+    // 1. État du cache
+    debugPrint('📱 État du cache de déchiffrement:');
+    debugPrint('  - Taille: ${_decryptedCache.length}');
+    if (_decryptedCache.isNotEmpty) {
+      final sampleKeys = _decryptedCache.keys.take(3).toList();
+      debugPrint('  - Exemples: $sampleKeys');
+    }
+    
+    // 2. Messages de la conversation
+    final messages = _messages[conversationId] ?? [];
+    debugPrint('📥 Messages de la conversation:');
+    debugPrint('  - Total: ${messages.length}');
+    debugPrint('  - Avec V2Data: ${messages.where((m) => m.v2Data != null).length}');
+    debugPrint('  - Déchiffrés: ${messages.where((m) => m.decryptedText != null).length}');
+    
+    // 3. Test de déchiffrement sur un message
+    if (messages.isNotEmpty) {
+      final testMessage = messages.first;
+      debugPrint('🧪 Test de déchiffrement sur message ${testMessage.id.substring(0, 8)}...');
+      debugPrint('  - V2Data présent: ${testMessage.v2Data != null}');
+      debugPrint('  - Déjà déchiffré: ${testMessage.decryptedText != null}');
+      debugPrint('  - En cache: ${_decryptedCache.containsKey(testMessage.id)}');
+      
+      if (testMessage.v2Data != null) {
+        try {
+          final result = await decryptMessageIfNeeded(testMessage);
+          debugPrint('  - Résultat déchiffrement: ${result != null ? "✅ Succès" : "❌ Échec"}');
+          if (result != null) {
+            debugPrint('  - Texte: ${result.substring(0, math.min(30, result.length))}...');
+          }
+        } catch (e) {
+          debugPrint('  - Erreur déchiffrement: $e');
+        }
+      }
+    }
+    
+    // 4. État des clés
+    try {
+      final currentUserId = _authProvider.userId;
+      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      if (currentUserId != null && messages.isNotEmpty) {
+        final groupId = messages.first.v2Data?['groupId'] as String?;
+        if (groupId != null) {
+          debugPrint('🔑 État des clés:');
+          debugPrint('  - GroupId: $groupId');
+          debugPrint('  - DeviceId: $deviceId');
+          debugPrint('  - UserId: $currentUserId');
+          
+          final hasKeys = await KeyManagerV2.instance.hasKeys(groupId, deviceId);
+          debugPrint('  - Clés existantes: ${hasKeys ? "✅" : "❌"}');
+          
+          if (hasKeys) {
+            final pubKeys = await KeyManagerV2.instance.publicKeysBase64(groupId, deviceId);
+            debugPrint('  - Clés publiques disponibles: ${pubKeys.isNotEmpty ? "✅" : "❌"}');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('  - Erreur vérification clés: $e');
+    }
+    
+    debugPrint('🔍 === FIN DU DIAGNOSTIC ===');
   }
   bool isUserOnline(String userId) => _userOnline[userId] == true;
   int onlineUsersCount() => _userOnline.values.where((v) => v == true).length;
@@ -317,7 +356,7 @@ class ConversationProvider extends ChangeNotifier {
             msg.decryptedText = decryptedTexts[msg.id];
             _decryptedCache[msg.id] = decryptedTexts[msg.id]!;
           } else if (_decryptedCache.containsKey(msg.id)) {
-            // Restaurer depuis le cache persistant
+            // Restaurer depuis le cache mémoire (session courante)
             msg.decryptedText = _decryptedCache[msg.id];
           }
         }
@@ -517,6 +556,11 @@ class ConversationProvider extends ChangeNotifier {
       if (myUserId == null) return;
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       final groupId = payload['groupId'] as String;
+      final messageId = payload['messageId'] as String;
+      
+      debugPrint('📨 Message WebSocket reçu: $messageId');
+      
+      // Déchiffrement immédiat
       final clear = await MessageCipherV2.decrypt(
         groupId: groupId,
         myUserId: myUserId,
@@ -524,8 +568,13 @@ class ConversationProvider extends ChangeNotifier {
         messageV2: payload,
         keyDirectory: _keyDirectory,
       );
+      
+      final decryptedText = String.fromCharCodes(clear);
+      debugPrint('✅ Message WebSocket déchiffré: ${decryptedText.substring(0, math.min(20, decryptedText.length))}...');
+      
+      // Création du message avec texte déchiffré
       final msg = Message(
-        id: payload['messageId'] as String,
+        id: messageId,
         conversationId: payload['convId'] as String,
         senderId: (payload['sender'] as Map)['userId'] as String,
         encrypted: null,
@@ -534,12 +583,33 @@ class ConversationProvider extends ChangeNotifier {
         signatureValid: true,
         senderPublicKey: null,
         timestamp: (payload['sentAt'] as num).toInt(),
-        v2Data: payload, // Stocker les données V2 pour cohérence avec fetchMessages
-        decryptedText: String.fromCharCodes(clear), // Pré-déchiffré via WebSocket
+        v2Data: payload, // Stocker les données V2 pour cohérence
+        decryptedText: decryptedText, // Pré-déchiffré via WebSocket
+      );
+      
+      // Mettre en cache mémoire uniquement (session courante)
+      _decryptedCache[messageId] = decryptedText;
+      
+      addLocalMessage(msg);
+      debugPrint('📨 Message WebSocket ajouté à la conversation');
+    } catch (e) {
+      debugPrint('❌ Erreur déchiffrement message WebSocket: $e');
+      
+      // Créer un message avec erreur pour affichage
+      final msg = Message(
+        id: payload['messageId'] as String,
+        conversationId: payload['convId'] as String,
+        senderId: (payload['sender'] as Map)['userId'] as String,
+        encrypted: null,
+        iv: null,
+        encryptedKeys: const {},
+        signatureValid: false,
+        senderPublicKey: null,
+        timestamp: (payload['sentAt'] as num).toInt(),
+        v2Data: payload,
+        decryptedText: '[❌ Erreur déchiffrement]',
       );
       addLocalMessage(msg);
-    } catch (e) {
-      debugPrint('❌ decrypt v2 ws message error: $e');
     }
   }
 

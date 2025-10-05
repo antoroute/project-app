@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -172,6 +173,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
     if (plainText.isEmpty) return;
     _textController.clear();
     await _conversationProvider.sendMessage(context, widget.conversationId, plainText);
+  }
+
+  Future<void> _runDiagnostic() async {
+    await _conversationProvider.debugFullDecryptionDiagnostic(widget.conversationId);
   }
 
   void _scrollToBottom({bool animate = true}) {
@@ -356,6 +361,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 child: const Icon(Icons.arrow_downward),
               ),
             ),
+            // Bouton de diagnostic (en mode debug)
+            if (kDebugMode)
+              Positioned(
+                bottom: 140,
+                right: 16,
+                child: FloatingActionButton(
+                  mini: true,
+                  backgroundColor: Colors.orange,
+                  onPressed: () => _runDiagnostic(),
+                  child: const Icon(Icons.bug_report, color: Colors.white),
+                ),
+              ),
         ],
       ),
     );
