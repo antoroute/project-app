@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/providers/group_provider.dart';
-import 'package:flutter_message_app/core/crypto/key_manager_v3.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'package:flutter_message_app/ui/screens/qr_scan_screen.dart';
@@ -34,8 +34,8 @@ class _GroupScreenState extends State<GroupScreen> {
       final groupName = _groupNameController.text.trim();
       
       // Utiliser le nom du groupe comme identifiant temporaire pour générer les clés groupe
-      await KeyManagerV3.instance.ensureKeysFor(groupName, deviceId);
-      final groupKeys = await KeyManagerV3.instance.publicKeysBase64(groupName, deviceId);
+      await KeyManagerFinal.instance.ensureKeysFor(groupName, deviceId);
+      final groupKeys = await KeyManagerFinal.instance.publicKeysBase64(groupName, deviceId);
       
       final groupProvider =
           Provider.of<GroupProvider>(context, listen: false);
@@ -65,8 +65,8 @@ class _GroupScreenState extends State<GroupScreen> {
       final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       
       // Utiliser l'ID du groupe pour générer les clés groupe
-      await KeyManagerV3.instance.ensureKeysFor(groupId, deviceId);
-      final groupKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
+      await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);
+      final groupKeys = await KeyManagerFinal.instance.publicKeysBase64(groupId, deviceId);
       
       final groupProvider =
           Provider.of<GroupProvider>(context, listen: false);

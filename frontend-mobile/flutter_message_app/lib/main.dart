@@ -6,12 +6,16 @@ import 'core/providers/auth_provider.dart';
 import 'core/providers/group_provider.dart';
 import 'core/providers/conversation_provider.dart';
 import 'core/services/websocket_service.dart';
+import 'core/crypto/key_manager_final.dart';
 import 'ui/screens/home_screen.dart';
 import 'ui/screens/login_screen.dart';
 import 'ui/themes/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🚀 Initialiser cryptography_flutter pour les performances natives
+  KeyManagerFinal.initialize();
 
   await initializeDateFormatting('fr_FR', null);
 

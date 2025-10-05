@@ -11,7 +11,7 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
-import 'package:flutter_message_app/core/crypto/key_manager_v3.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 
 /// Gère l’état des conversations et des messages.
 class ConversationProvider extends ChangeNotifier {
@@ -234,11 +234,11 @@ class ConversationProvider extends ChangeNotifier {
           debugPrint('  - DeviceId: $deviceId');
           debugPrint('  - UserId: $currentUserId');
           
-          final hasKeys = await KeyManagerV3.instance.hasKeys(groupId, deviceId);
+          final hasKeys = await KeyManagerFinal.instance.hasKeys(groupId, deviceId);
           debugPrint('  - Clés existantes: ${hasKeys ? "✅" : "❌"}');
           
           if (hasKeys) {
-            final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
+            final pubKeys = await KeyManagerFinal.instance.publicKeysBase64(groupId, deviceId);
             debugPrint('  - Clés publiques disponibles: ${pubKeys.isNotEmpty ? "✅" : "❌"}');
           }
         }
@@ -446,7 +446,7 @@ class ConversationProvider extends ChangeNotifier {
       final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
       
       // S'assurer que nos clés device sont générées
-      await KeyManagerV3.instance.ensureKeysFor(groupId, myDeviceId);
+      await KeyManagerFinal.instance.ensureKeysFor(groupId, myDeviceId);
       
       // Vérifier et publier nos clés si nécessaire
       await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
@@ -504,10 +504,10 @@ class ConversationProvider extends ChangeNotifier {
   Future<void> _ensureMyDeviceKeysArePublished(String groupId, String deviceId) async {
     try {
       // Vérifier si les clés ont été régénérées et doivent être republiées
-      if (KeyManagerV3.instance.keysNeedRepublishing) {
+      if (KeyManagerFinal.instance.keysNeedRepublishing) {
         debugPrint('🔑 REPUBLICATION: Les clés ont été régénérées, republication nécessaire');
         
-        final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
+        final pubKeys = await KeyManagerFinal.instance.publicKeysBase64(groupId, deviceId);
         final sigPub = pubKeys['pk_sig']!;
         final kemPub = pubKeys['pk_kem']!;
         
@@ -519,7 +519,7 @@ class ConversationProvider extends ChangeNotifier {
         );
         
         // Marquer que les clés ont été republiées
-        KeyManagerV3.instance.markKeysRepublished();
+        KeyManagerFinal.instance.markKeysRepublished();
         
         // Invalider le cache pour que les nouvelles clés soient récupérées
         await _keyDirectory.fetchGroupDevices(groupId); // Force refresh du cache
@@ -534,9 +534,9 @@ class ConversationProvider extends ChangeNotifier {
         debugPrint('🔑 Publication automatique des clés manquantes pour le groupe $groupId');
         
         // S'assurer que les clés device sont générées
-        await KeyManagerV3.instance.ensureKeysFor(groupId, deviceId);
+        await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);
         
-        final pubKeys = await KeyManagerV3.instance.publicKeysBase64(groupId, deviceId);
+        final pubKeys = await KeyManagerFinal.instance.publicKeysBase64(groupId, deviceId);
         final sigPub = pubKeys['pk_sig']!;
         final kemPub = pubKeys['pk_kem']!;
         
