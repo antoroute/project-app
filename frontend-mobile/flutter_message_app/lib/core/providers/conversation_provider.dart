@@ -8,6 +8,7 @@ import 'package:flutter_message_app/core/services/websocket_service.dart';
 import 'package:flutter_message_app/core/services/key_directory_service.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/notification_service.dart';
+import 'package:flutter_message_app/core/services/global_presence_service.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -62,7 +63,6 @@ class ConversationProvider extends ChangeNotifier {
         _authProvider = authProvider {
     _keyDirectory = KeyDirectoryService(_apiService);
     
-    // S'assurer que les callbacks WebSocket sont définis une seule fois
     // Charger le cache de déchiffrement au démarrage de manière synchrone
     _initializeCache();
     
@@ -73,14 +73,48 @@ class ConversationProvider extends ChangeNotifier {
       debugPrint('👥 [Presence] Initialized current user $currentUserId as online');
     }
     
-    // CORRECTION: Configurer les callbacks WebSocket de manière asynchrone
+    // CORRECTION: Utiliser le service global de présence au lieu de configurer nos propres callbacks
+    _setupGlobalPresenceListener();
+    
+    // Configurer les autres callbacks WebSocket de manière asynchrone
     _setupWebSocketCallbacksAsync();
   }
   
+  /// Configure l'écoute du service global de présence
+  void _setupGlobalPresenceListener() {
+    debugPrint('👥 [ConversationProvider] Setting up global presence listener');
+    
+    // Écouter les changements de présence globale
+    GlobalPresenceService().addListener(() {
+      debugPrint('👥 [ConversationProvider] Global presence changed, updating local state');
+      _syncWithGlobalPresence();
+      notifyListeners();
+    });
+    
+    // Synchroniser l'état initial avec le service global
+    _syncWithGlobalPresence();
+  }
+
+  /// Synchronise l'état local avec le service global de présence
+  void _syncWithGlobalPresence() {
+    final globalPresence = GlobalPresenceService();
+    
+    // Synchroniser la présence générale
+    _userOnline.clear();
+    _userOnline.addAll(globalPresence.allUsersOnline);
+    
+    // Synchroniser la présence des conversations
+    _conversationPresence.clear();
+    _conversationPresence.addAll(globalPresence.allConversationPresence);
+    
+    debugPrint('👥 [ConversationProvider] Synced with global presence: $_userOnline');
+    debugPrint('👥 [ConversationProvider] Synced conversation presence: $_conversationPresence');
+  }
+
   /// Configure les callbacks WebSocket de manière asynchrone
   void _setupWebSocketCallbacksAsync() {
-    // Configurer immédiatement les callbacks de présence critiques
-    _setupPresenceCallbacks();
+    // Les callbacks de présence sont maintenant gérés par le service global
+    debugPrint('👥 [ConversationProvider] Presence callbacks handled by global service');
     
     // Attendre un peu pour les autres callbacks moins critiques
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -89,14 +123,6 @@ class ConversationProvider extends ChangeNotifier {
     });
   }
   
-  /// Configure immédiatement les callbacks de présence critiques
-  void _setupPresenceCallbacks() {
-    debugPrint('👥 [ConversationProvider] Setting up presence callbacks immediately');
-    _webSocketService.onPresenceUpdate = _onPresenceUpdate;
-    _webSocketService.onPresenceConversation = _onPresenceConversation;
-    debugPrint('👥 [ConversationProvider] onPresenceUpdate callback set: ${_webSocketService.onPresenceUpdate != null}');
-    debugPrint('💬 [ConversationProvider] onPresenceConversation callback set: ${_webSocketService.onPresenceConversation != null}');
-  }
   
   /// Configure les callbacks WebSocket une seule fois
   void _setupWebSocketCallbacks() {
@@ -104,8 +130,8 @@ class ConversationProvider extends ChangeNotifier {
     if (_webSocketService.onNewMessageV2 == null) {
       _webSocketService.onNewMessageV2 = _onWebSocketNewMessageV2;
     }
-    // Les callbacks de présence sont déjà configurés dans _setupPresenceCallbacks()
-    debugPrint('👥 [ConversationProvider] Presence callbacks already configured');
+    // Les callbacks de présence sont maintenant gérés par le service global
+    debugPrint('👥 [ConversationProvider] Presence callbacks handled by global service');
     if (_webSocketService.onConvRead == null) {
       _webSocketService.onConvRead = _onConvRead;
     }
@@ -917,52 +943,8 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   // Presence + read receipts hooks (UI can observe derived state later)
-  void _onPresenceUpdate(String userId, bool online, int count) {
-    debugPrint('👥 [Presence] Received presence update: $userId = $online (count: $count)');
-    debugPrint('👥 [Presence] Before update - _userOnline: $_userOnline');
-    debugPrint('👥 [Presence] _onPresenceUpdate called for user: $userId');
-    
-    // CORRECTION: Simplifier la logique de présence
-    final wasOnline = _userOnline[userId] ?? false;
-    _userOnline[userId] = online; // Simplifier : utiliser directement le paramètre online
-    _userDeviceCount[userId] = count;
-    
-    debugPrint('👥 [Presence] After update - _userOnline: $_userOnline');
-    debugPresenceState(); // Debug complet
-    
-    // CORRECTION: Toujours notifier pour forcer la mise à jour de l'UI
-    if (wasOnline != _userOnline[userId]) {
-      debugPrint('👥 [Presence] Status changed for $userId: $wasOnline -> ${_userOnline[userId]}');
-      notifyListeners();
-    } else {
-      // Même si le statut n'a pas changé, notifier pour s'assurer que l'UI est à jour
-      debugPrint('👥 [Presence] Status unchanged for $userId: $wasOnline, but notifying UI anyway');
-      notifyListeners();
-    }
-  }
+  // Les méthodes _onPresenceUpdate et _onPresenceConversation sont maintenant gérées par GlobalPresenceService
   
-  /// Gère la présence spécifique aux conversations
-  void _onPresenceConversation(String userId, bool online, int count, String conversationId) {
-    debugPrint('💬 [Presence] Received conversation presence update: $userId = $online (count: $count) in $conversationId');
-    
-    // Initialiser la map pour cette conversation si elle n'existe pas
-    _conversationPresence.putIfAbsent(conversationId, () => <String, bool>{});
-    
-    // Mettre à jour la présence dans cette conversation
-    final wasOnlineInConv = _conversationPresence[conversationId]![userId] ?? false;
-    _conversationPresence[conversationId]![userId] = online; // Simplifier : utiliser directement le paramètre online
-    
-    debugPrint('💬 [Presence] Conversation presence updated: $_conversationPresence');
-    
-    // Toujours notifier pour s'assurer que l'UI est à jour
-    if (wasOnlineInConv != _conversationPresence[conversationId]![userId]) {
-      debugPrint('💬 [Presence] Conversation status changed for $userId in $conversationId: $wasOnlineInConv -> ${_conversationPresence[conversationId]![userId]}');
-      notifyListeners();
-    } else {
-      debugPrint('💬 [Presence] Conversation status unchanged for $userId in $conversationId: $wasOnlineInConv, but notifying UI anyway');
-      notifyListeners();
-    }
-  }
 
   void _onConvRead(String convId, String userId, String at) {
     // Refresh readers to fetch usernames and timestamps

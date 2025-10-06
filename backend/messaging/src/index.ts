@@ -144,16 +144,21 @@ async function build() {
         app.log.info({ convId, userId }, 'User subscribed to conversation');
         
         // CORRECTION: Émettre la présence de l'utilisateur dans cette conversation
-        if (app.services.presence) {
-          const userSocketCount = app.services.presence.getUserSocketCount?.(userId) || 1;
-          socket.to(`conv:${convId}`).emit('presence:conversation', { 
-            userId, 
-            online: true, 
-            count: userSocketCount,
-            conversationId: convId 
-          });
-          app.log.info({ convId, userId }, 'Presence broadcasted to conversation');
-        }
+        // Vérifier combien de sockets de cet utilisateur sont dans cette conversation
+        const conversationRoom = `conv:${convId}`;
+        const socketsInConversation = app.io.sockets.adapter.rooms.get(conversationRoom);
+        const userSocketsInConversation = Array.from(socketsInConversation || []).filter(socketId => {
+          const socket = app.io.sockets.sockets.get(socketId);
+          return socket && (socket as any).auth?.userId === userId;
+        });
+        
+        socket.to(`conv:${convId}`).emit('presence:conversation', {
+          userId,
+          online: true,
+          count: userSocketsInConversation.length,
+          conversationId: convId
+        });
+        app.log.info({ convId, userId, socketCount: userSocketsInConversation.length }, 'Presence broadcasted to conversation');
       } else {
         socket.emit('conv:subscribe', { success: false, error: 'Unauthorized' });
         app.log.warn({ convId, userId }, 'Unauthorized conversation subscription attempt');
@@ -166,16 +171,22 @@ async function build() {
       app.log.info({ convId, userId }, 'User unsubscribed from conversation');
       
       // CORRECTION: Émettre la présence de l'utilisateur comme hors ligne dans cette conversation
-      if (app.services.presence) {
-        const userSocketCount = app.services.presence.getUserSocketCount?.(userId) || 0;
-        socket.to(`conv:${convId}`).emit('presence:conversation', { 
-          userId, 
-          online: userSocketCount > 0, 
-          count: userSocketCount,
-          conversationId: convId 
-        });
-        app.log.info({ convId, userId }, 'Presence updated on conversation unsubscribe');
-      }
+      // Vérifier si l'utilisateur a encore des sockets dans cette conversation
+      const conversationRoom = `conv:${convId}`;
+      const socketsInConversation = app.io.sockets.adapter.rooms.get(conversationRoom);
+      const userSocketsInConversation = Array.from(socketsInConversation || []).filter(socketId => {
+        const socket = app.io.sockets.sockets.get(socketId);
+        return socket && (socket as any).auth?.userId === userId;
+      });
+      
+      const isOnlineInConversation = userSocketsInConversation.length > 0;
+      socket.to(`conv:${convId}`).emit('presence:conversation', { 
+        userId, 
+        online: isOnlineInConversation, 
+        count: userSocketsInConversation.length,
+        conversationId: convId 
+      });
+      app.log.info({ convId, userId, isOnlineInConversation }, 'Presence updated on conversation unsubscribe');
     });
     
     // Gestion des indicateurs de frappe avec vérification de sécurité
