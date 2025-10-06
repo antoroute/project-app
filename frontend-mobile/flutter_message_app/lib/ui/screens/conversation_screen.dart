@@ -390,7 +390,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
           ],
         ),
       ),
-      body: Stack(
+      body: SafeArea(
+        child: Stack(
         children: [
           Column(
             children: [
@@ -416,7 +417,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 child: ListView(
                   controller: _scrollController,
                   reverse: false,
-                  physics: const ClampingScrollPhysics(),
+                  physics: const BouncingScrollPhysics(),
                   children: [
                     // Indicateur de chargement pour pagination (en haut de la liste)
                     if (_isLoading) 
@@ -431,44 +432,50 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 ),
               ),
 
-              // zone de saisie
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-           boxShadow: [
-             BoxShadow(
-                 color: Colors.black.withValues(alpha: 0.2),
-                 blurRadius: 4),
-           ],
-                ),
-                child: Column(
-                  children: [
-                    // Indicateur de frappe
-                    _buildTypingIndicator(),
-                    // Champ de saisie
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _textController,
-                            onChanged: _onTextChanged, // Connecter le gestionnaire de frappe
-                            decoration: const InputDecoration(
-                              hintText: 'Écrire un message…',
-                              border: InputBorder.none,
+              // zone de saisie avec SafeArea pour Android
+              SafeArea(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.2),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Indicateur de frappe
+                      _buildTypingIndicator(),
+                      // Champ de saisie
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _textController,
+                              onChanged: _onTextChanged,
+                              decoration: const InputDecoration(
+                                hintText: 'Écrire un message…',
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              ),
+                              textInputAction: TextInputAction.send,
+                              onSubmitted: (_) => _onSendPressed(),
+                              maxLines: 4, // Permettre plusieurs lignes
+                              minLines: 1,
                             ),
-                            textInputAction: TextInputAction.send,
-                            onSubmitted: (_) => _onSendPressed(),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.send),
-                          onPressed: _onSendPressed,
-                        ),
-                      ],
-                    ),
-                  ],
+                          IconButton(
+                            icon: const Icon(Icons.send),
+                            onPressed: _onSendPressed,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -518,6 +525,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
               ),
             ),
         ],
+        ),
       ),
     );
   }

@@ -115,20 +115,33 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Rafraîchit le token via biométrie (popup) et l’API /refresh.
+  /// Rafraîchit le token via biométrie (popup) et l'API /refresh.
   Future<bool> refreshAccessToken() async {
     try {
+      // Vérifier si la biométrie est disponible
       if (!await _biometric.canCheckBiometrics()) {
+        debugPrint('🔐 [Auth] Biométrie non disponible');
         return false;
       }
+      
+      // Demander l'authentification biométrique
+      debugPrint('🔐 [Auth] Demande d\'authentification biométrique...');
       final bool authenticated = await _biometric.authenticate();
       if (!authenticated) {
+        debugPrint('🔐 [Auth] Authentification biométrique échouée');
         return false;
       }
+      debugPrint('🔐 [Auth] Authentification biométrique réussie');
+      
+      // Récupérer le refresh token
       final String? storedRefresh = await _storage.read(key: 'refreshToken');
       if (storedRefresh == null) {
+        debugPrint('🔐 [Auth] Aucun refresh token trouvé');
         return false;
       }
+      debugPrint('🔐 [Auth] Refresh token trouvé, appel API...');
+      
+      // Appeler l'API de refresh
       final http.Response response = await http.post(
         _refreshUri,
         headers: <String, String>{
@@ -137,19 +150,38 @@ class AuthProvider extends ChangeNotifier {
           'Authorization': 'Bearer $storedRefresh',
         },
       );
+      
+      debugPrint('🔐 [Auth] Réponse API refresh: ${response.statusCode}');
+      
       if (response.statusCode != 200) {
+        debugPrint('🔐 [Auth] Erreur API refresh: ${response.body}');
+        // Si le refresh token est invalide, le supprimer
+        if (response.statusCode == 401) {
+          await _storage.delete(key: 'refreshToken');
+          debugPrint('🔐 [Auth] Refresh token supprimé (401)');
+        }
         return false;
       }
+      
       final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
       final String? newAccessToken = (data['accessToken'] as String?) ?? (data['access'] as String?);
+      
       if (newAccessToken == null) {
+        debugPrint('🔐 [Auth] Aucun access token dans la réponse');
         return false;
       }
+      
+      // Mettre à jour le token en mémoire et en storage
       _token = newAccessToken;
       await _storage.write(key: 'accessToken', value: newAccessToken);
       notifyListeners();
+      debugPrint('🔐 [Auth] Token rafraîchi avec succès');
       return true;
-    } catch (_) {
+      
+    } catch (e) {
+      debugPrint('🔐 [Auth] Erreur lors du refresh: $e');
+      // En cas d'erreur, nettoyer les tokens
+      await _storage.delete(key: 'refreshToken');
       return false;
     }
   }
@@ -200,9 +232,14 @@ class AuthProvider extends ChangeNotifier {
       final bool biometricsAvailable = await canUseBiometrics();
       if (!biometricsAvailable) {
         logout();
-        throw Exception('Token invalide et biométrie indisponible déconnexion');
+        throw Exception('Token invalide et biométrie indisponible - déconnexion');
       }
-      loginWithBiometrics();
+      // CORRECTION: Attendre le résultat de la reconnexion biométrique
+      final bool biometricSuccess = await loginWithBiometrics();
+      if (!biometricSuccess) {
+        logout();
+        throw Exception('Échec de la reconnexion biométrique - déconnexion');
+      }
     }
     return <String, String>{
       'Content-Type': 'application/json',

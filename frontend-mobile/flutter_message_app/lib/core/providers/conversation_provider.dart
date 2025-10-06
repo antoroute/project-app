@@ -311,34 +311,38 @@ class ConversationProvider extends ChangeNotifier {
     final messages = _messages[conversationId] ?? [];
     if (messages.isEmpty) return;
     
-    // Déchiffrer seulement les derniers X messages (les plus récents)
+    // CORRECTION: Déchiffrer du plus récent au plus ancien pour une meilleure UX
     final toDecrypt = messages.length > visibleCount 
         ? messages.sublist(messages.length - visibleCount)
         : messages;
     
-    // Déchiffrer en parallèle pour optimiser (max 3 simultanés)
-    final futures = <Future<void>>[];
-    int concurrent = 0;
-    const maxConcurrent = 3;
+    // Inverser l'ordre pour déchiffrer du plus récent au plus ancien
+    final reversedMessages = toDecrypt.reversed.toList();
     
-    for (final msg in toDecrypt) {
-      if (msg.decryptedText == null && msg.v2Data != null) {
-        if (concurrent >= maxConcurrent) {
-          // Attendre qu'un déchiffrement se termine avant d'en lancer un autre
-          await Future.wait(futures.take(maxConcurrent));
-          futures.clear();
-          concurrent = 0;
+    // Déchiffrer par petits groupes pour éviter le freeze
+    const batchSize = 5; // Déchiffrer 5 messages à la fois
+    const delayBetweenBatches = 50; // 50ms entre chaque groupe
+    
+    for (int i = 0; i < reversedMessages.length; i += batchSize) {
+      final batch = reversedMessages.skip(i).take(batchSize).toList();
+      final futures = <Future<void>>[];
+      
+      for (final msg in batch) {
+        if (msg.decryptedText == null && msg.v2Data != null) {
+          futures.add(decryptMessageIfNeeded(msg).then((_) => notifyListeners()));
         }
-        
-        futures.add(decryptMessageIfNeeded(msg).then((_) => notifyListeners()));
-        concurrent++;
       }
-    }
-    
-    // Attendre la fin de tous les déchiffrements
-    if (futures.isNotEmpty) {
-      await Future.wait(futures);
-      notifyListeners();
+      
+      // Attendre la fin du groupe actuel
+      if (futures.isNotEmpty) {
+        await Future.wait(futures);
+        notifyListeners();
+        
+        // Petite pause pour éviter le freeze de l'UI
+        if (i + batchSize < reversedMessages.length) {
+          await Future.delayed(const Duration(milliseconds: delayBetweenBatches));
+        }
+      }
     }
   }
 
@@ -356,29 +360,30 @@ class ConversationProvider extends ChangeNotifier {
     
     final toDecrypt = messages.sublist(startIndex, endIndex);
     
-    // Déchiffrer en parallèle pour optimiser (max 2 simultanés pour éviter le freeze)
-    final futures = <Future<void>>[];
-    int concurrent = 0;
-    const maxConcurrent = 2;
+    // Déchiffrer par petits groupes pour éviter le freeze
+    const batchSize = 3; // Plus petit pour les messages anciens
+    const delayBetweenBatches = 30; // Pause plus courte
     
-    for (final msg in toDecrypt) {
-      if (msg.decryptedText == null && msg.v2Data != null) {
-        if (concurrent >= maxConcurrent) {
-          // Attendre qu'un déchiffrement se termine avant d'en lancer un autre
-          await Future.wait(futures.take(maxConcurrent));
-          futures.clear();
-          concurrent = 0;
+    for (int i = 0; i < toDecrypt.length; i += batchSize) {
+      final batch = toDecrypt.skip(i).take(batchSize).toList();
+      final futures = <Future<void>>[];
+      
+      for (final msg in batch) {
+        if (msg.decryptedText == null && msg.v2Data != null) {
+          futures.add(decryptMessageIfNeeded(msg).then((_) => notifyListeners()));
         }
-        
-        futures.add(decryptMessageIfNeeded(msg).then((_) => notifyListeners()));
-        concurrent++;
       }
-    }
-    
-    // Attendre la fin de tous les déchiffrements
-    if (futures.isNotEmpty) {
-      await Future.wait(futures);
-      notifyListeners();
+      
+      // Attendre la fin du groupe actuel
+      if (futures.isNotEmpty) {
+        await Future.wait(futures);
+        notifyListeners();
+        
+        // Petite pause pour éviter le freeze de l'UI
+        if (i + batchSize < toDecrypt.length) {
+          await Future.delayed(const Duration(milliseconds: delayBetweenBatches));
+        }
+      }
     }
   }
 

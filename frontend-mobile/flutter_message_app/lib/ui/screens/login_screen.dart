@@ -24,11 +24,27 @@ class _LoginScreenState extends State<LoginScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final auth = Provider.of<AuthProvider>(context, listen: false);
       final bool hasRefresh = await auth.hasRefreshToken();
-      final bool canBio    = await auth.canUseBiometrics();
+      final bool canBio = await auth.canUseBiometrics();
+      
       if (hasRefresh && canBio) {
-        final bool ok = await auth.loginWithBiometrics();
-        if (ok) {
-          _goHome();
+        try {
+          final bool ok = await auth.loginWithBiometrics();
+          if (ok && mounted) {
+            _goHome();
+          } else if (mounted) {
+            // Afficher un message d'erreur si la biométrie échoue
+            SnackbarService.showError(
+              context, 
+              'Échec de la reconnexion biométrique. Veuillez vous reconnecter manuellement.'
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            SnackbarService.showError(
+              context, 
+              'Erreur lors de la reconnexion : $e'
+            );
+          }
         }
       }
     });

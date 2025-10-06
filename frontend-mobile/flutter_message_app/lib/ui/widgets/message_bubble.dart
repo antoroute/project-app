@@ -140,7 +140,7 @@ class MessageBubble extends StatelessWidget {
             // avatar ou espace
             _avatarOrSpacer(context),
 
-            // la bulle
+            // la bulle avec gestion d'overflow
             Flexible(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: maxWidth),
@@ -161,12 +161,23 @@ class MessageBubble extends StatelessWidget {
                     crossAxisAlignment: isMe
                         ? CrossAxisAlignment.end
                         : CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(text, style: messageStyle),
+                      // Texte avec gestion d'overflow
+                      Text(
+                        text, 
+                        style: messageStyle,
+                        overflow: TextOverflow.visible,
+                        softWrap: true,
+                      ),
                       if (time != null)
                         Padding(
-                          padding: const EdgeInsets.only(top: 0),
-                          child: Text(time!, style: timeStyle),
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            time!, 
+                            style: timeStyle,
+                            overflow: TextOverflow.visible,
+                          ),
                         ),
                     ],
                   ),
