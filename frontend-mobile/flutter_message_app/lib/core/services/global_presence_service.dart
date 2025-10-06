@@ -17,8 +17,6 @@ class GlobalPresenceService {
 
   /// Initialise le service de présence global
   void initialize() {
-    debugPrint('🌍 [GlobalPresence] Initializing global presence service');
-    
     // Configurer les callbacks WebSocket immédiatement
     _setupWebSocketCallbacks();
   }
@@ -27,37 +25,25 @@ class GlobalPresenceService {
   void _setupWebSocketCallbacks() {
     final webSocketService = WebSocketService.instance;
     
-    debugPrint('🌍 [GlobalPresence] Setting up WebSocket callbacks');
-    
     // Callback pour les événements presence:update
     webSocketService.onPresenceUpdate = (String userId, bool online, int count) {
-      debugPrint('🌍 [GlobalPresence] Received presence:update: $userId = $online (count: $count)');
-      
       final wasOnline = _userOnline[userId] ?? false;
       _userOnline[userId] = online;
       _userDeviceCount[userId] = count;
       
-      debugPrint('🌍 [GlobalPresence] Updated global presence: $_userOnline');
-      
       if (wasOnline != online) {
-        debugPrint('🌍 [GlobalPresence] Presence changed for $userId: $wasOnline -> $online');
         _notifyListeners();
       }
     };
 
     // Callback pour les événements presence:conversation
     webSocketService.onPresenceConversation = (String userId, bool online, int count, String conversationId) {
-      debugPrint('🌍 [GlobalPresence] Received presence:conversation: $userId = $online (count: $count) in $conversationId');
-      
       _conversationPresence.putIfAbsent(conversationId, () => <String, bool>{});
       
       final wasOnlineInConv = _conversationPresence[conversationId]![userId] ?? false;
       _conversationPresence[conversationId]![userId] = online;
       
-      debugPrint('🌍 [GlobalPresence] Updated conversation presence: $_conversationPresence');
-      
       if (wasOnlineInConv != online) {
-        debugPrint('🌍 [GlobalPresence] Conversation presence changed for $userId in $conversationId: $wasOnlineInConv -> $online');
         _notifyListeners();
       }
     };
@@ -68,18 +54,15 @@ class GlobalPresenceService {
   /// Ajoute un listener pour les changements de présence
   void addListener(VoidCallback listener) {
     _presenceListeners.add(listener);
-    debugPrint('🌍 [GlobalPresence] Added listener, total: ${_presenceListeners.length}');
   }
 
   /// Supprime un listener
   void removeListener(VoidCallback listener) {
     _presenceListeners.remove(listener);
-    debugPrint('🌍 [GlobalPresence] Removed listener, total: ${_presenceListeners.length}');
   }
 
   /// Notifie tous les listeners des changements de présence
   void _notifyListeners() {
-    debugPrint('🌍 [GlobalPresence] Notifying ${_presenceListeners.length} listeners');
     for (final listener in _presenceListeners) {
       try {
         listener();

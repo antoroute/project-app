@@ -57,18 +57,13 @@ class _SecureChatAppState extends State<SecureChatApp> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final auth = context.watch<AuthProvider>();
-    if (auth.isAuthenticated && !_socketInitialized) {
-      _socketInitialized = true;
-      print('🔌 [Main] Initializing WebSocket connection...');
-      // Initialiser le service de présence global
-      GlobalPresenceService().initialize();
-      // Initialiser la connexion WebSocket une seule fois au niveau de l'app
-      WebSocketService.instance.connect(context).then((_) {
-        print('🔌 [Main] WebSocket connection attempt completed');
-      }).catchError((error) {
-        print('🔌 [Main] WebSocket connection failed: $error');
-      });
-    }
+      if (auth.isAuthenticated && !_socketInitialized) {
+        _socketInitialized = true;
+        // Initialiser le service de présence global
+        GlobalPresenceService().initialize();
+        // Initialiser la connexion WebSocket une seule fois au niveau de l'app
+        WebSocketService.instance.connect(context);
+      }
   }
 
   @override

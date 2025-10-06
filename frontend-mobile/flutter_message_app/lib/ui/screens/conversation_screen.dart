@@ -385,24 +385,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
             const Text('Conversation'),
             const SizedBox(width: 8),
             // Indicateur de statut WebSocket
-            StreamBuilder<SocketStatus>(
-              stream: WebSocketService.instance.statusStream,
-              builder: (context, snapshot) {
-                final status = snapshot.data ?? SocketStatus.disconnected;
-                return Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: status == SocketStatus.connected 
-                        ? Colors.green 
-                        : status == SocketStatus.connecting 
-                            ? Colors.orange 
-                            : Colors.red,
-                  ),
-                );
-              },
-            ),
+            _WebSocketStatusIndicator(),
             const SizedBox(width: 8),
           ],
         ),
@@ -535,6 +518,52 @@ class _ConversationScreenState extends State<ConversationScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Widget séparé pour l'indicateur de statut WebSocket
+class _WebSocketStatusIndicator extends StatefulWidget {
+  @override
+  _WebSocketStatusIndicatorState createState() => _WebSocketStatusIndicatorState();
+}
+
+class _WebSocketStatusIndicatorState extends State<_WebSocketStatusIndicator> {
+  late StreamSubscription<SocketStatus> _statusSubscription;
+  SocketStatus _currentStatus = SocketStatus.disconnected;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentStatus = WebSocketService.instance.status;
+    _statusSubscription = WebSocketService.instance.statusStream.listen((status) {
+      if (mounted) {
+        setState(() {
+          _currentStatus = status;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _statusSubscription.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: _currentStatus == SocketStatus.connected 
+            ? Colors.green 
+            : _currentStatus == SocketStatus.connecting 
+                ? Colors.orange 
+                : Colors.red,
       ),
     );
   }

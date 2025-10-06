@@ -30,8 +30,6 @@ class ConversationProvider extends ChangeNotifier {
   final Map<String, String> _decryptedCache = {};
   /// Presence: userId -> online
   final Map<String, bool> _userOnline = <String, bool>{};
-  /// Presence: userId -> device count
-  final Map<String, int> _userDeviceCount = <String, int>{};
   /// Presence spécifique aux conversations: conversationId -> userId -> online
   final Map<String, Map<String, bool>> _conversationPresence = <String, Map<String, bool>>{};
   /// Read receipts per conversation
@@ -53,7 +51,6 @@ class ConversationProvider extends ChangeNotifier {
   void cacheUsername(String userId, String username) {
     if (username.isNotEmpty) {
       _userUsernames[userId] = username;
-      debugPrint('👤 [Usernames] Cached username for $userId: $username');
     }
   }
 
@@ -243,7 +240,6 @@ class ConversationProvider extends ChangeNotifier {
     try {
       // Vérifier que le message a des données V2 pour le déchiffrement
       if (message.v2Data == null) {
-        debugPrint('⚠️ Message $msgId sans données V2, impossible à déchiffrer');
         const errorText = '[Pas de données V2]';
         _decryptedCache[msgId] = errorText;
         message.decryptedText = errorText;
@@ -259,7 +255,6 @@ class ConversationProvider extends ChangeNotifier {
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       
       // Déchiffrer le message V2
-      debugPrint('🔐 [Decrypt] Déchiffrement message $msgId - groupId: ${message.v2Data!['groupId']}, myUserId: $currentUserId, myDeviceId: $myDeviceId');
       final result = await MessageCipherV2.decrypt(
         groupId: message.v2Data!['groupId'] as String,
         myUserId: currentUserId,
@@ -455,22 +450,6 @@ class ConversationProvider extends ChangeNotifier {
     return _typingUsers[conversationId]?.toList() ?? [];
   }
   
-  /// Méthode de debug pour vérifier l'état de la présence
-  void debugPresenceState() {
-    debugPrint('👥 [Presence] Debug - Current presence state:');
-    debugPrint('👥 [Presence] _userOnline: $_userOnline');
-    debugPrint('👥 [Presence] _userDeviceCount: $_userDeviceCount');
-    debugPrint('👥 [Presence] _conversationPresence: $_conversationPresence');
-    debugPrint('👥 [Presence] Current user: ${_authProvider.userId}');
-  }
-  
-  /// Méthode de test pour simuler un changement de présence (pour debug)
-  void testPresenceToggle(String userId) {
-    final currentStatus = _userOnline[userId] ?? false;
-    _userOnline[userId] = !currentStatus;
-    debugPrint('👥 [Presence] TEST - Toggled presence for $userId: $currentStatus -> ${_userOnline[userId]}');
-    notifyListeners();
-  }
 
   /// Obtient les pseudos des utilisateurs en train de taper pour une conversation
   List<String> getTypingUsernames(String conversationId) {
@@ -481,7 +460,6 @@ class ConversationProvider extends ChangeNotifier {
       // Utiliser le cache des pseudos si disponible, sinon utiliser l'ID tronqué
       final username = _userUsernames[userId] ?? (userId.length > 8 ? '${userId.substring(0, 8)}...' : userId);
       usernames.add(username);
-      debugPrint('✏️ [Typing] User $userId typing as: $username');
     }
     
     return usernames;
@@ -579,9 +557,7 @@ class ConversationProvider extends ChangeNotifier {
         cursor: cursor,
       );
       final List<Message> display = items.map((it) {
-        debugPrint('📝 Parsing message ${it.messageId}: timestamp=${it.sentAt}');
         final senderUserId = (it.sender['userId'] as String?) ?? '';
-        debugPrint('📝 Parsing message ${it.messageId}: sender={$senderUserId}');
         
         // CORRECTION: Préserver les données existantes si le message existe déjà
         Message? existingMessage;
@@ -725,15 +701,6 @@ class ConversationProvider extends ChangeNotifier {
       
       final recipients = await _keyDirectory.fetchGroupDevices(groupId);
       
-      // Debug: vérifier les clés des destinataires
-      debugPrint('🔍 Debug clés destinataires:');
-      for (final recipient in recipients) {
-        debugPrint('  📱 Device ${recipient.deviceId}:');
-        debugPrint('    - pk_sig length: ${recipient.pkSigB64.length}');
-        debugPrint('    - pk_kem length: ${recipient.pkKemB64.length}');
-        debugPrint('    - pk_sig: ${recipient.pkSigB64.substring(0, math.min(10, recipient.pkSigB64.length))}...');
-      }
-      
       final payload = await MessageCipherV2.encrypt(
         groupId: groupId,
         convId: conversationId,
@@ -747,12 +714,10 @@ class ConversationProvider extends ChangeNotifier {
       SnackbarService.showRateLimitError(context);
       rethrow;
     } catch (e) {
-      debugPrint('❌ sendMessage error: $e');
-      
       // Si c'est une erreur de clés manquantes, essayer UNE SEULE FOIS
       if ((e.toString().contains('length=0') || e.toString().contains('Failed assertion')) && !plaintext.contains('🔧 RETRY:')) {
         try {
-          debugPrint('🔧 Tentative UNIQUE de publication automatique des clés...');
+          // Tentative UNIQUE de publication automatique des clés
           final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
           final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
           await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
@@ -762,7 +727,7 @@ class ConversationProvider extends ChangeNotifier {
           await sendMessage(context, conversationId, '🔧 RETRY: $plaintext');
           return;
         } catch (retryError) {
-          debugPrint('❌ Retry failed: $retryError');
+          // Si le retry échoue aussi, afficher l'erreur originale
         }
       }
       
