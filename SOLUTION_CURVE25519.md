@@ -184,3 +184,4 @@ class KeyManagerCurve25519 {
 4. **Tester la reconstruction**
 
 **Cette solution résoudra définitivement le problème de reconstruction des clés !** 🎉
+

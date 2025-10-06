@@ -16,6 +16,10 @@ const dbPlugin: FastifyPluginAsync = async (app) => {
       if (!r.rows.length) throw new Error('No rows');
       return r.rows[0];
     },
+    oneOrNone: async (q: string, p?: any[]) => {
+      const r = await pool.query(q, p);
+      return r.rows.length ? r.rows[0] : null;
+    },
     any: async (q: string, p?: any[]) => (await pool.query(q, p)).rows,
     none: async (q: string, p?: any[]) => {
       await pool.query(q, p);

@@ -6,6 +6,7 @@ declare module 'fastify' {
     db: {
       query: (q: string, p?: any[]) => Promise<any>;
       one: (q: string, p?: any[]) => Promise<any>;
+      oneOrNone: (q: string, p?: any[]) => Promise<any | null>;
       any: (q: string, p?: any[]) => Promise<any[]>;
       none: (q: string, p?: any[]) => Promise<void>;
     };

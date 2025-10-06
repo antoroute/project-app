@@ -123,7 +123,7 @@ class GroupProvider extends ChangeNotifier {
       notifyListeners();
     } catch (error) {
       debugPrint('❌ GroupProvider.fetchGroupDetail error: $error');
-      rethrow;
+      // Ne pas rethrow pour éviter les erreurs de widget unmounted
     }
   }
 

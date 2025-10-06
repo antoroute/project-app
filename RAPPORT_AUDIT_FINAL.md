@@ -116,3 +116,4 @@ KeyManagerV3
 La solution est prête pour les tests avec vos 2 utilisateurs. Les messages devraient maintenant être déchiffrables en session grâce au cache intelligent des SimpleKeyPair.
 
 **Cette implémentation résout définitivement le problème de reconstruction des clés !** 🎯
+

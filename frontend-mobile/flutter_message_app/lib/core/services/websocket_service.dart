@@ -74,6 +74,9 @@ class WebSocketService {
             .setPath('/socket')
             .setTransports(['websocket'])
             .setAuth({'token': token})
+            .setTimeout(10000)
+            .setReconnectionDelay(3000)
+            .setReconnectionAttempts(5)
             .build(),
       );
       _registerListeners(context);
@@ -97,7 +100,12 @@ class WebSocketService {
       ..onDisconnect((_) {
         _log('WebSocket déconnecté', level: 'warn');
         _updateStatus(SocketStatus.disconnected);
-        Future.delayed(const Duration(seconds: 3), () => connect(context));
+        Future.delayed(const Duration(seconds: 3), () {
+          // Vérifier que le contexte est encore valide avant de reconnecter
+          if (context.mounted) {
+            connect(context);
+          }
+        });
       })
       // v2 message:new : payload v2 complet (Map<String,dynamic>)
       ..on('message:new', (data) {

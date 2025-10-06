@@ -498,12 +498,16 @@ class ConversationProvider extends ChangeNotifier {
       notifyListeners();
       return convo;
     } on RateLimitException {
-      SnackbarService.showRateLimitError(context);
+      if (context.mounted) {
+        SnackbarService.showRateLimitError(context);
+      }
       rethrow;
     } catch (e) {
       debugPrint('❌ fetchConversationDetail error: $e');
-      SnackbarService.showError(
-          context, 'Impossible de charger la conversation : $e');
+      if (context.mounted) {
+        SnackbarService.showError(
+            context, 'Impossible de charger la conversation : $e');
+      }
       rethrow;
     }
   }
