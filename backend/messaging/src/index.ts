@@ -144,7 +144,7 @@ async function build() {
         app.log.info({ convId, userId }, 'User subscribed to conversation');
         
         // CORRECTION: Émettre la présence de l'utilisateur dans cette conversation
-        if (app.services.presence && app.services.presence.broadcastUserPresence) {
+        if (app.services.presence) {
           const userSocketCount = app.services.presence.getUserSocketCount?.(userId) || 1;
           socket.to(`conv:${convId}`).emit('presence:conversation', { 
             userId, 
@@ -166,7 +166,7 @@ async function build() {
       app.log.info({ convId, userId }, 'User unsubscribed from conversation');
       
       // CORRECTION: Émettre la présence de l'utilisateur comme hors ligne dans cette conversation
-      if (app.services.presence && app.services.presence.broadcastUserPresence) {
+      if (app.services.presence) {
         const userSocketCount = app.services.presence.getUserSocketCount?.(userId) || 0;
         socket.to(`conv:${convId}`).emit('presence:conversation', { 
           userId, 
