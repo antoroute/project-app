@@ -409,6 +409,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
               icon: Icon(Icons.bug_report),
               onPressed: () {
                 _conversationProvider.debugPresenceState();
+                // Test simple avec un utilisateur fictif
+                _conversationProvider.testPresenceToggle('test-user-123');
               },
             ),
           ],

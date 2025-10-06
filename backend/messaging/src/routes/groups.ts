@@ -224,6 +224,15 @@ export default async function routes(app: FastifyInstance) {
       approverId 
     });
     app.log.info({ groupId, userId: jr.user_id, approverId }, 'User joined group - broadcasted');
+    
+    // CORRECTION: Notifier spécifiquement l'utilisateur accepté qu'il a rejoint le groupe
+    app.log.info({ groupId, userId: jr.user_id }, 'About to emit group:joined event to accepted user');
+    app.io.to(`user:${jr.user_id}`).emit('group:joined', { 
+      groupId, 
+      userId: jr.user_id, 
+      approverId 
+    });
+    app.log.info({ groupId, userId: jr.user_id }, 'User accepted - notified of group join');
 
     // CORRECTION: Broadcaster la présence de l'utilisateur accepté aux autres membres du groupe
     if (app.services.presence && app.services.presence.broadcastUserPresence) {

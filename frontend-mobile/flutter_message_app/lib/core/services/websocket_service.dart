@@ -132,7 +132,13 @@ class WebSocketService {
           final online = m['online'] as bool;
           final count = (m['count'] as num?)?.toInt() ?? 0;
           _log('👥 Présence mise à jour: $uid = $online (count: $count)', level: 'info');
-          onPresenceUpdate?.call(uid, online, count);
+          _log('👥 [WebSocket] onPresenceUpdate callback: ${onPresenceUpdate != null ? 'defined' : 'null'}', level: 'info');
+          if (onPresenceUpdate != null) {
+            _log('👥 [WebSocket] Calling onPresenceUpdate for $uid', level: 'info');
+            onPresenceUpdate!(uid, online, count);
+          } else {
+            _log('👥 [WebSocket] onPresenceUpdate callback is null - skipping', level: 'warn');
+          }
         } else {
           _log('❌ Données presence:update invalides: ${data.runtimeType}', level: 'error');
         }
@@ -148,6 +154,7 @@ class WebSocketService {
           final count = (m['count'] as num?)?.toInt() ?? 0;
           final conversationId = m['conversationId'] as String;
           _log('💬 Présence conversation mise à jour: $uid = $online (count: $count) dans $conversationId', level: 'info');
+          _log('💬 [WebSocket] onPresenceConversation callback: ${onPresenceConversation != null ? 'defined' : 'null'}', level: 'info');
           onPresenceConversation?.call(uid, online, count, conversationId);
         } else {
           _log('❌ Données presence:conversation invalides: ${data.runtimeType}', level: 'error');
@@ -238,6 +245,7 @@ class WebSocketService {
           final userId = m['userId'] as String;
           final approverId = m['approverId'] as String;
           _log('👥 Nouveau membre dans le groupe: $userId dans $groupId par $approverId', level: 'info');
+          _log('👥 [WebSocket] onGroupMemberJoined callback: ${onGroupMemberJoined != null ? 'defined' : 'null'}', level: 'info');
           onGroupMemberJoined?.call(groupId, userId, approverId);
         } else {
           _log('❌ Données group:member_joined invalides: ${data.runtimeType}', level: 'error');

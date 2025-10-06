@@ -83,10 +83,18 @@ class ConversationProvider extends ChangeNotifier {
       _webSocketService.onNewMessageV2 = _onWebSocketNewMessageV2;
     }
     if (_webSocketService.onPresenceUpdate == null) {
+      debugPrint('👥 [ConversationProvider] Setting up onPresenceUpdate callback');
       _webSocketService.onPresenceUpdate = _onPresenceUpdate;
+      debugPrint('👥 [ConversationProvider] onPresenceUpdate callback set: ${_webSocketService.onPresenceUpdate != null}');
+    } else {
+      debugPrint('👥 [ConversationProvider] onPresenceUpdate callback already defined');
     }
     if (_webSocketService.onPresenceConversation == null) {
+      debugPrint('💬 [ConversationProvider] Setting up onPresenceConversation callback');
       _webSocketService.onPresenceConversation = _onPresenceConversation;
+      debugPrint('💬 [ConversationProvider] onPresenceConversation callback set: ${_webSocketService.onPresenceConversation != null}');
+    } else {
+      debugPrint('💬 [ConversationProvider] onPresenceConversation callback already defined');
     }
     if (_webSocketService.onConvRead == null) {
       _webSocketService.onConvRead = _onConvRead;
@@ -416,7 +424,16 @@ class ConversationProvider extends ChangeNotifier {
     debugPrint('👥 [Presence] Debug - Current presence state:');
     debugPrint('👥 [Presence] _userOnline: $_userOnline');
     debugPrint('👥 [Presence] _userDeviceCount: $_userDeviceCount');
+    debugPrint('👥 [Presence] _conversationPresence: $_conversationPresence');
     debugPrint('👥 [Presence] Current user: ${_authProvider.userId}');
+  }
+  
+  /// Méthode de test pour simuler un changement de présence (pour debug)
+  void testPresenceToggle(String userId) {
+    final currentStatus = _userOnline[userId] ?? false;
+    _userOnline[userId] = !currentStatus;
+    debugPrint('👥 [Presence] TEST - Toggled presence for $userId: $currentStatus -> ${_userOnline[userId]}');
+    notifyListeners();
   }
 
   /// Obtient les pseudos des utilisateurs en train de taper pour une conversation
@@ -893,18 +910,23 @@ class ConversationProvider extends ChangeNotifier {
   void _onPresenceUpdate(String userId, bool online, int count) {
     debugPrint('👥 [Presence] Received presence update: $userId = $online (count: $count)');
     debugPrint('👥 [Presence] Before update - _userOnline: $_userOnline');
+    debugPrint('👥 [Presence] _onPresenceUpdate called for user: $userId');
     
-    // CORRECTION: Toujours mettre à jour la présence, même si count = 0
+    // CORRECTION: Simplifier la logique de présence
     final wasOnline = _userOnline[userId] ?? false;
-    _userOnline[userId] = online && count > 0;
+    _userOnline[userId] = online; // Simplifier : utiliser directement le paramètre online
     _userDeviceCount[userId] = count;
     
     debugPrint('👥 [Presence] After update - _userOnline: $_userOnline');
     debugPresenceState(); // Debug complet
     
-    // CORRECTION: Forcer la mise à jour si le statut a changé
+    // CORRECTION: Toujours notifier pour forcer la mise à jour de l'UI
     if (wasOnline != _userOnline[userId]) {
       debugPrint('👥 [Presence] Status changed for $userId: $wasOnline -> ${_userOnline[userId]}');
+      notifyListeners();
+    } else {
+      // Même si le statut n'a pas changé, notifier pour s'assurer que l'UI est à jour
+      debugPrint('👥 [Presence] Status unchanged for $userId: $wasOnline, but notifying UI anyway');
       notifyListeners();
     }
   }
@@ -918,13 +940,16 @@ class ConversationProvider extends ChangeNotifier {
     
     // Mettre à jour la présence dans cette conversation
     final wasOnlineInConv = _conversationPresence[conversationId]![userId] ?? false;
-    _conversationPresence[conversationId]![userId] = online && count > 0;
+    _conversationPresence[conversationId]![userId] = online; // Simplifier : utiliser directement le paramètre online
     
     debugPrint('💬 [Presence] Conversation presence updated: $_conversationPresence');
     
-    // Notifier seulement si le statut a changé dans cette conversation
+    // Toujours notifier pour s'assurer que l'UI est à jour
     if (wasOnlineInConv != _conversationPresence[conversationId]![userId]) {
       debugPrint('💬 [Presence] Conversation status changed for $userId in $conversationId: $wasOnlineInConv -> ${_conversationPresence[conversationId]![userId]}');
+      notifyListeners();
+    } else {
+      debugPrint('💬 [Presence] Conversation status unchanged for $userId in $conversationId: $wasOnlineInConv, but notifying UI anyway');
       notifyListeners();
     }
   }

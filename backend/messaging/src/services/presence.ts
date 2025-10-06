@@ -7,6 +7,10 @@ type PresenceState = Map<string /*userId*/, Set<string /*socket.id*/>>;
 
 export function initPresenceService(io: Server, app: any) {
   const state: PresenceState = new Map();
+  
+  function getUserSocketCount(userId: string): number {
+    return state.get(userId)?.size || 0;
+  }
 
   function broadcastPresenceToGroups(userId: string, online: boolean, count: number) {
     // Récupérer les groupes de l'utilisateur et broadcaster uniquement aux membres de ces groupes
@@ -97,5 +101,5 @@ export function initPresenceService(io: Server, app: any) {
     broadcastPresenceToConversations(userId, online, count);
   }
 
-  return { onConnect, onDisconnect, isOnline, broadcastUserPresence };
+  return { onConnect, onDisconnect, isOnline, broadcastUserPresence, getUserSocketCount };
 }

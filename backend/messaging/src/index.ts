@@ -142,6 +142,18 @@ async function build() {
         socket.join(`conv:${convId}`);
         socket.emit('conv:subscribe', { success: true, convId });
         app.log.info({ convId, userId }, 'User subscribed to conversation');
+        
+        // CORRECTION: Émettre la présence de l'utilisateur dans cette conversation
+        if (app.services.presence && app.services.presence.broadcastUserPresence) {
+          const userSocketCount = app.services.presence.getUserSocketCount?.(userId) || 1;
+          socket.to(`conv:${convId}`).emit('presence:conversation', { 
+            userId, 
+            online: true, 
+            count: userSocketCount,
+            conversationId: convId 
+          });
+          app.log.info({ convId, userId }, 'Presence broadcasted to conversation');
+        }
       } else {
         socket.emit('conv:subscribe', { success: false, error: 'Unauthorized' });
         app.log.warn({ convId, userId }, 'Unauthorized conversation subscription attempt');
@@ -152,6 +164,18 @@ async function build() {
       const convId = data.convId || data;
       socket.leave(`conv:${convId}`);
       app.log.info({ convId, userId }, 'User unsubscribed from conversation');
+      
+      // CORRECTION: Émettre la présence de l'utilisateur comme hors ligne dans cette conversation
+      if (app.services.presence && app.services.presence.broadcastUserPresence) {
+        const userSocketCount = app.services.presence.getUserSocketCount?.(userId) || 0;
+        socket.to(`conv:${convId}`).emit('presence:conversation', { 
+          userId, 
+          online: userSocketCount > 0, 
+          count: userSocketCount,
+          conversationId: convId 
+        });
+        app.log.info({ convId, userId }, 'Presence updated on conversation unsubscribe');
+      }
     });
     
     // Gestion des indicateurs de frappe avec vérification de sécurité

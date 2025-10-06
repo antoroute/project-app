@@ -30,9 +30,11 @@ class GroupProvider extends ChangeNotifier {
   GroupProvider(AuthProvider authProvider)
       : _apiService = ApiService(authProvider),
         _webSocketService = WebSocketService.instance {
+          debugPrint('🏗️ [GroupProvider] Setting up WebSocket callbacks');
           _webSocketService.onGroupJoined = _onWebSocketGroupJoined;
           _webSocketService.onGroupCreated = _onWebSocketGroupCreated;
           _webSocketService.onGroupMemberJoined = _onWebSocketGroupMemberJoined;
+          debugPrint('🏗️ [GroupProvider] onGroupMemberJoined callback set: ${_webSocketService.onGroupMemberJoined != null}');
  }
 
   Map<String, dynamic>? get groupDetail => _groupDetail;
@@ -295,7 +297,9 @@ class GroupProvider extends ChangeNotifier {
   
   void _onWebSocketGroupMemberJoined(String groupId, String userId, String approverId) {
     debugPrint('👥 [GroupProvider] Group member joined event received: $userId in $groupId by $approverId');
+    debugPrint('👥 [GroupProvider] Refreshing groups list...');
     // CORRECTION: Rafraîchir immédiatement la liste des groupes
     fetchUserGroups();
+    debugPrint('👥 [GroupProvider] Groups list refreshed');
   }
 }

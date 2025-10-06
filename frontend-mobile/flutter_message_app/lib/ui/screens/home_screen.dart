@@ -76,7 +76,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   )
                 : ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
-
                     itemCount: groups.length,
                     itemBuilder: (context, index) {
                       final GroupInfo g = groups[index];
