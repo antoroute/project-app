@@ -42,7 +42,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   void initState() {
     super.initState();
     _loadGroupData();
-    WebSocketService.instance.onGroupJoined = () {
+    WebSocketService.instance.onGroupJoined = (groupId, userId, approverId) {
       if (mounted) {
         _loadGroupData();
         SnackbarService.showInfo(

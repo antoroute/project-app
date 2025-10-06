@@ -227,6 +227,17 @@ export default async function routes(app: FastifyInstance) {
     
     // CORRECTION: Notifier spécifiquement l'utilisateur accepté qu'il a rejoint le groupe
     app.log.info({ groupId, userId: jr.user_id }, 'About to emit group:joined event to accepted user');
+    
+    // Vérifier si l'utilisateur est dans la room user:${userId}
+    const userRoom = `user:${jr.user_id}`;
+    const socketsInRoom = app.io.sockets.adapter.rooms.get(userRoom);
+    app.log.info({ 
+      groupId, 
+      userId: jr.user_id, 
+      userRoom, 
+      socketsInRoom: socketsInRoom ? socketsInRoom.size : 0 
+    }, 'Checking user room before emitting group:joined');
+    
     app.io.to(`user:${jr.user_id}`).emit('group:joined', { 
       groupId, 
       userId: jr.user_id, 

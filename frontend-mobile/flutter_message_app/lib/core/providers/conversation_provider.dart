@@ -63,8 +63,6 @@ class ConversationProvider extends ChangeNotifier {
     _keyDirectory = KeyDirectoryService(_apiService);
     
     // S'assurer que les callbacks WebSocket sont définis une seule fois
-    _setupWebSocketCallbacks();
-    
     // Charger le cache de déchiffrement au démarrage de manière synchrone
     _initializeCache();
     
@@ -74,6 +72,30 @@ class ConversationProvider extends ChangeNotifier {
       _userOnline[currentUserId] = true;
       debugPrint('👥 [Presence] Initialized current user $currentUserId as online');
     }
+    
+    // CORRECTION: Configurer les callbacks WebSocket de manière asynchrone
+    _setupWebSocketCallbacksAsync();
+  }
+  
+  /// Configure les callbacks WebSocket de manière asynchrone
+  void _setupWebSocketCallbacksAsync() {
+    // Configurer immédiatement les callbacks de présence critiques
+    _setupPresenceCallbacks();
+    
+    // Attendre un peu pour les autres callbacks moins critiques
+    Future.delayed(const Duration(milliseconds: 100), () {
+      debugPrint('👥 [ConversationProvider] Setting up WebSocket callbacks asynchronously');
+      _setupWebSocketCallbacks();
+    });
+  }
+  
+  /// Configure immédiatement les callbacks de présence critiques
+  void _setupPresenceCallbacks() {
+    debugPrint('👥 [ConversationProvider] Setting up presence callbacks immediately');
+    _webSocketService.onPresenceUpdate = _onPresenceUpdate;
+    _webSocketService.onPresenceConversation = _onPresenceConversation;
+    debugPrint('👥 [ConversationProvider] onPresenceUpdate callback set: ${_webSocketService.onPresenceUpdate != null}');
+    debugPrint('💬 [ConversationProvider] onPresenceConversation callback set: ${_webSocketService.onPresenceConversation != null}');
   }
   
   /// Configure les callbacks WebSocket une seule fois
@@ -82,20 +104,8 @@ class ConversationProvider extends ChangeNotifier {
     if (_webSocketService.onNewMessageV2 == null) {
       _webSocketService.onNewMessageV2 = _onWebSocketNewMessageV2;
     }
-    if (_webSocketService.onPresenceUpdate == null) {
-      debugPrint('👥 [ConversationProvider] Setting up onPresenceUpdate callback');
-      _webSocketService.onPresenceUpdate = _onPresenceUpdate;
-      debugPrint('👥 [ConversationProvider] onPresenceUpdate callback set: ${_webSocketService.onPresenceUpdate != null}');
-    } else {
-      debugPrint('👥 [ConversationProvider] onPresenceUpdate callback already defined');
-    }
-    if (_webSocketService.onPresenceConversation == null) {
-      debugPrint('💬 [ConversationProvider] Setting up onPresenceConversation callback');
-      _webSocketService.onPresenceConversation = _onPresenceConversation;
-      debugPrint('💬 [ConversationProvider] onPresenceConversation callback set: ${_webSocketService.onPresenceConversation != null}');
-    } else {
-      debugPrint('💬 [ConversationProvider] onPresenceConversation callback already defined');
-    }
+    // Les callbacks de présence sont déjà configurés dans _setupPresenceCallbacks()
+    debugPrint('👥 [ConversationProvider] Presence callbacks already configured');
     if (_webSocketService.onConvRead == null) {
       _webSocketService.onConvRead = _onConvRead;
     }
@@ -798,7 +808,7 @@ class ConversationProvider extends ChangeNotifier {
       _webSocketService.subscribeConversation(conversationId);
 
   void unsubscribe(String conversationId) =>
-      _webSocketService.unsubscribeConversation(conversationId);
+      _webSocketService.unsubscribeConversation(conversationId, userId: _authProvider.userId);
 
   /// Ajoute un message *localement* (WS ou REST) et notifie.
   void addLocalMessage(Message message) {

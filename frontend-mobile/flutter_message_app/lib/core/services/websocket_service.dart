@@ -44,7 +44,7 @@ class WebSocketService {
   void Function(String conversationId, String userId)? onUserAdded;
   VoidCallback? onNotificationNew;
   VoidCallback? onConversationJoined;
-  VoidCallback? onGroupJoined;
+  Function(String groupId, String userId, String approverId)? onGroupJoined;
   // Nouveaux callbacks pour les indicateurs de frappe
   void Function(String convId, String userId)? onTypingStart;
   void Function(String convId, String userId)? onTypingStop;
@@ -178,7 +178,15 @@ class WebSocketService {
       })
       ..on('notification:new', (_) => onNotificationNew?.call())
       ..on('conversation:joined', (_) => onConversationJoined?.call())
-      ..on('group:joined', (_) => onGroupJoined?.call())
+      ..on('group:joined', (data) {
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final groupId = m['groupId'] as String;
+          final userId = m['userId'] as String;
+          final approverId = m['approverId'] as String;
+          onGroupJoined?.call(groupId, userId, approverId);
+        }
+      })
       ..on('group:user_added', (data) {
         final Map<String, dynamic> json = data as Map<String, dynamic>;
         _log(
@@ -251,6 +259,20 @@ class WebSocketService {
           _log('❌ Données group:member_joined invalides: ${data.runtimeType}', level: 'error');
         }
       })
+      ..on('group:joined', (data) {
+        _log('👥 Événement group:joined reçu: ${data.runtimeType}', level: 'info');
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final groupId = m['groupId'] as String;
+          final userId = m['userId'] as String;
+          final approverId = m['approverId'] as String;
+          _log('👥 Utilisateur a rejoint le groupe: $userId dans $groupId par $approverId', level: 'info');
+          _log('👥 [WebSocket] onGroupJoined callback: ${onGroupJoined != null ? 'defined' : 'null'}', level: 'info');
+          onGroupJoined?.call(groupId, userId, approverId);
+        } else {
+          _log('❌ Données group:joined invalides: ${data.runtimeType}', level: 'error');
+        }
+      })
       ..onError((err) => _handleError('Erreur WebSocket: $err'))
       ..on('connect_error', (err) => _handleError('Erreur de connexion: $err'));
   }
@@ -282,7 +304,7 @@ class WebSocketService {
     );
   }
 
-  void unsubscribeConversation(String conversationId) {
+  void unsubscribeConversation(String conversationId, {String? userId}) {
     // Retirer de la liste des abonnements persistants
     _subscribedConversations.remove(conversationId);
     _pendingSubscriptions.remove(conversationId);
@@ -290,6 +312,12 @@ class WebSocketService {
     if (_status != SocketStatus.connected || _socket == null) return;
     _log('Desabonnement de la conversation : $conversationId', level: 'info');
     _socket!.emit('conv:unsubscribe', {'convId': conversationId});
+    
+    // CORRECTION: Émettre un événement de présence hors ligne pour cette conversation
+    if (onPresenceConversation != null && userId != null) {
+      _log('👥 [WebSocket] Emitting offline presence for conversation $conversationId', level: 'info');
+      onPresenceConversation!(userId, false, 0, conversationId);
+    }
   }
   
   /// Émet un événement de début de frappe
