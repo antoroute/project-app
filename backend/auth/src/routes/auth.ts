@@ -86,11 +86,11 @@ export default async function routes(app: FastifyInstance) {
     );
     if (!ok.length) return reply.code(401).send({ error: 'revoked' });
 
-    const access = await app.jwt.sign(
+    const accessToken = await app.jwt.sign(
       { sub: payload.sub, iss: 'project-app', aud: 'messaging' },
       { expiresIn: '15m' }
     );
-    return reply.send({ access });
+    return reply.send({ accessToken });
   });
 
   app.get('/me', { onRequest: [app.authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
