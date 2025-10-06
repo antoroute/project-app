@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/group_info.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/group_provider.dart';
+import '../../core/services/websocket_service.dart';
 import 'group_detail_screen.dart';
 import 'group_screen.dart';
 import 'login_screen.dart';
@@ -53,7 +54,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Mes Groupes'),
+        title: Row(
+          children: [
+            const Text('Mes Groupes'),
+            const SizedBox(width: 8),
+            // Indicateur de statut WebSocket
+            StreamBuilder<SocketStatus>(
+              stream: WebSocketService.instance.statusStream,
+              builder: (context, snapshot) {
+                final status = snapshot.data ?? SocketStatus.disconnected;
+                return Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: status == SocketStatus.connected 
+                        ? Colors.green 
+                        : status == SocketStatus.connecting 
+                            ? Colors.orange 
+                            : Colors.red,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
         actions: <Widget>[
           IconButton(
             icon: const Icon(Icons.logout),

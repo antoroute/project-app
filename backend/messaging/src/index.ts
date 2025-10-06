@@ -159,6 +159,34 @@ async function build() {
           conversationId: convId
         });
         app.log.info({ convId, userId, socketCount: userSocketsInConversation.length }, 'Presence broadcasted to conversation');
+        
+        // NOUVEAU: Envoyer l'état de présence actuel de tous les autres utilisateurs au nouvel arrivant
+        const conversationRoomSockets = app.io.sockets.adapter.rooms.get(conversationRoom);
+        if (conversationRoomSockets) {
+          const presenceMap = new Map<string, number>();
+          
+          // Compter les sockets par utilisateur dans cette conversation
+          for (const socketId of conversationRoomSockets) {
+            const otherSocket = app.io.sockets.sockets.get(socketId);
+            if (otherSocket && otherSocket.id !== socket.id) {
+              const otherUserId = (otherSocket as any).auth?.userId;
+              if (otherUserId) {
+                presenceMap.set(otherUserId, (presenceMap.get(otherUserId) || 0) + 1);
+              }
+            }
+          }
+          
+          // Envoyer l'état de présence de chaque utilisateur au nouvel arrivant
+          for (const [otherUserId, socketCount] of presenceMap.entries()) {
+            socket.emit('presence:conversation', {
+              userId: otherUserId,
+              online: true,
+              count: socketCount,
+              conversationId: convId
+            });
+            app.log.info({ convId, userId, otherUserId, socketCount }, 'Sent current presence state to new subscriber');
+          }
+        }
       } else {
         socket.emit('conv:subscribe', { success: false, error: 'Unauthorized' });
         app.log.warn({ convId, userId }, 'Unauthorized conversation subscription attempt');

@@ -55,19 +55,28 @@ class WebSocketService {
 
   /// Établit la connexion WS
   Future<void> connect(BuildContext context) async {
-    if (_status == SocketStatus.connected || _status == SocketStatus.connecting) return;
+    print('🔌 [WebSocket] Starting connection process...');
+    if (_status == SocketStatus.connected || _status == SocketStatus.connecting) {
+      print('🔌 [WebSocket] Already connected or connecting, skipping');
+      return;
+    }
     _updateStatus(SocketStatus.connecting);
+    print('🔌 [WebSocket] Status updated to connecting');
 
     final auth = Provider.of<AuthProvider>(context, listen: false);
+    print('🔌 [WebSocket] Getting auth provider...');
     final valid = await auth.ensureTokenValid();
     if (!valid) {
+      print('🔌 [WebSocket] Token validation failed');
       _handleError('Token invalide ou rafraîchissement échoué.');
       return;
     }
     final token = auth.token!;
+    print('🔌 [WebSocket] Token validated, disposing old socket...');
     _disposeSocket();
 
     try {
+      print('🔌 [WebSocket] Creating new socket...');
       _socket = IO.io(
         'https://api.kavalek.fr',
         IO.OptionBuilder()
@@ -79,9 +88,13 @@ class WebSocketService {
             .setReconnectionAttempts(5)
             .build(),
       );
+      print('🔌 [WebSocket] Socket created, registering listeners...');
       _registerListeners(context);
+      print('🔌 [WebSocket] Listeners registered, attempting connection...');
       _socket!.connect();
+      print('🔌 [WebSocket] Connection attempt initiated');
     } catch (e) {
+      print('🔌 [WebSocket] Connection failed with error: $e');
       _handleError("Erreur d'initialisation du WebSocket: $e");
     }
   }
@@ -91,6 +104,7 @@ class WebSocketService {
 
     _socket!
       ..onConnect((_) {
+        print('🔌 [WebSocket] ✅ CONNECTED!');
         _log('WebSocket connecté', level: 'info');
         _updateStatus(SocketStatus.connected);
         
@@ -98,11 +112,13 @@ class WebSocketService {
         _resubscribeToConversations();
       })
       ..onDisconnect((_) {
+        print('🔌 [WebSocket] ❌ DISCONNECTED!');
         _log('WebSocket déconnecté', level: 'warn');
         _updateStatus(SocketStatus.disconnected);
         Future.delayed(const Duration(seconds: 3), () {
           // Vérifier que le contexte est encore valide avant de reconnecter
           if (context.mounted) {
+            print('🔌 [WebSocket] Attempting reconnection...');
             connect(context);
           }
         });
@@ -273,8 +289,14 @@ class WebSocketService {
           _log('❌ Données group:joined invalides: ${data.runtimeType}', level: 'error');
         }
       })
-      ..onError((err) => _handleError('Erreur WebSocket: $err'))
-      ..on('connect_error', (err) => _handleError('Erreur de connexion: $err'));
+      ..onError((err) {
+        print('🔌 [WebSocket] ❌ ERROR: $err');
+        _handleError('Erreur WebSocket: $err');
+      })
+      ..on('connect_error', (err) {
+        print('🔌 [WebSocket] ❌ CONNECT ERROR: $err');
+        _handleError('Erreur de connexion: $err');
+      });
   }
 
   void subscribeConversation(String conversationId) {
