@@ -28,14 +28,6 @@ class MessageV2Model {
   });
 
   factory MessageV2Model.fromJson(Map<String, dynamic> json) {
-    // Debug des données reçues du backend
-    print('🔍 MessageV2Model.fromJson DEBUG:');
-    print('  - sentAt type: ${json['sentAt'].runtimeType}');
-    print('  - sentAt value: ${json['sentAt']}');
-    print('  - senderUserId: ${json['senderUserId']}');
-    print('  - senderDeviceId: ${json['senderDeviceId']}');
-    print('  - salt present: ${json.containsKey('salt')}');
-    print('  - salt length: ${json['salt'] != null ? (json['salt'] as String).length : 'null'}');
     // Adapter à la structure backend qui retourne senderUserId/senderDeviceId directement
     // au lieu d'un objet sender
     Map<String, dynamic> senderObject;

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_message_app/core/models/conversation.dart';
 import 'package:flutter_message_app/core/models/message.dart';
@@ -11,7 +12,6 @@ import 'package:flutter_message_app/core/services/notification_service.dart';
 import 'package:flutter_message_app/core/services/global_presence_service.dart';
 import 'dart:typed_data';
 import 'dart:convert';
-import 'dart:math' as math;
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 
@@ -269,13 +269,10 @@ class ConversationProvider extends ChangeNotifier {
       
       // Mettre à jour le statut de signature du message
       message.signatureValid = signatureValid;
-      debugPrint('🔐 [Decrypt] Message $msgId - Signature: ${signatureValid ? "✅" : "❌"}');
       
       // Enregistrer en cache mémoire uniquement (session courante)
       _decryptedCache[msgId] = decryptedText;
       message.decryptedText = decryptedText;
-      
-      debugPrint('✅ Message $msgId déchiffré avec succès - Signature: ${signatureValid ? "✅" : "❌"}');
       return decryptedText;
       
     } catch (e) {
@@ -304,44 +301,73 @@ class ConversationProvider extends ChangeNotifier {
     }
   }
 
-  /// Déchiffre seulement les messages visibles (optimisation)
-  Future<void> decryptVisibleMessages(String conversationId, {
+  /// CORRECTION: Déchiffrement rapide des 3 derniers messages SANS vérification de signature
+  Future<void> decryptVisibleMessagesFast(String conversationId, {
     required int visibleCount,
   }) async {
     final messages = _messages[conversationId] ?? [];
     if (messages.isEmpty) return;
     
-    // CORRECTION: Déchiffrer du plus récent au plus ancien pour une meilleure UX
-    final toDecrypt = messages.length > visibleCount 
-        ? messages.sublist(messages.length - visibleCount)
+    // CORRECTION: Déchiffrer seulement les 3 derniers messages (les plus importants)
+    final toDecrypt = messages.length > 3 
+        ? messages.sublist(messages.length - 3)
         : messages;
     
-    // Inverser l'ordre pour déchiffrer du plus récent au plus ancien
-    final reversedMessages = toDecrypt.reversed.toList();
+    // Obtenir nos informations utilisateur et device une seule fois
+    final currentUserId = _authProvider.userId;
+    if (currentUserId == null) return;
     
-    // Déchiffrer par petits groupes pour éviter le freeze
-    const batchSize = 5; // Déchiffrer 5 messages à la fois
-    const delayBetweenBatches = 50; // 50ms entre chaque groupe
+    final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
     
-    for (int i = 0; i < reversedMessages.length; i += batchSize) {
-      final batch = reversedMessages.skip(i).take(batchSize).toList();
-      final futures = <Future<void>>[];
-      
-      for (final msg in batch) {
-        if (msg.decryptedText == null && msg.v2Data != null) {
-          futures.add(decryptMessageIfNeeded(msg).then((_) => notifyListeners()));
-        }
+    // Déchiffrer les 3 derniers messages en parallèle (RAPIDE - sans vérification de signature)
+    final futures = <Future<void>>[];
+    for (final msg in toDecrypt) {
+      if (msg.decryptedText == null && msg.v2Data != null) {
+        futures.add(_decryptMessageFast(msg, currentUserId, myDeviceId));
       }
+    }
+    
+    if (futures.isNotEmpty) {
+      await Future.wait(futures);
+      notifyListeners();
+    }
+  }
+  
+  /// Déchiffrement rapide d'un message - fallback sur déchiffrement normal si erreur
+  Future<void> _decryptMessageFast(Message message, String currentUserId, String myDeviceId) async {
+    final msgId = message.id;
+    
+    try {
+      // Essayer d'abord le déchiffrement rapide (sans vérification de signature)
+      final result = await MessageCipherV2.decryptFast(
+        groupId: message.v2Data!['groupId'] as String,
+        myUserId: currentUserId,
+        myDeviceId: myDeviceId,
+        messageV2: message.v2Data!,
+        keyDirectory: _keyDirectory,
+      );
       
-      // Attendre la fin du groupe actuel
-      if (futures.isNotEmpty) {
-        await Future.wait(futures);
-        notifyListeners();
-        
-        // Petite pause pour éviter le freeze de l'UI
-        if (i + batchSize < reversedMessages.length) {
-          await Future.delayed(const Duration(milliseconds: delayBetweenBatches));
-        }
+      // Convertir les bytes en String UTF-8
+      final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
+      
+      // Marquer comme non vérifié pour le mode rapide
+      message.signatureValid = false;
+      
+      // Enregistrer en cache mémoire uniquement (session courante)
+      _decryptedCache[msgId] = decryptedText;
+      message.decryptedText = decryptedText;
+      
+    } catch (e) {
+      debugPrint('⚠️ Déchiffrement rapide échoué pour $msgId, fallback sur déchiffrement normal: $e');
+      
+      // Fallback: utiliser le déchiffrement normal avec vérification de signature
+      try {
+        await decryptMessageIfNeeded(message);
+      } catch (fallbackError) {
+        debugPrint('❌ Erreur déchiffrement normal message $msgId: $fallbackError');
+        final errorText = '[Erreur déchiffrement]';
+        _decryptedCache[msgId] = errorText;
+        message.decryptedText = errorText;
       }
     }
   }
@@ -360,9 +386,9 @@ class ConversationProvider extends ChangeNotifier {
     
     final toDecrypt = messages.sublist(startIndex, endIndex);
     
-    // Déchiffrer par petits groupes pour éviter le freeze
-    const batchSize = 3; // Plus petit pour les messages anciens
-    const delayBetweenBatches = 30; // Pause plus courte
+    // CORRECTION: Déchiffrer par très petits groupes pour éviter le freeze
+    const batchSize = 1; // Déchiffrer seulement 1 message à la fois pour les anciens
+    const delayBetweenBatches = 300; // Pause plus longue
     
     for (int i = 0; i < toDecrypt.length; i += batchSize) {
       final batch = toDecrypt.skip(i).take(batchSize).toList();
@@ -370,7 +396,7 @@ class ConversationProvider extends ChangeNotifier {
       
       for (final msg in batch) {
         if (msg.decryptedText == null && msg.v2Data != null) {
-          futures.add(decryptMessageIfNeeded(msg).then((_) => notifyListeners()));
+          futures.add(decryptMessageIfNeeded(msg));
         }
       }
       
@@ -384,6 +410,20 @@ class ConversationProvider extends ChangeNotifier {
           await Future.delayed(const Duration(milliseconds: delayBetweenBatches));
         }
       }
+    }
+  }
+
+  /// CORRECTION: Déchiffrement uniquement sur demande (ultra-fluide)
+  Future<void> decryptMessageOnDemand(String conversationId, String messageId) async {
+    final messages = _messages[conversationId] ?? [];
+    final message = messages.firstWhere(
+      (m) => m.id == messageId,
+      orElse: () => throw Exception('Message not found'),
+    );
+    
+    if (message.decryptedText == null && message.v2Data != null) {
+      await decryptMessageIfNeeded(message);
+      notifyListeners();
     }
   }
 
@@ -549,7 +589,8 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   /// Appelle GET /conversations/:id/messages avec pagination (chargement initial)
-  Future<void> fetchMessages(
+  /// Retourne true s'il y a encore des messages à charger, false sinon
+  Future<bool> _fetchMessagesWithHasMore(
       BuildContext context,
       String conversationId, {
         int limit = 25,  // Charger seulement les 25 derniers messages
@@ -624,31 +665,48 @@ class ConversationProvider extends ChangeNotifier {
       }
       
       notifyListeners();
+      
+      // CORRECTION: Retourner s'il y a encore des messages à charger
+      return items.isNotEmpty;
     } on RateLimitException {
       SnackbarService.showRateLimitError(context);
+      return false;
     } catch (e) {
-      debugPrint('❌ fetchMessages error: $e');
-      // pas de popup ici, on peut juste loguer
+      debugPrint('❌ _fetchMessagesWithHasMore error: $e');
+      return false;
     }
   }
 
+  /// Appelle GET /conversations/:id/messages avec pagination (chargement initial)
+  Future<void> fetchMessages(
+      BuildContext context,
+      String conversationId, {
+        int limit = 25,  // Charger seulement les 25 derniers messages
+        String? cursor,
+      }) async {
+    await _fetchMessagesWithHasMore(context, conversationId, limit: limit, cursor: cursor);
+  }
+
   /// Charge les messages plus anciens (pagination vers le haut)
-  Future<void> fetchOlderMessages(
+  /// Retourne true s'il y a encore des messages à charger, false sinon
+  Future<bool> fetchOlderMessages(
     BuildContext context,
     String conversationId, {
       int limit = 25,
     }) async {
     final messages = _messages[conversationId] ?? [];
-    if (messages.isEmpty) return;
+    if (messages.isEmpty) return false;
     
     // Utiliser le timestamp du message le plus ancien comme cursor
     final oldestMessage = messages.reduce((a, b) => a.timestamp < b.timestamp ? a : b);
     final cursorTimestamp = oldestMessage.timestamp;
     
     try {
-      await fetchMessages(context, conversationId, limit: limit, cursor: cursorTimestamp.toString());
+      final hasMore = await _fetchMessagesWithHasMore(context, conversationId, limit: limit, cursor: cursorTimestamp.toString());
+      return hasMore;
     } catch (e) {
       debugPrint('❌ fetchOlderMessages error: $e');
+      return false;
     }
   }
 
@@ -679,6 +737,10 @@ class ConversationProvider extends ChangeNotifier {
         _messages.putIfAbsent(conversationId, () => []);
         _messages[conversationId]!.addAll(newMessages);
         notifyListeners();
+
+        // AJOUT: déchiffrer immédiatement les 3 derniers
+        await decryptVisibleMessagesFast(conversationId, visibleCount: 3);
+        // (Cette méthode notifie déjà à la fin)
       }
     } on RateLimitException {
       SnackbarService.showRateLimitError(context);
@@ -826,8 +888,6 @@ class ConversationProvider extends ChangeNotifier {
       final convId = payload['convId'] as String;
       final senderId = (payload['sender'] as Map)['userId'] as String;
       
-      debugPrint('📨 Message WebSocket reçu: $messageId');
-      
       // Déchiffrement immédiat
       final result = await MessageCipherV2.decrypt(
         groupId: groupId,
@@ -839,7 +899,6 @@ class ConversationProvider extends ChangeNotifier {
       
       final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
       final signatureValid = result['signatureValid'] as bool;
-      debugPrint('✅ Message WebSocket déchiffré: ${decryptedText.substring(0, math.min(20, decryptedText.length))}... - Signature: ${signatureValid ? "✅" : "❌"}');
       
       // Incrémenter le compteur de messages non lus si ce n'est pas notre message
       if (senderId != myUserId) {
@@ -869,7 +928,6 @@ class ConversationProvider extends ChangeNotifier {
       _decryptedCache[messageId] = decryptedText;
       
       addLocalMessage(msg);
-      debugPrint('📨 Message WebSocket ajouté à la conversation');
     } catch (e) {
       debugPrint('❌ Erreur déchiffrement message WebSocket: $e');
       

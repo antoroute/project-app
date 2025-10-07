@@ -10,7 +10,7 @@ class ChatStyles {
   static const double avatarSpacing = 46;  
 }
 
-class MessageBubble extends StatelessWidget {
+class MessageBubble extends StatefulWidget {
   final bool isMe;
   final String text;
   final String? time;
@@ -22,6 +22,7 @@ class MessageBubble extends StatelessWidget {
   final bool sameAsPrevious;
   final bool sameAsNext;
   final double maxWidth;
+  final String? messageId; // NOUVEAU: ID du message pour le déchiffrement lazy
 
   const MessageBubble({
     Key? key,
@@ -36,12 +37,136 @@ class MessageBubble extends StatelessWidget {
     this.sameAsPrevious = false,
     this.sameAsNext = false,
     required this.maxWidth,
+    this.messageId, // NOUVEAU: ID du message pour le déchiffrement lazy
   }) : super(key: key);
+
+  @override
+  State<MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<MessageBubble> {
+  bool _hasDecrypted = false;
+  String _currentText = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _currentText = widget.text;
+    
+    // CORRECTION: Déchiffrement seulement si le message n'est pas déjà déchiffré ET pas dans les 15 premiers
+    if (widget.text == '[Chiffré]' && widget.messageId != null && widget.conversationId != null) {
+      _decryptMessageUltraGradual();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant MessageBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final textChanged = widget.text != oldWidget.text;
+    final idChanged = widget.messageId != oldWidget.messageId;
+
+    if (idChanged) {
+      // Nouveau message: resynchroniser l'état
+      _hasDecrypted = false;
+      _currentText = widget.text;
+      if (widget.text == '[Chiffré]' && widget.messageId != null && widget.conversationId != null) {
+        _decryptMessageUltraGradual();
+      }
+      setState(() {}); // refléter immédiatement
+      return;
+    }
+
+    if (textChanged && widget.text != _currentText) {
+      _currentText = widget.text;
+      setState(() {}); // met à jour l'affichage quand decryptedText arrive
+      if (_currentText == '[Chiffré]' && !_hasDecrypted && widget.messageId != null && widget.conversationId != null) {
+        _decryptMessageUltraGradual();
+      }
+    }
+  }
+
+  /// Déchiffre le message de manière ultra-graduelle pour éviter complètement le freeze
+  Future<void> _decryptMessageUltraGradual() async {
+    if (_hasDecrypted || widget.messageId == null || widget.conversationId == null) return;
+    
+    // CORRECTION: Vérifier d'abord si le message est déjà déchiffré dans le cache
+    try {
+      final provider = context.read<ConversationProvider>();
+      final messages = provider.messagesFor(widget.conversationId!);
+      final message = messages.firstWhere(
+        (m) => m.id == widget.messageId,
+        orElse: () => throw Exception('Message not found'),
+      );
+      
+      // Si le message est déjà déchiffré, l'utiliser directement
+      if (message.decryptedText != null && message.decryptedText!.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _currentText = message.decryptedText!;
+          });
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('❌ Erreur vérification cache pour message ${widget.messageId}: $e');
+    }
+    
+    _hasDecrypted = true;
+    
+    try {
+      final provider = context.read<ConversationProvider>();
+      final messages = provider.messagesFor(widget.conversationId!);
+      final message = messages.firstWhere(
+        (m) => m.id == widget.messageId,
+        orElse: () => throw Exception('Message not found'),
+      );
+      
+      // CORRECTION: Déchiffrement automatique intelligent - seulement si nécessaire
+      final messageIndex = messages.indexOf(message);
+      final totalMessages = messages.length;
+      
+      // Ne pas déchiffrer automatiquement les messages déjà déchiffrés
+      if (message.decryptedText != null) {
+        return;
+      }
+      
+      // CORRECTION: Déchiffrement automatique avec délais très courts pour mobile
+      int delayMs;
+      if (messageIndex >= totalMessages - 3) {
+        delayMs = 0; // 3 derniers messages : immédiat (déjà gérés par decryptVisibleMessagesFast)
+      } else if (messageIndex >= totalMessages - 6) {
+        delayMs = 10; // Messages récents : très court
+      } else if (messageIndex >= totalMessages - 10) {
+        delayMs = 20; // Messages moyens : court
+      } else {
+        delayMs = 50; // Messages anciens : délai raisonnable
+      }
+      
+      // Attendre le délai calculé
+      await Future.delayed(Duration(milliseconds: delayMs));
+      
+      // Déchiffrer le message
+      final decryptedText = await provider.decryptMessageIfNeeded(message);
+      
+      if (mounted && decryptedText != null) {
+        setState(() {
+          _currentText = decryptedText;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Erreur déchiffrement ultra-graduel pour message ${widget.messageId}: $e');
+      if (mounted) {
+        setState(() {
+          _currentText = '[Erreur déchiffrement]';
+        });
+      }
+    }
+  }
 
   /// Avatar ou espace réservé avec indicateur de présence
   Widget _avatarOrSpacer(BuildContext context) {
     final theme = Theme.of(context);
-    if (isMe || sameAsNext) {
+    if (widget.isMe || widget.sameAsNext) {
       return const SizedBox(width: ChatStyles.avatarSpacing);
     }
     
@@ -55,15 +180,15 @@ class MessageBubble extends StatelessWidget {
               radius: ChatStyles.avatarDiameter / 2,
               backgroundColor: theme.colorScheme.tertiary,  
               child: Text(
-                senderUsername.isNotEmpty
-                    ? senderUsername[0].toUpperCase()
-                    : senderInitial,
+                widget.senderUsername.isNotEmpty
+                    ? widget.senderUsername[0].toUpperCase()
+                    : widget.senderInitial,
                 style: const TextStyle(color: Colors.white),
               ),
             ),
           ),
           // Indicateur de présence
-          if (senderUserId != null && !isMe)
+          if (widget.senderUserId != null && !widget.isMe)
             Positioned(
               bottom: 0,
               right: 0,
@@ -79,9 +204,9 @@ class MessageBubble extends StatelessWidget {
     return Consumer<ConversationProvider>(
       builder: (context, provider, _) {
         // Utiliser la présence spécifique aux conversations si disponible, sinon la présence générale
-        final isOnline = conversationId != null 
-            ? provider.isUserOnlineInConversation(conversationId!, senderUserId!)
-            : provider.isUserOnline(senderUserId!);
+        final isOnline = widget.conversationId != null 
+            ? provider.isUserOnlineInConversation(widget.conversationId!, widget.senderUserId!)
+            : provider.isUserOnline(widget.senderUserId!);
             
         return Container(
           width: 12,
@@ -100,7 +225,7 @@ class MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bubbleColor =
-        isMe ? theme.colorScheme.primary : theme.colorScheme.secondary;
+        widget.isMe ? theme.colorScheme.primary : theme.colorScheme.secondary;
     final messageStyle = theme.textTheme.bodyLarge!;
     final timeStyle = theme.textTheme.bodySmall!.copyWith(
       color: theme.colorScheme.onSecondary,
@@ -111,30 +236,30 @@ class MessageBubble extends StatelessWidget {
       fontSize: 13,
     );
 
-    final iconData = signatureValid ? Icons.verified : Icons.warning_amber;
-    final iconColor = signatureValid
+    final iconData = widget.signatureValid ? Icons.verified : Icons.warning_amber;
+    final iconColor = widget.signatureValid
         ? theme.colorScheme.onError
         : theme.colorScheme.error;
-    final tooltipMsg = signatureValid
-        ? 'Signature vérifiée : message signé par l’expéditeur.'
-        : 'Signature non vérifiée : le message a pu être altéré.';
-    final showIcon = (!sameAsNext && !isMe) || !signatureValid;
+    final tooltipMsg = widget.signatureValid
+        ? 'Signature verifiee : message signe par l\'expediteur.'
+        : 'Signature non verifiee : le message a pu etre altere.';
+    final showIcon = (!widget.sameAsNext && !widget.isMe) || !widget.signatureValid;
 
     return Column(
       crossAxisAlignment:
-          isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          widget.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         // optional username
-        if (!isMe && !sameAsPrevious)
+        if (!widget.isMe && !widget.sameAsPrevious)
           Padding(
             padding: const EdgeInsets.only(left: 58),
-            child: Text(senderUsername, style: usernameStyle),
+            child: Text(widget.senderUsername, style: usernameStyle),
           ),
 
         // bubble + avatar 
         Row(
           mainAxisAlignment:
-              isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+              widget.isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             // avatar ou espace
@@ -143,7 +268,7 @@ class MessageBubble extends StatelessWidget {
             // la bulle avec gestion d'overflow
             Flexible(
               child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxWidth),
+                constraints: BoxConstraints(maxWidth: widget.maxWidth),
                 child: Container(
                   padding: ChatStyles.bubblePadding,
                   decoration: BoxDecoration(
@@ -152,29 +277,29 @@ class MessageBubble extends StatelessWidget {
                       topLeft: ChatStyles.bubbleRadius,
                       topRight: ChatStyles.bubbleRadius,
                       bottomLeft:
-                          isMe ? ChatStyles.bubbleRadius : Radius.zero,
+                          widget.isMe ? ChatStyles.bubbleRadius : Radius.zero,
                       bottomRight:
-                          isMe ? Radius.zero : ChatStyles.bubbleRadius,
+                          widget.isMe ? Radius.zero : ChatStyles.bubbleRadius,
                     ),
                   ),
                   child: Column(
-                    crossAxisAlignment: isMe
+                    crossAxisAlignment: widget.isMe
                         ? CrossAxisAlignment.end
                         : CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       // Texte avec gestion d'overflow
                       Text(
-                        text, 
+                        _currentText, // CORRECTION: Utiliser le texte déchiffré
                         style: messageStyle,
                         overflow: TextOverflow.visible,
                         softWrap: true,
                       ),
-                      if (time != null)
+                      if (widget.time != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Text(
-                            time!, 
+                            widget.time!, 
                             style: timeStyle,
                             overflow: TextOverflow.visible,
                           ),

@@ -31,6 +31,9 @@ class KeyManagerFinal {
   final Map<String, SimpleKeyPair> _ed25519Cache = <String, SimpleKeyPair>{};
   final Map<String, SimpleKeyPair> _x25519Cache = <String, SimpleKeyPair>{};
   
+  // Cache global statique pour éviter les reconstructions répétées
+  static final Map<String, SimpleKeyPair> _globalKeyCache = <String, SimpleKeyPair>{};
+  
   String _cacheKey(String groupId, String deviceId) => '$groupId:$deviceId';
 
   /// Initialise cryptography pour les performances
@@ -158,9 +161,13 @@ class KeyManagerFinal {
   Future<SimpleKeyPair> loadX25519KeyPair(String groupId, String deviceId) async {
     final cacheKey = _cacheKey(groupId, deviceId);
     
-    // Vérifier le cache
+    // Vérifier le cache global d'abord
+    if (_globalKeyCache.containsKey(cacheKey)) {
+      return _globalKeyCache[cacheKey]!;
+    }
+    
+    // Vérifier le cache local
     if (_x25519Cache.containsKey(cacheKey)) {
-      debugPrint('🔐 X25519 keypair retrieved from cache');
       return _x25519Cache[cacheKey]!;
     }
     
@@ -168,15 +175,12 @@ class KeyManagerFinal {
     final seedB64 = await _storage.read(key: _ns(groupId, deviceId, 'x25519'));
     
     if (seedB64 != null) {
-      debugPrint('🔐 Reconstructing X25519 keypair from stored seed');
-      
       try {
         // Charger le seed stocké (32 octets)
         final seedBytes = base64Decode(seedB64);
         
         // Vérifier que le seed a la bonne taille
         if (seedBytes.length != 32) {
-          debugPrint('🔐 Invalid X25519 seed length: ${seedBytes.length}, expected 32');
           throw Exception('Invalid X25519 seed length');
         }
         
@@ -186,11 +190,10 @@ class KeyManagerFinal {
         
         // Mettre en cache la paire reconstruite
         _x25519Cache[cacheKey] = reconstructedKeyPair;
+        _globalKeyCache[cacheKey] = reconstructedKeyPair;
         
-        debugPrint('🔐 X25519 keypair reconstructed from seed ✅');
         return reconstructedKeyPair;
       } catch (e) {
-        debugPrint('🔐 Error reconstructing X25519 from seed: $e');
         // CORRECTION: Supprimer le seed corrompu et régénérer
         await _storage.delete(key: _ns(groupId, deviceId, 'x25519'));
         await _storage.delete(key: _ns(groupId, deviceId, 'x25519_pub'));
@@ -211,6 +214,7 @@ class KeyManagerFinal {
 
     // Mettre en cache
     _x25519Cache[cacheKey] = xKeyPair;
+    _globalKeyCache[cacheKey] = xKeyPair;
     debugPrint('🔐 New X25519 keypair generated and stored');
     return xKeyPair;
   }

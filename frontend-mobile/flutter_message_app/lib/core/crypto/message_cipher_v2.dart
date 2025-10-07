@@ -16,6 +16,27 @@ class MessageCipherV2 {
       Uint8List.fromList(List<int>.generate(n, (_) => Random.secure().nextInt(256)));
 
   static String _b64(Uint8List bytes) => base64.encode(bytes);
+  
+  /// Nettoie et valide une chaîne Base64
+  static String _cleanBase64(String input) {
+    // Supprimer les espaces, retours à la ligne et caractères invalides
+    String cleaned = input.trim().replaceAll(RegExp(r'[\s\n\r]'), '');
+    
+    // Vérifier que la chaîne ne contient que des caractères Base64 valides
+    if (!RegExp(r'^[A-Za-z0-9+/=_-]*$').hasMatch(cleaned)) {
+      throw FormatException('Invalid Base64 characters in: $input');
+    }
+    
+    // Gérer les variantes Base64 URL-safe
+    cleaned = cleaned.replaceAll('-', '+').replaceAll('_', '/');
+    
+    // Ajouter padding si nécessaire
+    while (cleaned.length % 4 != 0) {
+      cleaned += '=';
+    }
+    
+    return cleaned;
+  }
 
   static Uint8List _concatCanonical(
     Map<String, dynamic> payload,
@@ -94,7 +115,7 @@ class MessageCipherV2 {
       }
       
       final recipientPub = SimplePublicKey(
-        base64.decode(entry.pkKemB64),
+        base64.decode(_cleanBase64(entry.pkKemB64)),
         type: KeyPairType.x25519,
       );
       final shared = await x.sharedSecretKey(keyPair: eph, remotePublicKey: recipientPub);
@@ -163,6 +184,96 @@ class MessageCipherV2 {
     return payload;
   }
 
+  /// Déchiffrement rapide SANS vérification de signature (pour le chargement initial)
+  static Future<Map<String, dynamic>> decryptFast({
+    required String groupId,
+    required String myUserId,
+    required String myDeviceId,
+    required Map<String, dynamic> messageV2,
+    required KeyDirectoryService keyDirectory,
+  }) async {
+    // Vérifier que les champs requis ne sont pas null
+    final ephPubB64 = messageV2['senderEphPub'] as String?;
+    if (ephPubB64 == null) {
+      throw Exception('senderEphPub is null in messageV2');
+    }
+
+    // unwrap mk (même logique que decrypt normal)
+    final x = X25519();
+    final myKey = await KeyManagerFinal.instance.loadX25519KeyPair(groupId, myDeviceId);
+    final shared = await x.sharedSecretKey(
+      keyPair: myKey,
+      remotePublicKey: SimplePublicKey(base64.decode(_cleanBase64(ephPubB64)), type: KeyPairType.x25519),
+    );
+    
+    // Récupérer la salt depuis le payload (ou fallback si pas disponible)
+    final Uint8List salt;
+    if (messageV2.containsKey('salt')) {
+      salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
+    } else {
+      // Fallback pour compatibilité avec anciens messages
+      salt = Uint8List.fromList(
+        crypto.sha256.convert(utf8.encode('${messageV2['messageId']}:${_b64(_randomBytes(16))}')).bytes,
+      );
+    }
+
+    final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
+    final kek = await _hkdf.deriveKey(
+      secretKey: SecretKey(Uint8List.fromList(await shared.extractBytes())),
+      nonce: salt,
+      info: utf8.encode(infoData),
+    );
+    final kekBytes = Uint8List.fromList(await kek.extractBytes());
+
+    // Trouver notre entrée dans wrappedKeys
+    final wrappedKeys = messageV2['wrappedKeys'] as List<dynamic>;
+    final mine = wrappedKeys.firstWhere(
+      (w) => w['userId'] == myUserId && w['deviceId'] == myDeviceId,
+    );
+
+    // unwrap mk
+    final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
+    final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
+    final macLen = 16; // AES-GCM tag size
+    final cipherLen = wrapBytes.length - macLen;
+    final wrapBox = SecretBox(
+      wrapBytes.sublist(0, cipherLen),
+      nonce: wrapNonce,
+      mac: Mac(wrapBytes.sublist(cipherLen)),
+    );
+    final mkBytes = await _aead.decrypt(
+      wrapBox,
+      secretKey: SecretKey(kekBytes),
+    );
+
+    // decrypt content avec validation Base64 (SANS vérification de signature)
+    String ivB64 = messageV2['iv'] as String;
+    String ctB64 = messageV2['ciphertext'] as String;
+    
+    // Validation et nettoyage Base64
+    ivB64 = _cleanBase64(ivB64);
+    ctB64 = _cleanBase64(ctB64);
+    
+    final iv = base64.decode(ivB64);
+    final ct = base64.decode(ctB64);
+    final macLen2 = 16;
+    final ctLen = ct.length - macLen2;
+    final contentBox = SecretBox(
+      ct.sublist(0, ctLen),
+      nonce: iv,
+      mac: Mac(ct.sublist(ctLen)),
+    );
+    final clear = await _aead.decrypt(
+      contentBox,
+      secretKey: SecretKey(mkBytes),
+    );
+    
+    return {
+      'decryptedText': Uint8List.fromList(clear),
+      'signatureValid': false, // Marqué comme non vérifié pour le mode rapide
+    };
+  }
+
   static Future<Map<String, dynamic>> decrypt({
     required String groupId,
     required String myUserId,
@@ -195,13 +306,13 @@ class MessageCipherV2 {
     final myKey = await KeyManagerFinal.instance.loadX25519KeyPair(groupId, myDeviceId);
     final shared = await x.sharedSecretKey(
       keyPair: myKey,
-      remotePublicKey: SimplePublicKey(base64.decode(ephPubB64), type: KeyPairType.x25519),
+      remotePublicKey: SimplePublicKey(base64.decode(_cleanBase64(ephPubB64)), type: KeyPairType.x25519),
     );
     
     // Récupérer la salt depuis le payload (ou fallback si pas disponible)
     final Uint8List salt;
     if (messageV2.containsKey('salt')) {
-      salt = base64.decode(messageV2['salt'] as String);
+      salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
     } else {
       // Fallback pour compatibilité avec anciens messages
       salt = Uint8List.fromList(
@@ -218,8 +329,8 @@ class MessageCipherV2 {
     final kekBytes = Uint8List.fromList(await kek.extractBytes());
 
     // unwrap mk
-    final wrapBytes = base64.decode(mine['wrap'] as String);
-    final wrapNonce = base64.decode(mine['nonce'] as String);
+    final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
+    final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
     final macLen = 16; // AES-GCM tag size
     final cipherLen = wrapBytes.length - macLen;
     final wrapBox = SecretBox(
@@ -245,21 +356,28 @@ class MessageCipherV2 {
       throw Exception('⛔ senderEntry.pkSigB64 est vide - impossible de vérifier la signature');
     }
     
-    final sigPubBytes = base64.decode(senderEntry.pkSigB64);
+    final sigPubBytes = base64.decode(_cleanBase64(senderEntry.pkSigB64));
     final pub = SimplePublicKey(sigPubBytes, type: KeyPairType.ed25519);
     
     // Debug de la signature avant décodage
     final sigString = messageV2['sig'] as String;
-    final sigBytes = base64.decode(sigString);
+    final sigBytes = base64.decode(_cleanBase64(sigString));
     
     final verified = await ed.verify(
       _concatCanonical(messageV2),
       signature: Signature(sigBytes, publicKey: pub),
     );
 
-    // decrypt content
-    final iv = base64.decode(messageV2['iv'] as String);
-    final ct = base64.decode(messageV2['ciphertext'] as String);
+    // decrypt content avec validation Base64
+    String ivB64 = messageV2['iv'] as String;
+    String ctB64 = messageV2['ciphertext'] as String;
+    
+    // Validation et nettoyage Base64
+    ivB64 = _cleanBase64(ivB64);
+    ctB64 = _cleanBase64(ctB64);
+    
+    final iv = base64.decode(ivB64);
+    final ct = base64.decode(ctB64);
     final macLen2 = 16;
     final ctLen = ct.length - macLen2;
     final contentBox = SecretBox(

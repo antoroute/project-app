@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'dart:math' as math;
 import 'dart:async';
 
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/conversation_provider.dart';
-import '../../core/providers/group_provider.dart';
-import '../../core/services/websocket_service.dart';
 import '../helpers/extensions.dart';
 import '../widgets/message_bubble.dart';
 
@@ -21,19 +18,12 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   late final ConversationProvider _conversationProvider;
-  late final GroupProvider _groupProvider;
 
   static const int _messagesPerPage = 25;  // Messages chargés par pagination
-
-  static const double _nearBottomThreshold = 100.0; 
-  static const double _showButtonThreshold = 300.0;
-
+  
   bool _isLoading = false;
   bool _initialDecryptDone = false;
-  bool _isAtBottom = true;
-  bool _showScrollToBottom = false;
-  bool _isDecrypting = false;
-  int _visibleCount = 20; // Nombre de messages visibles pour l'optimisation
+  bool _hasMoreOlderMessages = true;
   
   // Timer pour les indicateurs de frappe
   Timer? _typingTimer;
@@ -45,11 +35,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void initState() {
     super.initState();
     _conversationProvider = context.read<ConversationProvider>();
-    _groupProvider = context.read<GroupProvider>();
 
-    // Écoute la position
-    _scrollController.addListener(_onScroll);
-
+    // Pas d'écoute du scroll - géré par NotificationListener
+    
     // WebSocket déjà connecté au niveau de l'app, juste s'abonner à la conversation
     _conversationProvider.subscribe(widget.conversationId);
     _conversationProvider.addListener(_onMessagesUpdated);
@@ -57,42 +45,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _loadData();
   }
 
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
-    final offset = _scrollController.offset;
-    final maxExtent = _scrollController.position.maxScrollExtent;
-    final atBottom = (maxExtent - offset) < _nearBottomThreshold;
-    final showButton = (maxExtent - offset) > _showButtonThreshold;
+  /// Vérifie si l'utilisateur est proche du bas (reverse:true)
+  bool _isNearBottom() {
+    if (!_scrollController.hasClients) return true;
+    return _scrollController.offset < 80.0; // reverse:true -> 0 == bas
+  }
 
-    // Déclencher le chargement de messages plus anciens quand on approche du haut
-    const loadMoreThreshold = 200.0;
-    if (offset < loadMoreThreshold && !_isLoading && _initialDecryptDone) {
-      _loadOlderMessages();
+  /// Gestionnaire de notification de scroll pour reverse:true
+  bool _onScrollNotification(ScrollNotification n) {
+    // Near top de la liste inversée -> charger anciens
+    if (n.metrics.pixels >= n.metrics.maxScrollExtent - 100 && _hasMoreOlderMessages) {
+      _loadOlderPreservingOffset();
     }
-
-    // Déchiffrer les messages autour de la position de scroll pour les messages anciens
-    if (_initialDecryptDone && !_isDecrypting) {
-      final messages = _conversationProvider.messagesFor(widget.conversationId);
-      if (messages.isNotEmpty) {
-        // Estimer l'index du message visible au centre de l'écran
-        final estimatedIndex = (offset / (maxExtent / messages.length)).round();
-        final clampedIndex = math.max(0, math.min(messages.length - 1, estimatedIndex));
-        
-        // Déchiffrer les messages autour de cette position
-        _conversationProvider.decryptMessagesAroundScrollPosition(
-          widget.conversationId,
-          scrollIndex: clampedIndex,
-          visibleCount: _visibleCount,
-        );
-      }
-    }
-
-    if (atBottom != _isAtBottom || showButton != _showScrollToBottom) {
-      setState(() {
-        _isAtBottom = atBottom;
-        _showScrollToBottom = showButton;
-      });
-    }
+    return false;
   }
 
   Future<void> _loadData() async {
@@ -116,46 +81,49 @@ class _ConversationScreenState extends State<ConversationScreen> {
       // 4) Fetch initial readers
       await context.read<ConversationProvider>().refreshReaders(widget.conversationId);
       
-      // 5) Scroll vers le bas pour montrer les messages récents
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottom(animate: false);
-      });
+      // 5) Déchiffrement rapide des 3 derniers messages (SANS vérification de signature)
+      await _conversationProvider.decryptVisibleMessagesFast(
+        widget.conversationId, 
+        visibleCount: 3,
+      );
       
       setState(() => _isLoading = false);
       
       _initialDecryptDone = true;
-      setState(() {});
-      
-      // 6) Déchiffrer UNIQUEMENT les messages visibles en arrière-plan (éviter le freeze)
-      _conversationProvider.decryptVisibleMessages(
-        widget.conversationId, 
-        visibleCount: _visibleCount,
-      );
-      
+
     } catch (e) {
       debugPrint('❌ Erreur chargement conversation : $e');
       setState(() => _isLoading = false);
     }
   }
 
-  /// Charge les messages plus anciens lors du scroll vers le haut
-  Future<void> _loadOlderMessages() async {
-    if (_isLoading) return;
+  /// Charge les messages plus anciens en préservant la position de scroll (reverse:true)
+  Future<void> _loadOlderPreservingOffset() async {
+    if (_isLoading || !_hasMoreOlderMessages) return;
+    
+    if (!_scrollController.hasClients) return;
+    final before = _scrollController.position.maxScrollExtent;
     
     setState(() => _isLoading = true);
     try {
-      await _conversationProvider.fetchOlderMessages(
+      final hasMore = await _conversationProvider.fetchOlderMessages(
         context,
         widget.conversationId,
         limit: _messagesPerPage,
       );
       
-      // Déchiffrer les nouveaux messages chargés en arrière-plan
-      _conversationProvider.decryptVisibleMessages(
-        widget.conversationId, 
-        visibleCount: _visibleCount,
-      );
+      // Arrêter le chargement s'il n'y a plus de messages
+      if (!hasMore) {
+        _hasMoreOlderMessages = false;
+        debugPrint('📄 Plus de messages anciens à charger');
+      }
       
+      // Préserver la position de scroll après ajout des nouveaux messages
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) return;
+        final after = _scrollController.position.maxScrollExtent;
+        _scrollController.jumpTo(_scrollController.offset + (after - before)); // pas de "saut"
+      });
     } catch (e) {
       debugPrint('❌ Erreur chargement messages anciens: $e');
     } finally {
@@ -166,28 +134,20 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void _onMessagesUpdated() {
     if (!_initialDecryptDone) return;
     
-    // Auto-scroll seulement si l'utilisateur est en bas
-    if (_isAtBottom) {
+    // Auto-scroll seulement si l'utilisateur est proche du bas (reverse:true)
+    if (_isNearBottom()) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottom();
-      });
-    }
-    
-    // Déchiffrer seulement les nouveaux messages visibles (optimisation)
-    final messages = _conversationProvider.messagesFor(widget.conversationId);
-    if (messages.isEmpty) return;
-    
-    // Utiliser la méthode optimisée de déchiffrement avec indicateur
-    if (!_isDecrypting) {
-      setState(() => _isDecrypting = true);
-      _conversationProvider.decryptVisibleMessages(
-        widget.conversationId,
-        visibleCount: _visibleCount,
-      ).then((_) {
-        if (mounted) {
-          setState(() => _isDecrypting = false);
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            0, // reverse:true -> bas
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+          );
         }
       });
+    } else {
+      // Afficher un indicateur "Nouveaux messages" si pas en bas
+      // TODO: Implémenter le pill "Nouveaux messages"
     }
   }
 
@@ -233,49 +193,25 @@ class _ConversationScreenState extends State<ConversationScreen> {
     
     if (otherTypingUsers.isEmpty) return const SizedBox.shrink();
     
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          const SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            otherTypingUsers.length == 1 
-                ? '${otherTypingUsers.first} tape...'
-                : '${otherTypingUsers.length} personnes tapent...',
-            style: TextStyle(
-              fontStyle: FontStyle.italic,
-              color: Theme.of(context).colorScheme.onSecondary,
-              fontSize: 12,
-            ),
-          ),
-        ],
+    final typingText = otherTypingUsers.length == 1
+        ? '${otherTypingUsers.first} est en train d\'écrire...'
+        : '${otherTypingUsers.length} personnes sont en train d\'écrire...';
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Text(
+        typingText,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontSize: 12,
+          fontStyle: FontStyle.italic,
+        ),
       ),
     );
   }
 
-
-  void _scrollToBottom({bool animate = true}) {
-    if (!_scrollController.hasClients) return;
-    final target = _scrollController.position.maxScrollExtent;
-    if (animate) {
-      _scrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
-    } else {
-      _scrollController.jumpTo(target);
-    }
-  }
-
   @override
   void dispose() {
-    // Se désabonner de la conversation (mais garder la connexion WebSocket active)
     _conversationProvider.unsubscribe(widget.conversationId);
     _conversationProvider.removeListener(_onMessagesUpdated);
     _textController.dispose();
@@ -286,292 +222,177 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final raw = context
+    final messages = context
         .watch<ConversationProvider>()
         .messagesFor(widget.conversationId);
-    final currentUserId = context.read<AuthProvider>().userId ?? '';
-    final maxBubbleWidth = context.maxBubbleWidth;
-
-    // Construire chatItems (chronologique)
-    final List<Widget> chatItems = [];
-    DateTime? lastDate;
-    for (final msg in raw) {
-      final msgDate = DateTime.fromMillisecondsSinceEpoch(msg.timestamp * 1000)
-          .toLocal();
-      final dateOnly = DateTime(msgDate.year, msgDate.month, msgDate.day);
-
-      if (lastDate == null || lastDate != dateOnly) {
-        chatItems.add(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Center(
-              child: Text(
-                dateOnly.toChatDateHeader(),
-                style: TextStyle(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ),
-        );
-        lastDate = dateOnly;
-      }
-
-      final index = raw.indexOf(msg);
-      final sameAsPrevious = index > 0 &&
-          raw[index - 1].senderId == msg.senderId;
-      final sameAsNext = index < raw.length - 1 &&
-          raw[index + 1].senderId == msg.senderId;
-
-      final isMe = msg.senderId == currentUserId;
-      final text = msg.decryptedText ?? '[Chiffré]';
-      final time = msgDate.toHm();
-      
-      // CORRECTION: Utiliser le cache des usernames du ConversationProvider
-      String senderUsername = '';
-      if (!isMe) {
-        // Essayer d'abord le cache des usernames
-        senderUsername = context.read<ConversationProvider>().getUsernameForUser(msg.senderId);
-        
-        // Si pas trouvé, essayer dans les membres du groupe
-        if (senderUsername.isEmpty) {
-          try {
-            final member = _groupProvider.members.firstWhere(
-              (m) => m['userId'] == msg.senderId,
-              orElse: () => <String, dynamic>{},
-            );
-            senderUsername = (member['username'] as String? ?? '').trim();
-            
-            // Mettre en cache pour la prochaine fois
-            if (senderUsername.isNotEmpty) {
-              context.read<ConversationProvider>().cacheUsername(msg.senderId, senderUsername);
-            }
-          } catch (e) {
-            debugPrint('⚠️ Username not found for user ${msg.senderId}: $e');
-          }
-        }
-        
-        // Fallback: utiliser l'ID tronqué
-        if (senderUsername.isEmpty) {
-          senderUsername = msg.senderId.length > 8 ? '${msg.senderId.substring(0, 8)}...' : msg.senderId;
-        }
-      }
-
-      chatItems.add(
-        MessageBubble(
-          isMe: isMe,
-          text: text,
-          time: time,
-          signatureValid: msg.signatureValid,
-          senderInitial: isMe ? '' : msg.senderId[0].toUpperCase(),
-          senderUsername: senderUsername,
-          senderUserId: msg.senderId, // Ajout pour les indicateurs de présence
-          conversationId: widget.conversationId, // Ajout pour la présence spécifique aux conversations
-          sameAsPrevious: sameAsPrevious,
-          sameAsNext: sameAsNext,
-          maxWidth: maxBubbleWidth,
-        ),
-      );
-    }
+    
+    // Si la liste est vide, ne rien afficher pour éviter le flash
+    if (messages.isEmpty) return const SizedBox.shrink();
 
     return Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
-            const Text('Conversation'),
-            const SizedBox(width: 8),
-            // Indicateur de statut WebSocket
+            Expanded(
+              child: Text(
+                'Conversation',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
+              ),
+            ),
             _WebSocketStatusIndicator(),
-            const SizedBox(width: 8),
           ],
         ),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
       ),
-      body: SafeArea(
-        child: Stack(
+      body: Column(
         children: [
-          Column(
-            children: [
-              // Presence/readers bar
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: Builder(
-                  builder: (context) {
-                    final readers = context.watch<ConversationProvider>().readersFor(widget.conversationId);
-                    if (readers.isEmpty) {
-                      return const SizedBox.shrink();
-                    }
-                    final names = readers.map((r) => r['username'] as String? ?? r['userId'] as String).toList();
-                    return Text(
-                      'Vu par: ${names.join(', ')}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    );
-                  },
-                ),
-              ),
-              Expanded(
-                child: ListView(
-                  controller: _scrollController,
-                  reverse: false,
-                  physics: const BouncingScrollPhysics(),
-                  children: [
-                    // Indicateur de chargement pour pagination (en haut de la liste)
-                    if (_isLoading) 
-                      const Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                      ),
-                    ...chatItems,
-                  ],
-                ),
-              ),
-
-              // zone de saisie avec SafeArea pour Android
-              SafeArea(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        blurRadius: 4,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+          // Zone de messages avec NotificationListener
+          Expanded(
+            child: NotificationListener<ScrollNotification>(
+              onNotification: _onScrollNotification,
+              child: ListView.builder(
+                reverse: true, // Clé anti-jump
+                controller: _scrollController,
+                itemCount: messages.length,
+                itemBuilder: (_, i) {
+                  final msg = messages[messages.length - 1 - i]; // dernier d'abord
+                  final currentUserId = context.read<AuthProvider>().userId ?? '';
+                  
+                  // Calculer sameAsPrevious et sameAsNext pour l'affichage des vignettes
+                  final sameAsPrevious = i < messages.length - 1 && 
+                      messages[messages.length - 2 - i].senderId == msg.senderId;
+                  final sameAsNext = i > 0 && 
+                      messages[messages.length - i].senderId == msg.senderId;
+                  
+                  // Vérifier si on doit afficher un indicateur de date
+                  final msgDate = DateTime.fromMillisecondsSinceEpoch(msg.timestamp * 1000).toLocal();
+                  final dateOnly = DateTime(msgDate.year, msgDate.month, msgDate.day);
+                  
+                  // Vérifier la date du message précédent pour savoir si on doit afficher l'en-tête de date
+                  DateTime? previousDate;
+                  if (i < messages.length - 1) {
+                    final prevMsg = messages[messages.length - 2 - i];
+                    final prevMsgDate = DateTime.fromMillisecondsSinceEpoch(prevMsg.timestamp * 1000).toLocal();
+                    previousDate = DateTime(prevMsgDate.year, prevMsgDate.month, prevMsgDate.day);
+                  }
+                  
+                  final showDateHeader = previousDate == null || previousDate != dateOnly;
+                  
+                  return Column(
                     children: [
-                      // Indicateur de frappe
-                      _buildTypingIndicator(),
-                      // Champ de saisie
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _textController,
-                              onChanged: _onTextChanged,
-                              decoration: const InputDecoration(
-                                hintText: 'Écrire un message…',
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      // Indicateur de date
+                      if (showDateHeader)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Center(
+                            child: Text(
+                              dateOnly.toChatDateHeader(),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSecondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
                               ),
-                              textInputAction: TextInputAction.send,
-                              onSubmitted: (_) => _onSendPressed(),
-                              maxLines: 4, // Permettre plusieurs lignes
-                              minLines: 1,
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.send),
-                            onPressed: _onSendPressed,
-                          ),
-                        ],
+                        ),
+                      
+                      // Message
+                      MessageBubble(
+                        key: ValueKey(msg.id), // Clé stable
+                        isMe: msg.senderId == currentUserId,
+                        text: msg.decryptedText ?? '[Chiffré]',
+                        time: msgDate.toHm(),
+                        signatureValid: msg.signatureValid,
+                        senderInitial: msg.senderId == currentUserId ? '' : msg.senderId[0].toUpperCase(),
+                        senderUsername: context.read<ConversationProvider>().getUsernameForUser(msg.senderId),
+                        senderUserId: msg.senderId,
+                        conversationId: widget.conversationId,
+                        sameAsPrevious: sameAsPrevious,
+                        sameAsNext: sameAsNext,
+                        maxWidth: context.maxBubbleWidth,
+                        messageId: msg.id,
                       ),
                     ],
+                  );
+                },
+              ),
+            ),
+          ),
+
+          // Zone de saisie avec SafeArea pour Android
+          SafeArea(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                    width: 1,
                   ),
                 ),
               ),
-            ],
-          ),
-
-          if (_showScrollToBottom)
-            Positioned(
-              bottom: 80,
-              right: 16,
-              child: FloatingActionButton(
-                mini: true,
-                onPressed: () => _scrollToBottom(),
-                child: const Icon(Icons.arrow_downward),
-              ),
-            ),
-          
-          // Indicateur de déchiffrement en cours
-          if (_isDecrypting)
-            Positioned(
-              top: 16,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-             decoration: BoxDecoration(
-               color: Colors.blue.withValues(alpha: 0.9),
-               borderRadius: BorderRadius.circular(20),
-             ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Indicateur de frappe
+                  _buildTypingIndicator(),
+                  
+                  // Zone de saisie
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _textController,
+                          onChanged: _onTextChanged,
+                          decoration: InputDecoration(
+                            hintText: 'Tapez votre message...',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(20),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Theme.of(context).colorScheme.surfaceVariant,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                          ),
+                          maxLines: 4,
+                          minLines: 1,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Déchiffrement en cours...',
-                      style: TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 8),
+                      FloatingActionButton(
+                        onPressed: _onSendPressed,
+                        mini: true,
+                        child: const Icon(Icons.send),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
+          ),
         ],
-        ),
       ),
     );
   }
 }
 
-/// Widget séparé pour l'indicateur de statut WebSocket
-class _WebSocketStatusIndicator extends StatefulWidget {
-  @override
-  _WebSocketStatusIndicatorState createState() => _WebSocketStatusIndicatorState();
-}
-
-class _WebSocketStatusIndicatorState extends State<_WebSocketStatusIndicator> {
-  late StreamSubscription<SocketStatus> _statusSubscription;
-  SocketStatus _currentStatus = SocketStatus.disconnected;
-
-  @override
-  void initState() {
-    super.initState();
-    _currentStatus = WebSocketService.instance.status;
-    _statusSubscription = WebSocketService.instance.statusStream.listen((status) {
-      if (mounted) {
-        setState(() {
-          _currentStatus = status;
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _statusSubscription.cancel();
-    super.dispose();
-  }
-
+/// Widget pour afficher le statut de connexion WebSocket
+class _WebSocketStatusIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
       width: 8,
       height: 8,
       decoration: BoxDecoration(
+        color: Colors.green, // Simplifié pour l'instant
         shape: BoxShape.circle,
-        color: _currentStatus == SocketStatus.connected 
-            ? Colors.green 
-            : _currentStatus == SocketStatus.connecting 
-                ? Colors.orange 
-                : Colors.red,
       ),
     );
   }

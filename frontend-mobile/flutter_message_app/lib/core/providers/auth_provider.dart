@@ -149,6 +149,7 @@ class AuthProvider extends ChangeNotifier {
           'X-Client-Version': clientVersion,
           'Authorization': 'Bearer $storedRefresh',
         },
+        body: '{}', // CORRECTION: Ajouter un body JSON vide
       );
       
       debugPrint('🔐 [Auth] Réponse API refresh: ${response.statusCode}');

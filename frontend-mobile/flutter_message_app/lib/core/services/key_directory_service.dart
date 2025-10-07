@@ -57,6 +57,9 @@ class KeyDirectoryService {
 
   // Cache en mémoire: groupId -> entries
   final Map<String, List<GroupDeviceKeyEntry>> _cache = <String, List<GroupDeviceKeyEntry>>{};
+  
+  // CORRECTION: Protection contre les appels simultanés
+  final Map<String, Future<List<GroupDeviceKeyEntry>>> _pendingRequests = <String, Future<List<GroupDeviceKeyEntry>>>{};
 
   /// Récupère et met en cache la liste (user,device,keys) d'un groupe
   Future<List<GroupDeviceKeyEntry>> fetchGroupDevices(String groupId) async {
@@ -79,9 +82,27 @@ class KeyDirectoryService {
 
   /// Retourne les entrées en cache si dispo, sinon fetch
   Future<List<GroupDeviceKeyEntry>> getGroupDevices(String groupId) async {
+    // Vérifier le cache d'abord
     final cached = _cache[groupId];
     if (cached != null) return cached;
-    return fetchGroupDevices(groupId);
+    
+    // CORRECTION: Éviter les appels simultanés pour le même groupe
+    final pending = _pendingRequests[groupId];
+    if (pending != null) {
+      return pending;
+    }
+    
+    // Créer une nouvelle requête et la mettre en cache
+    final future = fetchGroupDevices(groupId);
+    _pendingRequests[groupId] = future;
+    
+    try {
+      final result = await future;
+      return result;
+    } finally {
+      // Nettoyer la requête en cours
+      _pendingRequests.remove(groupId);
+    }
   }
 
   /// Helper: filtre par liste d'utilisateurs; retourne toutes leurs devices actives

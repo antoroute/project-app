@@ -460,26 +460,8 @@ class ApiService {
     final uri = Uri.parse('$_baseUrl/conversations/$conversationId/messages').replace(queryParameters: query);
     final res = await http.get(uri, headers: headers);
     
-    debugPrint('📥 fetchMessagesV2 DEBUG:');
-    debugPrint('  - URL: $uri');
-    debugPrint('  - Status: ${res.statusCode}');
-    debugPrint('  - Body length: ${res.body.length}');
-    debugPrint('  - Body: ${res.body.length > 200 ? res.body.substring(0, 200) + "..." : res.body}');
-    
     if (res.statusCode == 200) {
       final Map<String, dynamic> parsed = jsonDecode(res.body) as Map<String, dynamic>;
-      debugPrint('  - Parsed type: ${parsed.runtimeType}');
-      debugPrint('  - Parsed keys: ${parsed.keys.toList()}');
-      
-      final itemsRaw = parsed['items'];
-      debugPrint('  - items type: ${itemsRaw.runtimeType}');
-      if (itemsRaw is List) {
-        debugPrint('  - items count: ${itemsRaw.length}');
-        for (int i = 0; i < itemsRaw.length; i++) {
-          debugPrint('    Item $i keys: ${(itemsRaw[i] as Map).keys.toList()}');
-        }
-      }
-      
       final items = (parsed['items'] as List).map((e) => MessageV2Model.fromJson(e as Map<String, dynamic>)).toList();
       return items;
     }
@@ -512,7 +494,7 @@ class ApiService {
   }) async {
     final headers = await _buildHeaders();
     final uri = Uri.parse('$_baseUrl/conversations/$conversationId/read');
-    final res = await http.post(uri, headers: headers);
+    final res = await http.post(uri, headers: headers, body: '{}');
     if (res.statusCode == 200) {
       return jsonDecode(res.body) as Map<String, dynamic>;
     }

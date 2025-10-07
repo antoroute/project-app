@@ -36,6 +36,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   // bool _isCreator = false; // unused in v2
   final Set<String> _selectedUserIds = {};
 
+  // Cache pour éviter les logs répétitifs
+  int _lastMembers = -1;
+  int _lastConvos = -1;
+
   // Legacy fields removed
 
   @override
@@ -130,8 +134,14 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     final convProv  = context.watch<ConversationProvider>();
     final String? currentUserId = context.read<AuthProvider>().userId;
     
-    // Debug info
-    debugPrint('🔄 Group Detail - Members: ${groupProv.members.length}, Conversations: ${convProv.conversations.length}');
+    // Debug info - seulement si les valeurs ont changé
+    final membersCount = groupProv.members.length;
+    final convosCount = convProv.conversations.length;
+    if (_lastMembers != membersCount || _lastConvos != convosCount) {
+      debugPrint('🔄 Group Detail - Members: $membersCount, Conversations: $convosCount');
+      _lastMembers = membersCount;
+      _lastConvos = convosCount;
+    }
 
     // Filtre : exclut l'utilisateur courant de la liste des sélectionnables
     final members = List<Map<String, dynamic>>.from(groupProv.members)
