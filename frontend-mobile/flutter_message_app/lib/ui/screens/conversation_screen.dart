@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/conversation_provider.dart';
+import '../../core/models/message.dart';
+import '../../core/crypto/message_cipher_v2.dart';
+import '../../core/services/session_device_service.dart';
 import '../helpers/extensions.dart';
 import '../widgets/message_bubble.dart';
 
@@ -81,19 +86,80 @@ class _ConversationScreenState extends State<ConversationScreen> {
       // 4) Fetch initial readers
       await context.read<ConversationProvider>().refreshReaders(widget.conversationId);
       
-      // 5) Déchiffrement rapide des 3 derniers messages (SANS vérification de signature)
-      await _conversationProvider.decryptVisibleMessagesFast(
-        widget.conversationId, 
-        visibleCount: 3,
-      );
+      // 5) Pré-charger les clés de groupe en arrière-plan
+      _conversationProvider.preloadGroupKeys(widget.conversationId);
       
+      // 6) Afficher immédiatement les messages [Chiffré] (non-bloquant)
       setState(() => _isLoading = false);
+      
+      // 7) Déchiffrement progressif en arrière-plan
+      _startProgressiveDecryption();
       
       _initialDecryptDone = true;
 
     } catch (e) {
       debugPrint('❌ Erreur chargement conversation : $e');
       setState(() => _isLoading = false);
+    }
+  }
+
+  /// Déchiffrement progressif en arrière-plan pour éviter le blocage de l'UI
+  void _startProgressiveDecryption() {
+    final messages = _conversationProvider.messagesFor(widget.conversationId);
+    if (messages.isEmpty) return;
+    
+    // Déchiffrer les 3 derniers messages en premier (les plus importants)
+    final lastMessages = messages.length > 3 
+        ? messages.sublist(messages.length - 3)
+        : messages;
+    
+    // Marquer les messages pour déchiffrement progressif
+    for (int i = 0; i < lastMessages.length; i++) {
+      Timer(Duration(milliseconds: i * 200), () {
+        if (mounted) {
+          // Déchiffrer directement sans notifyListeners()
+          _decryptMessageDirectly(lastMessages[i]);
+        }
+      });
+    }
+  }
+  
+  /// Déchiffre un message directement sans déclencher de rebuild global
+  Future<void> _decryptMessageDirectly(Message message) async {
+    if (message.decryptedText != null) return; // Déjà déchiffré
+    
+    try {
+      final currentUserId = context.read<AuthProvider>().userId;
+      if (currentUserId == null) return;
+      
+      final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      
+      // Déchiffrement direct sans passer par ConversationProvider
+      final result = await MessageCipherV2.decryptFast(
+        groupId: message.v2Data!['groupId'] as String,
+        myUserId: currentUserId,
+        myDeviceId: myDeviceId,
+        messageV2: message.v2Data!,
+        keyDirectory: _conversationProvider.keyDirectory,
+      );
+      
+      final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
+      message.signatureValid = false;
+      message.decryptedText = decryptedText;
+      
+      // Mise à jour granulaire : seulement ce MessageBubble
+      if (mounted) {
+        setState(() {}); // Rebuild local seulement
+      }
+      
+    } catch (e) {
+      debugPrint('⚠️ Erreur déchiffrement direct message ${message.id}: $e');
+      // Fallback sur le déchiffrement normal si nécessaire
+      try {
+        await _conversationProvider.decryptMessageIfNeeded(message);
+      } catch (fallbackError) {
+        debugPrint('❌ Erreur fallback déchiffrement message ${message.id}: $fallbackError');
+      }
     }
   }
 

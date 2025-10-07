@@ -332,7 +332,28 @@ class ConversationProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
+  /// Getter pour accéder au service de clés de groupe
+  KeyDirectoryService get keyDirectory => _keyDirectory;
+
+  /// Pré-charge les clés de groupe pour améliorer les performances de déchiffrement
+  Future<void> preloadGroupKeys(String conversationId) async {
+    try {
+      final conversation = _conversations.firstWhere(
+        (c) => c.conversationId == conversationId,
+        orElse: () => throw Exception('Conversation not found'),
+      );
+      
+      final groupId = conversation.groupId;
+      
+      // Pré-charger les clés de groupe en arrière-plan
+      await _keyDirectory.getGroupDevices(groupId);
+      debugPrint('🔑 Clés de groupe pré-chargées pour $groupId');
+    } catch (e) {
+      debugPrint('⚠️ Erreur pré-chargement clés groupe: $e');
+    }
+  }
+
   /// Déchiffrement rapide d'un message - fallback sur déchiffrement normal si erreur
   Future<void> _decryptMessageFast(Message message, String currentUserId, String myDeviceId) async {
     final msgId = message.id;
