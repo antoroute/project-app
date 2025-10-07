@@ -35,6 +35,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  
+  // ValueNotifier pour les mises à jour ultra-granulaires
+  final ValueNotifier<String?> _messageUpdateNotifier = ValueNotifier<String?>(null);
 
   @override
   void initState() {
@@ -113,19 +116,26 @@ class _ConversationScreenState extends State<ConversationScreen> {
         ? messages.sublist(messages.length - 3)
         : messages;
     
-    // Marquer les messages pour déchiffrement progressif
+    // Déchiffrement ultra-fluide avec délais optimisés
     for (int i = 0; i < lastMessages.length; i++) {
-      Timer(Duration(milliseconds: i * 200), () {
+      Timer(Duration(milliseconds: i * 300), () {
         if (mounted) {
-          // Déchiffrer directement sans notifyListeners()
-          _decryptMessageDirectly(lastMessages[i]);
+          // Déchiffrer avec mise à jour ultra-granulaire
+          _decryptMessageUltraFluid(lastMessages[i]);
+          
+          // CORRECTION: Forcer une mise à jour UI après un délai pour s'assurer que la signature se met à jour
+          Timer(Duration(milliseconds: 100), () {
+            if (mounted) {
+              _messageUpdateNotifier.value = lastMessages[i].id;
+            }
+          });
         }
       });
     }
   }
   
-  /// Déchiffre un message directement sans déclencher de rebuild global
-  Future<void> _decryptMessageDirectly(Message message) async {
+  /// Déchiffre un message avec mise à jour ultra-granulaire (pas de setState)
+  Future<void> _decryptMessageUltraFluid(Message message) async {
     if (message.decryptedText != null) return; // Déjà déchiffré
     
     try {
@@ -147,20 +157,26 @@ class _ConversationScreenState extends State<ConversationScreen> {
       message.signatureValid = false;
       message.decryptedText = decryptedText;
       
-      // Mise à jour granulaire : seulement ce MessageBubble
+      // Mise à jour ultra-granulaire : seulement via ValueNotifier
       if (mounted) {
-        setState(() {}); // Rebuild local seulement
+        // Utiliser ValueNotifier pour une mise à jour non-bloquante
+        _messageUpdateNotifier.value = message.id;
       }
       
-    } catch (e) {
-      debugPrint('⚠️ Erreur déchiffrement direct message ${message.id}: $e');
-      // Fallback sur le déchiffrement normal si nécessaire
-      try {
-        await _conversationProvider.decryptMessageIfNeeded(message);
-      } catch (fallbackError) {
-        debugPrint('❌ Erreur fallback déchiffrement message ${message.id}: $fallbackError');
-      }
-    }
+     } catch (e) {
+       debugPrint('⚠️ Erreur déchiffrement ultra-fluide message ${message.id}: $e');
+       // Fallback sur le déchiffrement normal si nécessaire
+       try {
+         await _conversationProvider.decryptMessageIfNeeded(message);
+         
+         // CORRECTION: Déclencher la mise à jour UI après le fallback
+         if (mounted) {
+           _messageUpdateNotifier.value = message.id;
+         }
+       } catch (fallbackError) {
+         debugPrint('❌ Erreur fallback déchiffrement message ${message.id}: $fallbackError');
+       }
+     }
   }
 
   /// Charge les messages plus anciens en préservant la position de scroll (reverse:true)
@@ -282,6 +298,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _conversationProvider.removeListener(_onMessagesUpdated);
     _textController.dispose();
     _scrollController.dispose();
+    _messageUpdateNotifier.dispose(); // Nettoyer le ValueNotifier
     _typingTimer?.cancel(); // Annuler le timer de frappe
     super.dispose();
   }
@@ -365,21 +382,27 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           ),
                         ),
                       
-                      // Message
-                      MessageBubble(
-                        key: ValueKey(msg.id), // Clé stable
-                        isMe: msg.senderId == currentUserId,
-                        text: msg.decryptedText ?? '[Chiffré]',
-                        time: msgDate.toHm(),
-                        signatureValid: msg.signatureValid,
-                        senderInitial: msg.senderId == currentUserId ? '' : msg.senderId[0].toUpperCase(),
-                        senderUsername: context.read<ConversationProvider>().getUsernameForUser(msg.senderId),
-                        senderUserId: msg.senderId,
-                        conversationId: widget.conversationId,
-                        sameAsPrevious: sameAsPrevious,
-                        sameAsNext: sameAsNext,
-                        maxWidth: context.maxBubbleWidth,
-                        messageId: msg.id,
+                      // Message avec ValueListenableBuilder pour mise à jour ultra-granulaire
+                      ValueListenableBuilder<String?>(
+                        valueListenable: _messageUpdateNotifier,
+                        builder: (context, updatedMessageId, child) {
+                          // Toujours rebuild pour avoir les données à jour (signatureValid, text, etc.)
+                          return MessageBubble(
+                            key: ValueKey(msg.id), // Clé stable
+                            isMe: msg.senderId == currentUserId,
+                            text: msg.decryptedText ?? '[Chiffré]',
+                            time: msgDate.toHm(),
+                            signatureValid: msg.signatureValid,
+                            senderInitial: msg.senderId == currentUserId ? '' : msg.senderId[0].toUpperCase(),
+                            senderUsername: context.read<ConversationProvider>().getUsernameForUser(msg.senderId),
+                            senderUserId: msg.senderId,
+                            conversationId: widget.conversationId,
+                            sameAsPrevious: sameAsPrevious,
+                            sameAsNext: sameAsNext,
+                            maxWidth: context.maxBubbleWidth,
+                            messageId: msg.id,
+                          );
+                        },
                       ),
                     ],
                   );
