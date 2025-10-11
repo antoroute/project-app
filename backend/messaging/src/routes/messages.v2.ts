@@ -62,9 +62,9 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
+    const { id } = req.params as any;
     try {
       const userId = (req.user as any).sub;
-      const { id } = req.params as any;
       const { cursor, limit = 50 } = req.query as any;
 
       // ACL: vérifier que l'utilisateur est membre de la conversation
@@ -95,6 +95,10 @@ export default async function routes(app: FastifyInstance) {
         }
       }
 
+      // CORRECTION: Requête SQL avec validation des paramètres
+      const queryParams = [id, cursorDate, limit];
+      console.log(`🔍 Paramètres de requête: conversationId=${id}, cursor=${cursorDate}, limit=${limit}`);
+      
       const rows = await app.db.any(`
         SELECT m.id, m.conversation_id as "convId",
                encode(m.sender_eph_pub,'base64') as "sender_eph_pub",
@@ -112,11 +116,18 @@ export default async function routes(app: FastifyInstance) {
            AND ($2::timestamp IS NULL OR m.sent_at < $2)
          ORDER BY m.sent_at DESC
          LIMIT $3
-      `, [id, cursorDate, limit]);
+      `, queryParams);
       console.log(`📥 Messages found for conversation ${id}: ${rows.length} messages`);
-      return { items: rows, nextCursor: rows.length ? rows[rows.length-1].sentAt : null };
+      console.log(`📅 Cursor utilisé: ${cursorDate ? cursorDate.toISOString() : 'null'}`);
+      console.log(`📊 Limit utilisé: ${limit}`);
+      
+      // CORRECTION: nextCursor doit être le timestamp du message le plus ancien de cette page
+      const nextCursor = rows.length > 0 ? rows[rows.length - 1].sentAt : null;
+      console.log(`📄 Next cursor: ${nextCursor}`);
+      
+      return { items: rows, nextCursor };
     } catch (e: any) {
-      console.error(`❌ Erreur GET /conversations/${req.params?.id}/messages:`, e);
+      console.error(`❌ Erreur GET /conversations/${id}/messages:`, e);
       return reply.code(500).send({ error: 'internal_server_error', details: e.message });
     }
   });
