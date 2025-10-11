@@ -62,61 +62,62 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
-    const { id } = req.params as any;
-    const { cursor, limit = 50 } = req.query as any;
+    try {
+      const userId = (req.user as any).sub;
+      const { id } = req.params as any;
+      const { cursor, limit = 50 } = req.query as any;
 
-    // ACL: vérifier que l'utilisateur est membre de la conversation
-    const membership = await app.db.any(
-      `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
-      [id, userId]
-    );
-    console.log(`📥 GET /conversations/${id}/messages - userId: ${userId}, membership: ${membership.length > 0 ? 'OK' : 'FORBIDDEN'}`);
-    
-    if (membership.length === 0) {
-      return reply.code(403).send({ error: 'forbidden' });
-    }
-
-    // CORRECTION: Validation et conversion du cursor
-    let cursorDate = null;
-    if (cursor) {
-      try {
-        const cursorMs = Number(cursor);
-        if (isNaN(cursorMs) || cursorMs < 0) {
-          console.log(`⚠️ Cursor invalide: ${cursor}`);
-          return reply.code(400).send({ error: 'invalid_cursor' });
-        }
-        cursorDate = new Date(cursorMs);
-        console.log(`📅 Cursor converti: ${cursor} -> ${cursorDate.toISOString()}`);
-      } catch (e) {
-        console.log(`❌ Erreur conversion cursor: ${e}`);
-        return reply.code(400).send({ error: 'invalid_cursor_format' });
+      // ACL: vérifier que l'utilisateur est membre de la conversation
+      const membership = await app.db.any(
+        `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
+        [id, userId]
+      );
+      console.log(`📥 GET /conversations/${id}/messages - userId: ${userId}, membership: ${membership.length > 0 ? 'OK' : 'FORBIDDEN'}`);
+      
+      if (membership.length === 0) {
+        return reply.code(403).send({ error: 'forbidden' });
       }
-    }
 
-    const rows = await app.db.any(`
-      SELECT m.id, m.conversation_id as "convId",
-             encode(m.sender_eph_pub,'base64') as "sender_eph_pub",
-             encode(m.iv,'base64') as "iv",
-             encode(m.ciphertext,'base64') as "ciphertext",
-             m.wrapped_keys as "recipients",
-             REPLACE(REPLACE(encode(m.sig,'base64'), '\r', ''), '\n', '') as "sig",
-             encode(m.salt,'base64') as "salt",
-             m.alg, m.v, m.sender_id as "senderUserId", m.sender_device_id as "senderDeviceId",
-             m.message_id as "messageId", extract(epoch from m.sent_at)::bigint as "sentAt",
-             c.group_id as "groupId"
-        FROM messages m
-        JOIN conversations c ON c.id = m.conversation_id
-       WHERE m.conversation_id = $1
-         AND ($2::timestamp IS NULL OR m.sent_at < $2)
-       ORDER BY m.sent_at DESC
-       LIMIT $3
-    `, [id, cursorDate, limit]);
-    console.log(`📥 Messages found for conversation ${id}: ${rows.length} messages`);
-    return { items: rows, nextCursor: rows.length ? rows[rows.length-1].sentAt : null };
-  } catch (e: any) {
-    console.error(`❌ Erreur GET /conversations/${id}/messages:`, e);
-    return reply.code(500).send({ error: 'internal_server_error', details: e.message });
-  }
+      // CORRECTION: Validation et conversion du cursor
+      let cursorDate = null;
+      if (cursor) {
+        try {
+          const cursorMs = Number(cursor);
+          if (isNaN(cursorMs) || cursorMs < 0) {
+            console.log(`⚠️ Cursor invalide: ${cursor}`);
+            return reply.code(400).send({ error: 'invalid_cursor' });
+          }
+          cursorDate = new Date(cursorMs);
+          console.log(`📅 Cursor converti: ${cursor} -> ${cursorDate.toISOString()}`);
+        } catch (e) {
+          console.log(`❌ Erreur conversion cursor: ${e}`);
+          return reply.code(400).send({ error: 'invalid_cursor_format' });
+        }
+      }
+
+      const rows = await app.db.any(`
+        SELECT m.id, m.conversation_id as "convId",
+               encode(m.sender_eph_pub,'base64') as "sender_eph_pub",
+               encode(m.iv,'base64') as "iv",
+               encode(m.ciphertext,'base64') as "ciphertext",
+               m.wrapped_keys as "recipients",
+               REPLACE(REPLACE(encode(m.sig,'base64'), '\r', ''), '\n', '') as "sig",
+               encode(m.salt,'base64') as "salt",
+               m.alg, m.v, m.sender_id as "senderUserId", m.sender_device_id as "senderDeviceId",
+               m.message_id as "messageId", extract(epoch from m.sent_at)::bigint as "sentAt",
+               c.group_id as "groupId"
+          FROM messages m
+          JOIN conversations c ON c.id = m.conversation_id
+         WHERE m.conversation_id = $1
+           AND ($2::timestamp IS NULL OR m.sent_at < $2)
+         ORDER BY m.sent_at DESC
+         LIMIT $3
+      `, [id, cursorDate, limit]);
+      console.log(`📥 Messages found for conversation ${id}: ${rows.length} messages`);
+      return { items: rows, nextCursor: rows.length ? rows[rows.length-1].sentAt : null };
+    } catch (e: any) {
+      console.error(`❌ Erreur GET /conversations/${req.params?.id}/messages:`, e);
+      return reply.code(500).send({ error: 'internal_server_error', details: e.message });
+    }
   });
 }
