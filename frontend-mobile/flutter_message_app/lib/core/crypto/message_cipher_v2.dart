@@ -17,6 +17,60 @@ class MessageCipherV2 {
 
   static String _b64(Uint8List bytes) => base64.encode(bytes);
   
+  /// Valide les données V2 d'un message avant déchiffrement
+  static bool _validateMessageV2Data(Map<String, dynamic> messageV2) {
+    try {
+      // Vérifier les champs obligatoires
+      final requiredFields = [
+        'v', 'alg', 'groupId', 'convId', 'messageId', 'sentAt',
+        'sender', 'recipients', 'iv', 'ciphertext', 'sig'
+      ];
+      
+      for (final field in requiredFields) {
+        if (!messageV2.containsKey(field) || messageV2[field] == null) {
+          debugPrint('❌ Champ manquant dans V2: $field');
+          return false;
+        }
+      }
+      
+      // Vérifier la structure du sender
+      final sender = messageV2['sender'] as Map<String, dynamic>?;
+      if (sender == null || 
+          !sender.containsKey('userId') || 
+          !sender.containsKey('deviceId') ||
+          !sender.containsKey('eph_pub')) {
+        debugPrint('❌ Structure sender invalide');
+        return false;
+      }
+      
+      // Vérifier les recipients
+      final recipients = messageV2['recipients'] as List<dynamic>?;
+      if (recipients == null || recipients.isEmpty) {
+        debugPrint('❌ Aucun recipient trouvé');
+        return false;
+      }
+      
+      // Vérifier que les données Base64 sont valides
+      final ciphertext = messageV2['ciphertext'] as String?;
+      if (ciphertext == null || ciphertext.isEmpty) {
+        debugPrint('❌ Ciphertext vide');
+        return false;
+      }
+      
+      try {
+        base64.decode(ciphertext);
+      } catch (e) {
+        debugPrint('❌ Ciphertext Base64 invalide: $e');
+        return false;
+      }
+      
+      return true;
+    } catch (e) {
+      debugPrint('❌ Erreur validation V2: $e');
+      return false;
+    }
+  }
+  
   /// Nettoie et valide une chaîne Base64
   static String _cleanBase64(String input) {
     // Supprimer les espaces, retours à la ligne et caractères invalides
@@ -67,8 +121,26 @@ class MessageCipherV2 {
       sb.write(m['nonce']);
     }
     sb.write(payload['iv']);
-    sb.write(payload['ciphertext']);
-    return Uint8List.fromList(utf8.encode(sb.toString()));
+    
+    // SOLUTION 1: Signer le hash du ciphertext au lieu du ciphertext complet
+    // Cela résout le problème de validation de signature pour les messages longs
+    final ciphertextB64 = payload['ciphertext'] as String;
+    final ciphertextHash = crypto.sha256.convert(utf8.encode(ciphertextB64)).toString();
+    
+    // Logs de débogage pour les messages longs
+    if (ciphertextB64.length > 10000) {
+      debugPrint('🔍 Signature message long: ${ciphertextB64.length} chars Base64');
+      debugPrint('🔍 Hash du ciphertext: ${ciphertextHash.substring(0, 16)}...');
+    }
+    
+    sb.write(ciphertextHash);
+    
+    final canonicalString = sb.toString();
+    if (canonicalString.length > 50000) {
+      debugPrint('⚠️ Chaîne canonique très longue: ${canonicalString.length} chars');
+    }
+    
+    return Uint8List.fromList(utf8.encode(canonicalString));
   }
 
   static Future<Map<String, dynamic>> encrypt({
@@ -192,6 +264,11 @@ class MessageCipherV2 {
     required Map<String, dynamic> messageV2,
     required KeyDirectoryService keyDirectory,
   }) async {
+    // CORRECTION: Validation des données V2 avant déchiffrement
+    if (!_validateMessageV2Data(messageV2)) {
+      throw Exception('Données V2 invalides ou incomplètes');
+    }
+    
     // Vérifier que les champs requis ne sont pas null
     final ephPubB64 = messageV2['senderEphPub'] as String?;
     if (ephPubB64 == null) {
@@ -363,10 +440,25 @@ class MessageCipherV2 {
     final sigString = messageV2['sig'] as String;
     final sigBytes = base64.decode(_cleanBase64(sigString));
     
+    // Logs de débogage pour les messages longs
+    final ciphertextB64 = messageV2['ciphertext'] as String;
+    if (ciphertextB64.length > 10000) {
+      debugPrint('🔍 Validation signature message long: ${ciphertextB64.length} chars Base64');
+      debugPrint('🔍 Signature reçue: ${sigString.substring(0, math.min(20, sigString.length))}...');
+    }
+    
     final verified = await ed.verify(
       _concatCanonical(messageV2),
       signature: Signature(sigBytes, publicKey: pub),
     );
+    
+    // Log du résultat de validation pour les messages longs
+    if (ciphertextB64.length > 10000) {
+      debugPrint('🔍 Signature validée: $verified');
+      if (!verified) {
+        debugPrint('❌ Échec validation signature pour message long');
+      }
+    }
 
     // decrypt content avec validation Base64
     String ivB64 = messageV2['iv'] as String;

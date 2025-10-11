@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/conversation_provider.dart';
 
@@ -25,7 +26,7 @@ class MessageBubble extends StatefulWidget {
   final String? messageId; // NOUVEAU: ID du message pour le déchiffrement lazy
 
   const MessageBubble({
-    Key? key,
+    super.key,
     required this.isMe,
     required this.text,
     this.time,
@@ -38,7 +39,7 @@ class MessageBubble extends StatefulWidget {
     this.sameAsNext = false,
     required this.maxWidth,
     this.messageId, // NOUVEAU: ID du message pour le déchiffrement lazy
-  }) : super(key: key);
+  });
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -47,6 +48,43 @@ class MessageBubble extends StatefulWidget {
 class _MessageBubbleState extends State<MessageBubble> {
   bool _hasDecrypted = false;
   String _currentText = '';
+
+  /// Copie le texte du message dans le presse-papiers
+  Future<void> _copyMessage() async {
+    if (_currentText.isEmpty || _currentText == '[Chiffré]') {
+      return; // Ne pas copier les messages non déchiffrés
+    }
+    
+    try {
+      // Feedback haptique
+      HapticFeedback.lightImpact();
+      
+      await Clipboard.setData(ClipboardData(text: _currentText));
+      
+      // Afficher un feedback visuel
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.copy, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text('Message copié dans le presse-papiers'),
+              ],
+            ),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            backgroundColor: Colors.green.shade600,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Erreur lors de la copie: $e');
+    }
+  }
 
   @override
   void initState() {
@@ -265,46 +303,66 @@ class _MessageBubbleState extends State<MessageBubble> {
             // avatar ou espace
             _avatarOrSpacer(context),
 
-            // la bulle avec gestion d'overflow
+            // la bulle avec gestion d'overflow et copie longue pression
             Flexible(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: widget.maxWidth),
-                child: Container(
-                  padding: ChatStyles.bubblePadding,
-                  decoration: BoxDecoration(
-                    color: bubbleColor,
-                    borderRadius: BorderRadius.only(
-                      topLeft: ChatStyles.bubbleRadius,
-                      topRight: ChatStyles.bubbleRadius,
-                      bottomLeft:
-                          widget.isMe ? ChatStyles.bubbleRadius : Radius.zero,
-                      bottomRight:
-                          widget.isMe ? Radius.zero : ChatStyles.bubbleRadius,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: widget.isMe
-                        ? CrossAxisAlignment.end
-                        : CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Texte avec gestion d'overflow
-                      Text(
-                        _currentText, // CORRECTION: Utiliser le texte déchiffré
-                        style: messageStyle,
-                        overflow: TextOverflow.visible,
-                        softWrap: true,
+                child: GestureDetector(
+                  onLongPress: _copyMessage,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.only(
+                        topLeft: ChatStyles.bubbleRadius,
+                        topRight: ChatStyles.bubbleRadius,
+                        bottomLeft:
+                            widget.isMe ? ChatStyles.bubbleRadius : Radius.zero,
+                        bottomRight:
+                            widget.isMe ? Radius.zero : ChatStyles.bubbleRadius,
                       ),
-                      if (widget.time != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            widget.time!, 
-                            style: timeStyle,
-                            overflow: TextOverflow.visible,
+                      onTap: () {
+                        // Feedback léger au tap pour indiquer l'interactivité
+                        HapticFeedback.selectionClick();
+                      },
+                      child: Container(
+                        padding: ChatStyles.bubblePadding,
+                        decoration: BoxDecoration(
+                          color: bubbleColor,
+                          borderRadius: BorderRadius.only(
+                            topLeft: ChatStyles.bubbleRadius,
+                            topRight: ChatStyles.bubbleRadius,
+                            bottomLeft:
+                                widget.isMe ? ChatStyles.bubbleRadius : Radius.zero,
+                            bottomRight:
+                                widget.isMe ? Radius.zero : ChatStyles.bubbleRadius,
                           ),
                         ),
-                    ],
+                        child: Column(
+                          crossAxisAlignment: widget.isMe
+                              ? CrossAxisAlignment.end
+                              : CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Texte avec gestion d'overflow
+                            Text(
+                              _currentText, // CORRECTION: Utiliser le texte déchiffré
+                              style: messageStyle,
+                              overflow: TextOverflow.visible,
+                              softWrap: true,
+                            ),
+                            if (widget.time != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  widget.time!, 
+                                  style: timeStyle,
+                                  overflow: TextOverflow.visible,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),

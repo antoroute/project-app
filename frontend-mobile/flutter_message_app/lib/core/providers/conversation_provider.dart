@@ -294,6 +294,22 @@ class ConversationProvider extends ChangeNotifier {
         return errorText;
       }
       
+      // CORRECTION: Gérer les erreurs de format (messages corrompus)
+      if (e.toString().contains('FormatException') || e.toString().contains('Unexpected extension byte')) {
+        final errorText = '[📄 Message corrompu - Données invalides]';
+        _decryptedCache[msgId] = errorText;
+        message.decryptedText = errorText;
+        return errorText;
+      }
+      
+      // CORRECTION: Gérer les champs manquants dans les données V2
+      if (e.toString().contains('senderEphPub is null') || e.toString().contains('is null in messageV2')) {
+        final errorText = '[🔧 Message incomplet - Données manquantes]';
+        _decryptedCache[msgId] = errorText;
+        message.decryptedText = errorText;
+        return errorText;
+      }
+      
       final errorText = '[Erreur déchiffrement: ${e.toString().substring(0, e.toString().length > 50 ? 50 : e.toString().length)}]';
       _decryptedCache[msgId] = errorText;
       message.decryptedText = errorText;
@@ -694,6 +710,14 @@ class ConversationProvider extends ChangeNotifier {
       return false;
     } catch (e) {
       debugPrint('❌ _fetchMessagesWithHasMore error: $e');
+      
+      // CORRECTION: Gérer spécifiquement les erreurs 500 du backend
+      if (e.toString().contains('Erreur 500')) {
+        debugPrint('🚨 Erreur serveur 500 - Problème côté backend');
+        // Ne pas arrêter complètement le chargement, juste cette requête
+        return false;
+      }
+      
       return false;
     }
   }
@@ -720,10 +744,33 @@ class ConversationProvider extends ChangeNotifier {
     
     // Utiliser le timestamp du message le plus ancien comme cursor
     final oldestMessage = messages.reduce((a, b) => a.timestamp < b.timestamp ? a : b);
-    final cursorTimestamp = oldestMessage.timestamp;
+    
+    // CORRECTION: Le backend attend un timestamp en millisecondes pour new Date()
+    // Vérifier que le timestamp est valide (pas dans le futur)
+    final timestamp = oldestMessage.timestamp;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    
+    debugPrint('🔍 Debug timestamp - Message: ${oldestMessage.id}, Timestamp: $timestamp, Maintenant: $now');
+    
+    if (timestamp > now) {
+      debugPrint('⚠️ Timestamp invalide détecté: $timestamp (maintenant: $now)');
+      debugPrint('⚠️ Message problématique: ${oldestMessage.id}, Date: ${DateTime.fromMillisecondsSinceEpoch(timestamp * 1000)}');
+      return false;
+    }
+    
+    // Convertir en millisecondes pour le backend
+    final cursorMs = timestamp * 1000;
+    debugPrint('🔄 Chargement messages anciens avec cursor: $cursorMs (timestamp ms)');
     
     try {
-      final hasMore = await _fetchMessagesWithHasMore(context, conversationId, limit: limit, cursor: cursorTimestamp.toString());
+      final hasMore = await _fetchMessagesWithHasMore(
+        context, 
+        conversationId, 
+        limit: limit, 
+        cursor: cursorMs.toString()
+      );
+      
+      debugPrint('📄 Chargement terminé - hasMore: $hasMore');
       return hasMore;
     } catch (e) {
       debugPrint('❌ fetchOlderMessages error: $e');

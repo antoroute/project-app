@@ -61,8 +61,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   /// Gestionnaire de notification de scroll pour reverse:true
   bool _onScrollNotification(ScrollNotification n) {
-    // Near top de la liste inversée -> charger anciens
-    if (n.metrics.pixels >= n.metrics.maxScrollExtent - 100 && _hasMoreOlderMessages) {
+    // CORRECTION: Avec reverse:true, on détecte quand on approche du haut (maxScrollExtent)
+    if (n.metrics.pixels >= n.metrics.maxScrollExtent - 100 && _hasMoreOlderMessages && !_isLoading) {
+      debugPrint('🔄 Scroll détecté - Chargement messages anciens...');
       _loadOlderPreservingOffset();
     }
     return false;
@@ -181,10 +182,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   /// Charge les messages plus anciens en préservant la position de scroll (reverse:true)
   Future<void> _loadOlderPreservingOffset() async {
-    if (_isLoading || !_hasMoreOlderMessages) return;
+    if (_isLoading || !_hasMoreOlderMessages) {
+      debugPrint('⏸️ Chargement ignoré - isLoading: $_isLoading, hasMore: $_hasMoreOlderMessages');
+      return;
+    }
     
-    if (!_scrollController.hasClients) return;
+    if (!_scrollController.hasClients) {
+      debugPrint('⏸️ ScrollController non disponible');
+      return;
+    }
+    
     final before = _scrollController.position.maxScrollExtent;
+    final currentMessages = _conversationProvider.messagesFor(widget.conversationId);
+    debugPrint('🔄 Début chargement - Messages actuels: ${currentMessages.length}, ScrollExtent: $before');
     
     setState(() => _isLoading = true);
     try {
@@ -193,6 +203,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
         widget.conversationId,
         limit: _messagesPerPage,
       );
+      
+      final newMessages = _conversationProvider.messagesFor(widget.conversationId);
+      debugPrint('📄 Chargement terminé - Nouveaux messages: ${newMessages.length - currentMessages.length}, hasMore: $hasMore');
       
       // Arrêter le chargement s'il n'y a plus de messages
       if (!hasMore) {
@@ -204,7 +217,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_scrollController.hasClients) return;
         final after = _scrollController.position.maxScrollExtent;
-        _scrollController.jumpTo(_scrollController.offset + (after - before)); // pas de "saut"
+        final offsetDiff = after - before;
+        debugPrint('📍 Ajustement scroll - Avant: $before, Après: $after, Différence: $offsetDiff');
+        _scrollController.jumpTo(_scrollController.offset + offsetDiff);
       });
     } catch (e) {
       debugPrint('❌ Erreur chargement messages anciens: $e');
@@ -339,8 +354,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
               child: ListView.builder(
                 reverse: true, // Clé anti-jump
                 controller: _scrollController,
-                itemCount: messages.length,
+                itemCount: messages.length + (_isLoading ? 1 : 0), // +1 pour l'indicateur de chargement
                 itemBuilder: (_, i) {
+                  // CORRECTION: Gérer l'indicateur de chargement
+                  if (_isLoading && i == messages.length) {
+                    return const Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Center(
+                        child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
+                  
                   final msg = messages[messages.length - 1 - i]; // dernier d'abord
                   final currentUserId = context.read<AuthProvider>().userId ?? '';
                   
