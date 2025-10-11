@@ -77,6 +77,23 @@ export default async function routes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
+    // CORRECTION: Validation et conversion du cursor
+    let cursorDate = null;
+    if (cursor) {
+      try {
+        const cursorMs = Number(cursor);
+        if (isNaN(cursorMs) || cursorMs < 0) {
+          console.log(`⚠️ Cursor invalide: ${cursor}`);
+          return reply.code(400).send({ error: 'invalid_cursor' });
+        }
+        cursorDate = new Date(cursorMs);
+        console.log(`📅 Cursor converti: ${cursor} -> ${cursorDate.toISOString()}`);
+      } catch (e) {
+        console.log(`❌ Erreur conversion cursor: ${e}`);
+        return reply.code(400).send({ error: 'invalid_cursor_format' });
+      }
+    }
+
     const rows = await app.db.any(`
       SELECT m.id, m.conversation_id as "convId",
              encode(m.sender_eph_pub,'base64') as "sender_eph_pub",
@@ -94,8 +111,12 @@ export default async function routes(app: FastifyInstance) {
          AND ($2::timestamp IS NULL OR m.sent_at < $2)
        ORDER BY m.sent_at DESC
        LIMIT $3
-    `, [id, cursor ? new Date(Number(cursor)) : null, limit]);
+    `, [id, cursorDate, limit]);
     console.log(`📥 Messages found for conversation ${id}: ${rows.length} messages`);
     return { items: rows, nextCursor: rows.length ? rows[rows.length-1].sentAt : null };
+  } catch (e: any) {
+    console.error(`❌ Erreur GET /conversations/${id}/messages:`, e);
+    return reply.code(500).send({ error: 'internal_server_error', details: e.message });
+  }
   });
 }
