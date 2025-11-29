@@ -1309,6 +1309,31 @@ class ConversationProvider extends ChangeNotifier {
         return;
       }
       
+      // CORRECTION CRITIQUE: Vérifier aussi les devices révoqués avant de republier
+      // pour éviter de réactiver un device révoqué
+      final myUserId = _authProvider.userId;
+      if (myUserId != null) {
+        // Vérifier si le device est révoqué en utilisant l'endpoint my-devices
+        try {
+          final myDevices = await _apiService.fetchMyGroupDeviceKeys(groupId);
+          final myDevice = myDevices.firstWhere(
+            (d) => d['deviceId'] == deviceId && d['userId'] == myUserId,
+            orElse: () => <String, dynamic>{},
+          );
+          
+          if (myDevice.isNotEmpty) {
+            final status = myDevice['status'] as String? ?? 'active';
+            if (status == 'revoked') {
+              debugPrint('⚠️ Device $deviceId est révoqué, publication refusée');
+              return; // Ne pas republier un device révoqué
+            }
+          }
+        } catch (e) {
+          debugPrint('⚠️ Erreur vérification statut device: $e');
+          // Continuer si l'endpoint n'est pas disponible (fallback)
+        }
+      }
+      
       final recipients = await _keyDirectory.getGroupDevices(groupId);
       final myKeysInGroup = recipients.where((r) => r.deviceId == deviceId).toList();
       
@@ -1322,16 +1347,25 @@ class ConversationProvider extends ChangeNotifier {
         final sigPub = pubKeys['pk_sig']!;
         final kemPub = pubKeys['pk_kem']!;
         
-        await _apiService.publishGroupDeviceKey(
-          groupId: groupId,
-          deviceId: deviceId,
-          pkSigB64: sigPub,
-          pkKemB64: kemPub,
-        );
-        
-        // Invalider le cache pour que les nouvelles clés soient récupérées
-        await _keyDirectory.fetchGroupDevices(groupId); // Force refresh du cache
-        debugPrint('✅ Clés publiées et cache mis à jour');
+        try {
+          await _apiService.publishGroupDeviceKey(
+            groupId: groupId,
+            deviceId: deviceId,
+            pkSigB64: sigPub,
+            pkKemB64: kemPub,
+          );
+          
+          // Invalider le cache pour que les nouvelles clés soient récupérées
+          await _keyDirectory.fetchGroupDevices(groupId); // Force refresh du cache
+          debugPrint('✅ Clés publiées et cache mis à jour');
+        } catch (e) {
+          // Si l'erreur est "device_revoked", c'est normal et on ne doit pas la propager
+          if (e.toString().contains('device_revoked') || e.toString().contains('403')) {
+            debugPrint('⚠️ Publication refusée: device révoqué');
+            return;
+          }
+          rethrow;
+        }
       }
     } catch (e) {
       debugPrint('❌ Erreur publication automatique clés: $e');

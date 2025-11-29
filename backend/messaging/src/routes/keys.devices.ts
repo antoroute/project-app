@@ -91,6 +91,18 @@ export default async function routes(app: FastifyInstance) {
     const { groupId } = req.params as any;
     const { deviceId, pk_sig, pk_kem, key_version } = req.body as any;
 
+    // CORRECTION CRITIQUE: Ne pas réactiver un device révoqué lors de la publication
+    // Si le device est révoqué, on refuse la publication pour éviter la réactivation automatique
+    const existing = await app.db.oneOrNone(
+      `SELECT status FROM group_device_keys 
+       WHERE group_id=$1 AND user_id=$2 AND device_id=$3`,
+      [groupId, userId, deviceId]
+    );
+    
+    if (existing && existing.status === 'revoked') {
+      return reply.code(403).send({ error: 'device_revoked', message: 'Cannot publish keys for a revoked device' });
+    }
+    
     await app.db.none(
       `INSERT INTO group_device_keys(group_id, user_id, device_id, pk_sig, pk_kem, key_version, status)
        VALUES($1,$2,$3, decode($4,'base64'), decode($5,'base64'), $6, 'active')
