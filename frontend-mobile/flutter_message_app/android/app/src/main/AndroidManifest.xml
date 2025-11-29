@@ -9,7 +9,7 @@
     <uses-feature android:name="android.hardware.fingerprint" android:required="false" />
 
     <application
-        android:label="flutter_message_app"
+        android:label="TrustCircle"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 import 'package:flutter_message_app/core/services/key_directory_service.dart';
+import 'package:flutter_message_app/core/services/message_key_cache.dart';
 import 'package:uuid/uuid.dart';
 
 class MessageCipherV2 {
@@ -122,7 +123,7 @@ class MessageCipherV2 {
     }
     sb.write(payload['iv']);
     
-    // SOLUTION 1: Signer le hash du ciphertext au lieu du ciphertext complet
+    // Signer le hash du ciphertext au lieu du ciphertext complet
     // Cela résout le problème de validation de signature pour les messages longs
     final ciphertextB64 = payload['ciphertext'] as String;
     final ciphertextHash = crypto.sha256.convert(utf8.encode(ciphertextB64)).toString();
@@ -256,7 +257,8 @@ class MessageCipherV2 {
     return payload;
   }
 
-  /// Déchiffrement rapide SANS vérification de signature (pour le chargement initial)
+  /// 🚀 OPTIMISATION: Déchiffrement rapide SANS vérification de signature
+  /// Utilise le cache de message keys pour éviter la re-dérivation
   static Future<Map<String, dynamic>> decryptFast({
     required String groupId,
     required String myUserId,
@@ -264,64 +266,78 @@ class MessageCipherV2 {
     required Map<String, dynamic> messageV2,
     required KeyDirectoryService keyDirectory,
   }) async {
-    // CORRECTION: Validation des données V2 avant déchiffrement
+    // Validation des données V2 avant déchiffrement
     if (!_validateMessageV2Data(messageV2)) {
       throw Exception('Données V2 invalides ou incomplètes');
     }
     
-    // Vérifier que les champs requis ne sont pas null
-    final ephPubB64 = messageV2['senderEphPub'] as String?;
-    if (ephPubB64 == null) {
-      throw Exception('senderEphPub is null in messageV2');
-    }
-
-    // unwrap mk (même logique que decrypt normal)
-    final x = X25519();
-    final myKey = await KeyManagerFinal.instance.loadX25519KeyPair(groupId, myDeviceId);
-    final shared = await x.sharedSecretKey(
-      keyPair: myKey,
-      remotePublicKey: SimplePublicKey(base64.decode(_cleanBase64(ephPubB64)), type: KeyPairType.x25519),
-    );
+    final messageId = messageV2['messageId'] as String;
     
-    // Récupérer la salt depuis le payload (ou fallback si pas disponible)
-    final Uint8List salt;
-    if (messageV2.containsKey('salt')) {
-      salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
+    // 🚀 OPTIMISATION: Essayer d'abord de récupérer la message key depuis le cache
+    final cachedKey = MessageKeyCache.instance.getMessageKey(messageId);
+    Uint8List mkBytes;
+    
+    if (cachedKey != null) {
+      // Clé en cache : utiliser directement (BEAUCOUP plus rapide)
+      mkBytes = cachedKey;
     } else {
-      // Fallback pour compatibilité avec anciens messages
-      salt = Uint8List.fromList(
-        crypto.sha256.convert(utf8.encode('${messageV2['messageId']}:${_b64(_randomBytes(16))}')).bytes,
+      // Clé pas en cache : dériver normalement
+      // Récupérer l'eph_pub depuis le sender
+      final sender = messageV2['sender'] as Map<String, dynamic>;
+      final ephPubB64 = sender['eph_pub'] as String;
+      
+      if (ephPubB64.isEmpty) {
+        throw Exception('sender.eph_pub is empty in messageV2');
+      }
+
+      // unwrap mk (même logique que decrypt normal)
+      final x = X25519();
+      final myKey = await KeyManagerFinal.instance.loadX25519KeyPair(groupId, myDeviceId);
+      final shared = await x.sharedSecretKey(
+        keyPair: myKey,
+        remotePublicKey: SimplePublicKey(base64.decode(_cleanBase64(ephPubB64)), type: KeyPairType.x25519),
       );
+      
+      // Récupérer la salt depuis le payload
+      if (!messageV2.containsKey('salt')) {
+        throw Exception('salt is required in messageV2');
+      }
+      final salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
+
+      final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
+      final kek = await _hkdf.deriveKey(
+        secretKey: SecretKey(Uint8List.fromList(await shared.extractBytes())),
+        nonce: salt,
+        info: utf8.encode(infoData),
+      );
+      final kekBytes = Uint8List.fromList(await kek.extractBytes());
+
+      // Récupérer les recipients
+      final recipients = messageV2['recipients'] as List<dynamic>;
+      if (recipients.isEmpty) {
+        throw Exception('No recipients found in messageV2');
+      }
+      
+      final mine = recipients.firstWhere(
+        (w) => w['userId'] == myUserId && w['deviceId'] == myDeviceId,
+        orElse: () => throw Exception('No wrap for this device'),
+      );
+
+      // unwrap mk
+      final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
+      final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
+      final macLen = 16; // AES-GCM tag size
+      final cipherLen = wrapBytes.length - macLen;
+      final wrapBox = SecretBox(
+        wrapBytes.sublist(0, cipherLen),
+        nonce: wrapNonce,
+        mac: Mac(wrapBytes.sublist(cipherLen)),
+      );
+      mkBytes = Uint8List.fromList(await _aead.decrypt(
+        wrapBox,
+        secretKey: SecretKey(kekBytes),
+      ));
     }
-
-    final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
-    final kek = await _hkdf.deriveKey(
-      secretKey: SecretKey(Uint8List.fromList(await shared.extractBytes())),
-      nonce: salt,
-      info: utf8.encode(infoData),
-    );
-    final kekBytes = Uint8List.fromList(await kek.extractBytes());
-
-    // Trouver notre entrée dans wrappedKeys
-    final wrappedKeys = messageV2['wrappedKeys'] as List<dynamic>;
-    final mine = wrappedKeys.firstWhere(
-      (w) => w['userId'] == myUserId && w['deviceId'] == myDeviceId,
-    );
-
-    // unwrap mk
-    final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
-    final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
-    final macLen = 16; // AES-GCM tag size
-    final cipherLen = wrapBytes.length - macLen;
-    final wrapBox = SecretBox(
-      wrapBytes.sublist(0, cipherLen),
-      nonce: wrapNonce,
-      mac: Mac(wrapBytes.sublist(cipherLen)),
-    );
-    final mkBytes = await _aead.decrypt(
-      wrapBox,
-      secretKey: SecretKey(kekBytes),
-    );
 
     // decrypt content avec validation Base64 (SANS vérification de signature)
     String ivB64 = messageV2['iv'] as String;
@@ -358,11 +374,14 @@ class MessageCipherV2 {
     required Map<String, dynamic> messageV2,
     required KeyDirectoryService keyDirectory,
   }) async {
-    // select recipient wrap
-    final List<dynamic> recips = messageV2['recipients'] as List<dynamic>;
+    // Récupérer les recipients
+    final recipients = messageV2['recipients'] as List<dynamic>;
+    if (recipients.isEmpty) {
+      throw Exception('No recipients found in messageV2');
+    }
     
     Map<String, dynamic>? mine;
-    for (final r in recips) {
+    for (final r in recipients) {
       final m = r as Map<String, dynamic>;
       if (m['userId'] == myUserId && m['deviceId'] == myDeviceId) {
         mine = m;
@@ -373,7 +392,7 @@ class MessageCipherV2 {
       throw Exception('No wrap for this device');
     }
 
-    // derive KEK
+    // Récupérer les informations du sender
     final sender = messageV2['sender'] as Map<String, dynamic>;
     final senderUserId = sender['userId'] as String;
     final senderDeviceId = sender['deviceId'] as String;
@@ -386,16 +405,11 @@ class MessageCipherV2 {
       remotePublicKey: SimplePublicKey(base64.decode(_cleanBase64(ephPubB64)), type: KeyPairType.x25519),
     );
     
-    // Récupérer la salt depuis le payload (ou fallback si pas disponible)
-    final Uint8List salt;
-    if (messageV2.containsKey('salt')) {
-      salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
-    } else {
-      // Fallback pour compatibilité avec anciens messages
-      salt = Uint8List.fromList(
-        crypto.sha256.convert(utf8.encode('${messageV2['messageId']}:${_b64(_randomBytes(16))}')).bytes,
-      );
+    // Récupérer la salt depuis le payload
+    if (!messageV2.containsKey('salt')) {
+      throw Exception('salt is required in messageV2');
     }
+    final salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
     
     final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
     final kek = await _hkdf.deriveKey(

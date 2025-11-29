@@ -2,36 +2,34 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-// RSA removed in v2
-import 'package:flutter/services.dart';
 
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/group_provider.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/services/snackbar_service.dart';
 import '../../core/services/websocket_service.dart';
-// Legacy creation via RSA removed in v2
-import 'my_devices_screen.dart';
-import 'join_requests_screen.dart';
 import 'conversation_screen.dart';
 
-/// Écran de détail d’un groupe : liste des conversations et création de conversation.
-class GroupDetailScreen extends StatefulWidget {
+/// Écran de liste des conversations d'un groupe : liste des conversations et création de conversation.
+class GroupConversationListScreen extends StatefulWidget {
   final String groupId;
   final String groupName;
+  final Widget? bottomNavigationBar;
+  final int? currentNavIndex;
 
-  const GroupDetailScreen({
+  const GroupConversationListScreen({
     Key? key,
     required this.groupId,
     required this.groupName,
+    this.bottomNavigationBar,
+    this.currentNavIndex,
   }) : super(key: key);
 
   @override
-  State<GroupDetailScreen> createState() => _GroupDetailScreenState();
+  State<GroupConversationListScreen> createState() => _GroupConversationListScreenState();
 }
 
-class _GroupDetailScreenState extends State<GroupDetailScreen> {
+class _GroupConversationListScreenState extends State<GroupConversationListScreen> {
   bool _loading = true;
   // bool _isCreator = false; // unused in v2
   final Set<String> _selectedUserIds = {};
@@ -158,131 +156,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.groupName),
-        actions: [
-          // Bouton QR code
-          IconButton(
-            icon: const Icon(Icons.qr_code),
-            tooltip: 'Voir QR code',
-            onPressed: () {
-              showModalBottomSheet(
-                context: context,
-                backgroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                ),
-                builder: (bottomCtx) {
-                  return Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        QrImageView(
-                          data: widget.groupId,
-                          version: QrVersions.auto,
-                          size: 200.0,
-                          backgroundColor: Colors.white,
-                          eyeStyle: const QrEyeStyle(
-                            eyeShape: QrEyeShape.square,
-                            color: Colors.black,
-                          ),
-                          dataModuleStyle: const QrDataModuleStyle(
-                            dataModuleShape: QrDataModuleShape.square,
-                            color: Colors.black,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  const Text(
-                                    'ID du groupe',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.black,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    widget.groupId,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.black,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.copy),
-                              color: Colors.black,
-                              tooltip: 'Copier l’ID',
-                              onPressed: () {
-                                Clipboard.setData(
-                                  ClipboardData(text: widget.groupId),
-                                );
-                                Navigator.of(bottomCtx).pop();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('ID copié !')),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        TextButton(
-                          child: const Text('FERMER'),
-                          onPressed: () => Navigator.of(bottomCtx).pop(),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
-            },
-          ),
-
-          // Bouton 'Mes appareils'
-          IconButton(
-            icon: const Icon(Icons.devices),
-            tooltip: 'Mes appareils',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => MyDevicesScreen(groupId: widget.groupId),
-                ),
-              );
-            },
-          ),
-
-          // Bouton demandes d’adhésion
-          IconButton(
-            icon: const Icon(Icons.how_to_reg),
-            tooltip: 'Demandes d’adhésion',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => JoinRequestsScreen(
-                    groupId: widget.groupId,
-                    groupName: widget.groupName,
-                    isCreator: true,
-                  ),
-                ),
-              ).then((_) {
-                // Recharger après retour
-                _loadGroupData();
-              });
-            },
-          ),
-        ],
+        automaticallyImplyLeading: false, // Supprimer le bouton retour
       ),
 
       body: _loading
@@ -298,11 +172,16 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                       children: [
                         const Icon(Icons.add_circle_outline, color: Colors.blue),
                         const SizedBox(width: 8),
-                        const Text('💬 Créer une conversation', 
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                        Expanded(
+                          child: const Text('💬 Créer une conversation', 
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                         if (_selectedUserIds.isNotEmpty) ...[
                           const SizedBox(width: 8),
                           Container(
+                            constraints: const BoxConstraints(minWidth: 24),
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
                               color: Colors.blue,
@@ -457,6 +336,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               tooltip: 'Créer conversation',
             )
           : null,
+      bottomNavigationBar: widget.bottomNavigationBar,
     );
   }
 }
+

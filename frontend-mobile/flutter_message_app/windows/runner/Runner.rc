@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "flutter_message_app" "\0"
+            VALUE "FileDescription", "TrustCircle - Messagerie Sécurisée" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "flutter_message_app" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "flutter_message_app.exe" "\0"
-            VALUE "ProductName", "flutter_message_app" "\0"
+            VALUE "InternalName", "TrustCircle" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 TrustCircle. All rights reserved." "\0"
+            VALUE "OriginalFilename", "TrustCircle.exe" "\0"
+            VALUE "ProductName", "TrustCircle" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

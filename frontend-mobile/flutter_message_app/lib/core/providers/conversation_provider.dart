@@ -10,17 +10,24 @@ import 'package:flutter_message_app/core/services/key_directory_service.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/notification_service.dart';
 import 'package:flutter_message_app/core/services/global_presence_service.dart';
+import 'package:flutter_message_app/core/services/local_message_storage.dart';
+import 'package:flutter_message_app/core/services/message_key_cache.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 
-/// Gère l’état des conversations et des messages.
+/// Gère l'état des conversations et des messages.
 class ConversationProvider extends ChangeNotifier {
   final ApiService _apiService;
   final WebSocketService _webSocketService;
   late final KeyDirectoryService _keyDirectory;
   final AuthProvider _authProvider;
+
+  /// 🚀 OPTIMISATION: Limite maximale de messages en mémoire par conversation
+  /// Au-delà de cette limite, les messages les plus anciens sont automatiquement retirés
+  /// Les messages sont déjà sauvegardés dans LocalMessageStorage, donc pas de perte de données
+  static const int _maxMessagesInMemory = 200;
 
   List<Conversation> _conversations = <Conversation>[];
   /// Cache local des messages, par conversationId
@@ -59,6 +66,11 @@ class ConversationProvider extends ChangeNotifier {
         _webSocketService = WebSocketService.instance,
         _authProvider = authProvider {
     _keyDirectory = KeyDirectoryService(_apiService);
+    
+    // Initialiser le stockage local (async, non-bloquant)
+    LocalMessageStorage.instance.initialize().catchError((e) {
+      debugPrint('⚠️ Erreur initialisation stockage local: $e');
+    });
     
     // Charger le cache de déchiffrement au démarrage de manière synchrone
     _initializeCache();
@@ -207,6 +219,32 @@ class ConversationProvider extends ChangeNotifier {
     }
   }
 
+  /// 🚀 OPTIMISATION: Nettoie les messages anciens si la limite est dépassée
+  /// Garde uniquement les N derniers messages (les plus récents)
+  /// Les messages supprimés sont déjà sauvegardés dans LocalMessageStorage, donc pas de perte de données
+  void _trimMessagesIfNeeded(String conversationId) {
+    final messages = _messages[conversationId];
+    if (messages == null || messages.length <= _maxMessagesInMemory) {
+      return; // Pas besoin de nettoyer
+    }
+    
+    // Garder les N derniers messages (les plus récents)
+    // Les messages sont triés par timestamp croissant (plus ancien en premier)
+    final toKeep = messages.sublist(messages.length - _maxMessagesInMemory);
+    final removedCount = messages.length - toKeep.length;
+    
+    _messages[conversationId] = toKeep;
+    
+    // Nettoyer aussi le cache de déchiffrement pour les messages supprimés
+    final keptIds = toKeep.map((m) => m.id).toSet();
+    final removedIds = _decryptedCache.keys.where((id) => !keptIds.contains(id)).toList();
+    for (final id in removedIds) {
+      _decryptedCache.remove(id);
+    }
+    
+    debugPrint('🧹 Trimmed messages for $conversationId: kept ${toKeep.length} most recent, removed $removedCount old messages');
+  }
+
   Future<void> postRead(String conversationId) async {
     try {
       await _apiService.postConversationRead(conversationId: conversationId);
@@ -223,18 +261,30 @@ class ConversationProvider extends ChangeNotifier {
       _messages[conversationId] ?? <Message>[];
 
   /// Déchiffre un message à la demande et le met en cache
+  /// CORRECTION: Vérifie aussi la signature si le message est déjà déchiffré mais signatureValid != true
   Future<String?> decryptMessageIfNeeded(Message message) async {
     final msgId = message.id;
     
-    // Vérifier si déjà déchiffré
-    if (_decryptedCache.containsKey(msgId)) {
-      return _decryptedCache[msgId];
+    // CORRECTION: Si le message est déjà déchiffré ET signature vérifiée, retourner immédiatement
+    if (message.decryptedText != null && message.signatureValid == true) {
+      if (!_decryptedCache.containsKey(msgId)) {
+        _decryptedCache[msgId] = message.decryptedText!;
+      }
+      return message.decryptedText;
     }
     
-    // Vérifier si déjà dans le message
-    if (message.decryptedText != null) {
-      _decryptedCache[msgId] = message.decryptedText!;
-      return message.decryptedText;
+    // Vérifier si déjà dans le cache mémoire
+    if (_decryptedCache.containsKey(msgId)) {
+      // Si le texte est en cache mais signature pas vérifiée, continuer pour vérifier
+      if (message.signatureValid == true) {
+        return _decryptedCache[msgId];
+      }
+      // Sinon, continuer pour vérifier la signature
+    }
+    
+    // Si le message est déjà déchiffré mais signature pas vérifiée, continuer pour vérifier
+    if (message.decryptedText != null && message.signatureValid != true) {
+      // Continuer pour vérifier la signature
     }
     
     try {
@@ -253,10 +303,22 @@ class ConversationProvider extends ChangeNotifier {
       }
       
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      final groupId = message.v2Data!['groupId'] as String;
+      
+      // 🚀 OPTIMISATION SIGNAL: Pré-dériver la message key si pas en cache
+      // Cela accélère le déchiffrement pour les messages récents
+      await MessageKeyCache.instance.deriveAndCacheMessageKey(
+        messageId: msgId,
+        groupId: groupId,
+        myUserId: currentUserId,
+        myDeviceId: myDeviceId,
+        messageV2: message.v2Data!,
+        keyDirectory: _keyDirectory,
+      );
       
       // Déchiffrer le message V2
       final result = await MessageCipherV2.decrypt(
-        groupId: message.v2Data!['groupId'] as String,
+        groupId: groupId,
         myUserId: currentUserId,
         myDeviceId: myDeviceId,
         messageV2: message.v2Data!,
@@ -270,9 +332,20 @@ class ConversationProvider extends ChangeNotifier {
       // Mettre à jour le statut de signature du message
       message.signatureValid = signatureValid;
       
+      // CORRECTION: Sauvegarder signatureValid dans la base de données locale
+      // (non-bloquant, en arrière-plan)
+      LocalMessageStorage.instance.saveMessage(message).catchError((e) {
+        debugPrint('⚠️ Erreur sauvegarde signatureValid: $e');
+      });
+      
       // Enregistrer en cache mémoire uniquement (session courante)
       _decryptedCache[msgId] = decryptedText;
       message.decryptedText = decryptedText;
+      
+      // CORRECTION: Notifier les listeners pour mettre à jour l'UI
+      // Cela garantit que l'UI se met à jour quand signatureValid change
+      notifyListeners();
+      
       return decryptedText;
       
     } catch (e) {
@@ -302,12 +375,66 @@ class ConversationProvider extends ChangeNotifier {
         return errorText;
       }
       
-      // CORRECTION: Gérer les champs manquants dans les données V2
-      if (e.toString().contains('senderEphPub is null') || e.toString().contains('is null in messageV2')) {
+      // Gérer les champs manquants dans les données V2
+      if (e.toString().contains('eph_pub is empty') || 
+          e.toString().contains('is null in messageV2') ||
+          e.toString().contains('Structure sender invalide')) {
         final errorText = '[🔧 Message incomplet - Données manquantes]';
         _decryptedCache[msgId] = errorText;
         message.decryptedText = errorText;
         return errorText;
+      }
+      
+      // CORRECTION: Gérer l'erreur "No wrap for this device" (nouvel appareil)
+      if (e.toString().contains('No wrap for this device')) {
+        debugPrint('🔑 Appareil manquant dans le message - Tentative de synchronisation des clés');
+        
+        const fallbackErrorText = '[📱 Message envoyé avant votre connexion]';
+        
+        // Essayer de synchroniser les clés de l'appareil
+        try {
+          final groupId = message.v2Data!['groupId'] as String;
+          final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+          
+          // Vérifier si notre appareil est dans le groupe
+          final groupDevices = await _keyDirectory.getGroupDevices(groupId);
+          final myDeviceInGroup = groupDevices.any((d) => d.deviceId == myDeviceId);
+          
+          if (!myDeviceInGroup) {
+            debugPrint('🔑 Appareil non trouvé dans le groupe - Publication automatique des clés');
+            await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
+            
+            // Réessayer le déchiffrement après synchronisation
+            try {
+              final currentUserId = _authProvider.userId;
+              if (currentUserId == null) return fallbackErrorText;
+              
+              final result = await MessageCipherV2.decrypt(
+                groupId: groupId,
+                myUserId: currentUserId,
+                myDeviceId: myDeviceId,
+                messageV2: message.v2Data!,
+                keyDirectory: _keyDirectory,
+              );
+              
+              final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
+              final signatureValid = result['signatureValid'] as bool;
+              
+              message.signatureValid = signatureValid;
+              _decryptedCache[msgId] = decryptedText;
+              message.decryptedText = decryptedText;
+              return decryptedText;
+            } catch (retryError) {
+              debugPrint('❌ Échec du déchiffrement après synchronisation: $retryError');
+            }
+          }
+        } catch (syncError) {
+          debugPrint('❌ Erreur synchronisation clés: $syncError');
+        }
+        
+        _decryptedCache[msgId] = fallbackErrorText;
+        message.decryptedText = fallbackErrorText;
+        return fallbackErrorText;
       }
       
       final errorText = '[Erreur déchiffrement: ${e.toString().substring(0, e.toString().length > 50 ? 50 : e.toString().length)}]';
@@ -317,29 +444,23 @@ class ConversationProvider extends ChangeNotifier {
     }
   }
 
-  /// CORRECTION: Déchiffrement rapide des 3 derniers messages SANS vérification de signature
+  /// Déchiffrement des messages visibles AVEC vérification de signature
   Future<void> decryptVisibleMessagesFast(String conversationId, {
     required int visibleCount,
   }) async {
     final messages = _messages[conversationId] ?? [];
     if (messages.isEmpty) return;
     
-    // CORRECTION: Déchiffrer seulement les 3 derniers messages (les plus importants)
+    // Déchiffrer seulement les 3 derniers messages (les plus importants)
     final toDecrypt = messages.length > 3 
         ? messages.sublist(messages.length - 3)
         : messages;
     
-    // Obtenir nos informations utilisateur et device une seule fois
-    final currentUserId = _authProvider.userId;
-    if (currentUserId == null) return;
-    
-    final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
-    
-    // Déchiffrer les 3 derniers messages en parallèle (RAPIDE - sans vérification de signature)
+    // CORRECTION: Déchiffrer avec vérification de signature (utiliser decryptMessageIfNeeded)
     final futures = <Future<void>>[];
     for (final msg in toDecrypt) {
       if (msg.decryptedText == null && msg.v2Data != null) {
-        futures.add(_decryptMessageFast(msg, currentUserId, myDeviceId));
+        futures.add(decryptMessageIfNeeded(msg).then((_) => null));
       }
     }
     
@@ -367,45 +488,6 @@ class ConversationProvider extends ChangeNotifier {
       debugPrint('🔑 Clés de groupe pré-chargées pour $groupId');
     } catch (e) {
       debugPrint('⚠️ Erreur pré-chargement clés groupe: $e');
-    }
-  }
-
-  /// Déchiffrement rapide d'un message - fallback sur déchiffrement normal si erreur
-  Future<void> _decryptMessageFast(Message message, String currentUserId, String myDeviceId) async {
-    final msgId = message.id;
-    
-    try {
-      // Essayer d'abord le déchiffrement rapide (sans vérification de signature)
-      final result = await MessageCipherV2.decryptFast(
-        groupId: message.v2Data!['groupId'] as String,
-        myUserId: currentUserId,
-        myDeviceId: myDeviceId,
-        messageV2: message.v2Data!,
-        keyDirectory: _keyDirectory,
-      );
-      
-      // Convertir les bytes en String UTF-8
-      final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
-      
-      // Marquer comme non vérifié pour le mode rapide
-      message.signatureValid = false;
-      
-      // Enregistrer en cache mémoire uniquement (session courante)
-      _decryptedCache[msgId] = decryptedText;
-      message.decryptedText = decryptedText;
-      
-    } catch (e) {
-      debugPrint('⚠️ Déchiffrement rapide échoué pour $msgId, fallback sur déchiffrement normal: $e');
-      
-      // Fallback: utiliser le déchiffrement normal avec vérification de signature
-      try {
-        await decryptMessageIfNeeded(message);
-      } catch (fallbackError) {
-        debugPrint('❌ Erreur déchiffrement normal message $msgId: $fallbackError');
-        final errorText = '[Erreur déchiffrement]';
-        _decryptedCache[msgId] = errorText;
-        message.decryptedText = errorText;
-      }
     }
   }
 
@@ -581,15 +663,16 @@ class ConversationProvider extends ChangeNotifier {
       );
 
   /// Appelle GET /conversations/:id et met à jour la liste.
+  /// 🚀 OPTIMISATION: Utilise fetchConversationDetailRaw pour éviter 2 appels API
   Future<Conversation> fetchConversationDetail(
       BuildContext context,
       String conversationId,
   ) async {
     try {
-      final convo = await _apiService.fetchConversationDetail(conversationId);
+      // 🚀 OPTIMISATION: Utiliser seulement fetchConversationDetailRaw pour éviter 2 appels API
+      final rawResponse = await _apiService.fetchConversationDetailRaw(conversationId);
       
       // Extraire les informations des membres depuis la réponse brute
-      final rawResponse = await _apiService.fetchConversationDetailRaw(conversationId);
       if (rawResponse['members'] != null) {
         final members = rawResponse['members'] as List<dynamic>;
         for (final member in members) {
@@ -600,6 +683,9 @@ class ConversationProvider extends ChangeNotifier {
           debugPrint('👤 [Usernames] Cached username for $userId: $username');
         }
       }
+      
+      // Construire l'objet Conversation depuis la réponse brute (évite un 2ème appel API)
+      final convo = Conversation.fromJson(rawResponse);
       
       final idx = _conversations
           .indexWhere((c) => c.conversationId == conversationId);
@@ -630,7 +716,7 @@ class ConversationProvider extends ChangeNotifier {
   Future<bool> _fetchMessagesWithHasMore(
       BuildContext context,
       String conversationId, {
-        int limit = 25,  // Charger seulement les 25 derniers messages
+        int limit = 20,  // Charger seulement les 20 derniers messages
         String? cursor,
       }) async {
     try {
@@ -652,7 +738,7 @@ class ConversationProvider extends ChangeNotifier {
           existingMessage = null;
         }
         
-        return Message(
+        final msg = Message(
           id: it.messageId,
           conversationId: it.convId,
           senderId: senderUserId,
@@ -665,6 +751,16 @@ class ConversationProvider extends ChangeNotifier {
           v2Data: it.toJson(), // Stocker toutes les données V2 pour le déchiffrement
           decryptedText: existingMessage?.decryptedText, // Préserver le texte déchiffré existant
         );
+        
+        // 🚀 OPTIMISATION SIGNAL: Sauvegarder automatiquement chaque message reçu
+        // CORRECTION: Ne pas sauvegarder immédiatement si signatureValid n'est pas encore vérifié
+        // On sauvegardera après la vérification de signature dans decryptMessageIfNeeded
+        // Cela évite de sauvegarder avec signatureValid: false puis de re-sauvegarder après
+        // LocalMessageStorage.instance.saveMessage(msg).catchError((e) {
+        //   debugPrint('⚠️ Erreur sauvegarde message local: $e');
+        // });
+        
+        return msg;
       }).toList();
       
       // Trier les messages par timestamp (plus ancien en premier pour affichage chronologique)
@@ -693,12 +789,35 @@ class ConversationProvider extends ChangeNotifier {
         }
         
         _messages[conversationId] = display;
+        
+        // 🚀 OPTIMISATION: Nettoyer les messages si la limite est dépassée
+        _trimMessagesIfNeeded(conversationId);
+        
+        // CORRECTION: Sauvegarder les messages dans la DB après les avoir ajoutés
+        // Cela permet de sauvegarder avec signatureValid: false initialement
+        // puis de mettre à jour après la vérification de signature
+        for (final msg in display) {
+          LocalMessageStorage.instance.saveMessage(msg).catchError((e) {
+            debugPrint('⚠️ Erreur sauvegarde message local: $e');
+          });
+        }
       } else {
         // Pour la pagination, ajouter au début (messages plus anciens)
         final existing = _messages[conversationId] ?? [];
         _messages[conversationId] = [...display, ...existing];
         // Re-trier après ajout (plus ancien en premier)
         _messages[conversationId]!.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        
+        // 🚀 OPTIMISATION: Nettoyer les messages si la limite est dépassée
+        // Important: après pagination car on ajoute des messages anciens
+        _trimMessagesIfNeeded(conversationId);
+        
+        // Sauvegarder les nouveaux messages
+        for (final msg in display) {
+          LocalMessageStorage.instance.saveMessage(msg).catchError((e) {
+            debugPrint('⚠️ Erreur sauvegarde message local: $e');
+          });
+        }
       }
       
       notifyListeners();
@@ -723,13 +842,228 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   /// Appelle GET /conversations/:id/messages avec pagination (chargement initial)
+  /// 🚀 OPTIMISATION SIGNAL: Charge d'abord depuis le stockage local (instantané)
+  /// puis synchronise avec le serveur en arrière-plan
   Future<void> fetchMessages(
       BuildContext context,
       String conversationId, {
-        int limit = 25,  // Charger seulement les 25 derniers messages
+        int limit = 20,  // Charger seulement les 20 derniers messages
         String? cursor,
       }) async {
+    // 🚀 OPTIMISATION SIGNAL: Charger d'abord depuis le stockage local
+    // UNIQUEMENT pour le chargement initial (pas pour la pagination)
+    if (cursor == null) {
+      try {
+        // Initialiser le stockage local de manière non-bloquante
+        // Si l'initialisation échoue, on continue avec le serveur
+        try {
+          await LocalMessageStorage.instance.initialize();
+        } catch (initError) {
+          debugPrint('⚠️ Erreur initialisation stockage local (non-bloquant): $initError');
+          // Continuer avec le serveur même si l'init échoue
+        }
+        
+        // Vérifier si le stockage local est disponible
+        if (!LocalMessageStorage.instance.isAvailable) {
+          debugPrint('📭 Stockage local non disponible, chargement depuis le serveur');
+        } else {
+          // 🚀 OPTIMISATION: Limiter strictement à 20 messages max pour éviter la surcharge
+          // Même si limit est plus grand, on ne charge jamais plus que nécessaire
+          final effectiveLimit = limit > 20 ? 20 : limit; // Limite de sécurité max 20
+          debugPrint('💾 Chargement des $effectiveLimit derniers messages depuis le stockage local...');
+          
+          final localMessages = await LocalMessageStorage.instance.loadMessagesForConversation(
+            conversationId,
+            limit: effectiveLimit, // Utiliser la limite effective
+          );
+          
+          if (localMessages.isNotEmpty) {
+            debugPrint('⚡ ${localMessages.length} messages chargés depuis le stockage local (instantané)');
+            
+            // CORRECTION: Fusionner intelligemment avec les messages déjà en mémoire
+            // pour préserver signatureValid et decryptedText des messages WebSocket
+            final existingMessages = _messages[conversationId] ?? [];
+            final existingById = <String, Message>{};
+            for (final msg in existingMessages) {
+              existingById[msg.id] = msg;
+            }
+            
+            // Fusionner : préserver les messages en mémoire (WebSocket) s'ils sont plus récents
+            final mergedMessages = <Message>[];
+            for (final localMsg in localMessages) {
+              final existing = existingById[localMsg.id];
+              if (existing != null) {
+                // Message existe déjà en mémoire (ajouté via WebSocket)
+                // Préserver signatureValid et decryptedText de la version mémoire
+                // mais utiliser les autres données de la version locale (plus à jour)
+                mergedMessages.add(Message(
+                  id: existing.id,
+                  conversationId: existing.conversationId,
+                  senderId: existing.senderId,
+                  encrypted: existing.encrypted,
+                  iv: existing.iv,
+                  encryptedKeys: existing.encryptedKeys,
+                  signatureValid: existing.signatureValid, // CORRECTION: Préserver signatureValid de la mémoire
+                  senderPublicKey: existing.senderPublicKey,
+                  timestamp: existing.timestamp,
+                  v2Data: existing.v2Data ?? localMsg.v2Data,
+                  decryptedText: existing.decryptedText ?? localMsg.decryptedText,
+                ));
+                existingById.remove(existing.id); // Ne pas l'ajouter deux fois
+              } else {
+                // Nouveau message depuis la DB
+                // Restaurer le texte déchiffré depuis le cache si disponible
+                if (_decryptedCache.containsKey(localMsg.id)) {
+                  localMsg.decryptedText = _decryptedCache[localMsg.id];
+                  debugPrint('🔄 Texte déchiffré restauré depuis le cache pour ${localMsg.id}');
+                }
+                mergedMessages.add(localMsg);
+              }
+            }
+            
+            // Ajouter les messages en mémoire qui ne sont pas dans la DB (très récents)
+            for (final existing in existingById.values) {
+              mergedMessages.add(existing);
+            }
+            
+            // Trier par timestamp
+            mergedMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            
+            _messages[conversationId] = mergedMessages;
+            
+            // 🚀 OPTIMISATION: Nettoyer les messages si la limite est dépassée
+            _trimMessagesIfNeeded(conversationId);
+            
+            notifyListeners();
+            
+            debugPrint('✅ Messages locaux affichés immédiatement, synchronisation serveur en arrière-plan...');
+            
+            // Synchroniser avec le serveur en arrière-plan (non-bloquant)
+            _syncMessagesFromServer(context, conversationId, limit: limit).catchError((e) {
+              debugPrint('⚠️ Erreur synchronisation serveur: $e');
+            });
+            
+            return; // Afficher immédiatement les messages locaux
+          } else {
+            debugPrint('📭 Aucun message local trouvé pour $conversationId, chargement depuis le serveur');
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Erreur chargement messages locaux: $e');
+        // Fallback sur le serveur si erreur locale
+      }
+    }
+    
+    // Fallback: charger depuis le serveur (première fois ou pagination)
     await _fetchMessagesWithHasMore(context, conversationId, limit: limit, cursor: cursor);
+  }
+  
+  /// Synchronise les messages depuis le serveur en arrière-plan
+  Future<void> _syncMessagesFromServer(
+    BuildContext context,
+    String conversationId, {
+    int limit = 20,
+  }) async {
+    try {
+      // Note: syncState non utilisé pour l'instant, mais peut être utile pour optimisations futures
+      await LocalMessageStorage.instance.getSyncState(conversationId);
+      final lastLocalTimestamp = await LocalMessageStorage.instance.getLastMessageTimestamp(conversationId);
+      
+      // Charger les nouveaux messages depuis le serveur
+      final items = await _apiService.fetchMessagesV2(
+        conversationId: conversationId,
+        limit: limit,
+        cursor: lastLocalTimestamp != null ? (lastLocalTimestamp * 1000).toString() : null,
+      );
+      
+      if (items.isEmpty) {
+        // Pas de nouveaux messages, mettre à jour l'état de sync
+        await LocalMessageStorage.instance.updateSyncState(
+          conversationId,
+          DateTime.now().millisecondsSinceEpoch,
+          lastMessageTimestamp: lastLocalTimestamp,
+        );
+        debugPrint('✅ Synchronisation serveur: aucun nouveau message');
+        return;
+      }
+      
+      // CORRECTION: Fusionner intelligemment avec les messages déjà en mémoire
+      // au lieu de remplacer complètement
+      final existingMessages = _messages[conversationId] ?? [];
+      final existingById = <String, Message>{};
+      for (final msg in existingMessages) {
+        existingById[msg.id] = msg;
+      }
+      
+      // Convertir les items serveur en Messages
+      final newMessages = <Message>[];
+      for (final item in items) {
+        final senderUserId = (item.sender['userId'] as String?) ?? '';
+        
+        // Vérifier si le message existe déjà en mémoire
+        final existing = existingById[item.messageId];
+        
+        final msg = Message(
+          id: item.messageId,
+          conversationId: item.convId,
+          senderId: senderUserId,
+          encrypted: null,
+          iv: null,
+          encryptedKeys: const {},
+          signatureValid: existing?.signatureValid ?? false, // Préserver signatureValid si existe
+          senderPublicKey: null,
+          timestamp: item.sentAt,
+          v2Data: item.toJson(),
+          decryptedText: existing?.decryptedText, // Préserver decryptedText si existe
+        );
+        
+        newMessages.add(msg);
+        
+        // Sauvegarder localement (non-bloquant)
+        LocalMessageStorage.instance.saveMessage(msg).catchError((e) {
+          debugPrint('⚠️ Erreur sauvegarde message local: $e');
+        });
+      }
+      
+      // Fusionner les nouveaux messages avec les existants
+      final mergedMessages = <Message>[];
+      final newMessageIds = newMessages.map((m) => m.id).toSet();
+      
+      // Ajouter les messages existants qui ne sont pas dans les nouveaux
+      for (final existing in existingMessages) {
+        if (!newMessageIds.contains(existing.id)) {
+          mergedMessages.add(existing);
+        }
+      }
+      
+      // Ajouter les nouveaux messages
+      mergedMessages.addAll(newMessages);
+      
+      // Trier par timestamp
+      mergedMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      
+      // Mettre à jour en mémoire seulement si la conversation est ouverte
+      if (_messages.containsKey(conversationId)) {
+        _messages[conversationId] = mergedMessages;
+        
+        // 🚀 OPTIMISATION: Nettoyer les messages si la limite est dépassée
+        _trimMessagesIfNeeded(conversationId);
+        
+        notifyListeners();
+        debugPrint('✅ Synchronisation serveur: ${items.length} nouveaux messages fusionnés');
+      }
+      
+      // Mettre à jour l'état de sync
+      final latestTimestamp = items.isNotEmpty ? items.first.sentAt : lastLocalTimestamp;
+      await LocalMessageStorage.instance.updateSyncState(
+        conversationId,
+        DateTime.now().millisecondsSinceEpoch,
+        lastMessageTimestamp: latestTimestamp,
+      );
+      
+    } catch (e) {
+      debugPrint('❌ Erreur synchronisation serveur: $e');
+    }
   }
 
   /// Charge les messages plus anciens (pagination vers le haut)
@@ -737,7 +1071,7 @@ class ConversationProvider extends ChangeNotifier {
   Future<bool> fetchOlderMessages(
     BuildContext context,
     String conversationId, {
-      int limit = 25,
+      int limit = 20,
     }) async {
     final messages = _messages[conversationId] ?? [];
     if (messages.isEmpty) return false;
@@ -834,14 +1168,32 @@ class ConversationProvider extends ChangeNotifier {
       // Vérifier et publier nos clés si nécessaire
       await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
       
-      final recipients = await _keyDirectory.fetchGroupDevices(groupId);
+      // CORRECTION: Récupérer seulement les devices des membres de la conversation
+      // pour éviter l'erreur 403 (forbidden) si on inclut des devices de non-membres
+      final conversationDetail = await _apiService.fetchConversationDetailRaw(conversationId);
+      final members = conversationDetail['members'] as List<dynamic>? ?? [];
+      final memberUserIds = members.map((m) => m['userId'] as String).toList();
+      
+      debugPrint('📋 Membres de la conversation: ${memberUserIds.length} utilisateurs');
+      
+      // Filtrer les devices pour ne garder que ceux des membres de la conversation
+      final allGroupDevices = await _keyDirectory.fetchGroupDevices(groupId);
+      final conversationDevices = allGroupDevices
+          .where((device) => memberUserIds.contains(device.userId) && device.status == 'active')
+          .toList();
+      
+      debugPrint('🔑 Devices filtrés: ${conversationDevices.length} devices (sur ${allGroupDevices.length} du groupe)');
+      
+      if (conversationDevices.isEmpty) {
+        throw Exception('Aucun device actif trouvé pour les membres de la conversation');
+      }
       
       final payload = await MessageCipherV2.encrypt(
         groupId: groupId,
         convId: conversationId,
         senderUserId: myUserId,
         senderDeviceId: myDeviceId,
-        recipientsDevices: recipients,
+        recipientsDevices: conversationDevices,
         plaintext: Uint8List.fromList(plaintext.codeUnits),
       );
       await _apiService.sendMessageV2(payloadV2: payload);
@@ -871,6 +1223,28 @@ class ConversationProvider extends ChangeNotifier {
     }
   }
 
+
+  /// CORRECTION: Synchronisation proactive des clés pour tous les groupes
+  Future<void> ensureDeviceKeysForAllGroups() async {
+    try {
+      final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      final conversations = _conversations;
+      
+      debugPrint('🔑 Synchronisation proactive des clés pour ${conversations.length} conversations');
+      
+      for (final conv in conversations) {
+        try {
+          await _ensureMyDeviceKeysArePublished(conv.groupId, myDeviceId);
+        } catch (e) {
+          debugPrint('❌ Erreur synchronisation clés pour groupe ${conv.groupId}: $e');
+        }
+      }
+      
+      debugPrint('✅ Synchronisation proactive terminée');
+    } catch (e) {
+      debugPrint('❌ Erreur synchronisation proactive: $e');
+    }
+  }
 
   /// S'assurer que les clés de notre device sont publiées pour le groupe
   Future<void> _ensureMyDeviceKeysArePublished(String groupId, String deviceId) async {
@@ -940,7 +1314,32 @@ class ConversationProvider extends ChangeNotifier {
   void addLocalMessage(Message message) {
     final convId = message.conversationId;
     _messages.putIfAbsent(convId, () => []);
-    _messages[convId]!.add(message);
+    
+    // CORRECTION: Vérifier si le message existe déjà pour éviter les doublons
+    final existingIndex = _messages[convId]!.indexWhere((m) => m.id == message.id);
+    if (existingIndex >= 0) {
+      // Message existe déjà : mettre à jour avec la nouvelle version (préserver signatureValid si déjà vérifié)
+      final existing = _messages[convId]![existingIndex];
+      // Si la version existante a signatureValid = true, la préserver
+      if (existing.signatureValid == true && message.signatureValid != true) {
+        message.signatureValid = true;
+      }
+      // Si la version existante a decryptedText, le préserver
+      if (existing.decryptedText != null && message.decryptedText == null) {
+        message.decryptedText = existing.decryptedText;
+      }
+      _messages[convId]![existingIndex] = message;
+    } else {
+      // Nouveau message : l'ajouter
+      _messages[convId]!.add(message);
+      // Trier par timestamp pour maintenir l'ordre chronologique
+      _messages[convId]!.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      
+      // 🚀 OPTIMISATION: Nettoyer les messages si la limite est dépassée
+      // (seulement pour les nouveaux messages, pas pour les mises à jour)
+      _trimMessagesIfNeeded(convId);
+    }
+    
     notifyListeners();
   }
 
@@ -956,7 +1355,17 @@ class ConversationProvider extends ChangeNotifier {
       final convId = payload['convId'] as String;
       final senderId = (payload['sender'] as Map)['userId'] as String;
       
-      // Déchiffrement immédiat
+      // 🚀 OPTIMISATION SIGNAL: Pré-dériver la message key immédiatement
+      await MessageKeyCache.instance.deriveAndCacheMessageKey(
+        messageId: messageId,
+        groupId: groupId,
+        myUserId: myUserId,
+        myDeviceId: myDeviceId,
+        messageV2: payload,
+        keyDirectory: _keyDirectory,
+      );
+      
+      // Déchiffrement immédiat (utilisera la clé en cache si disponible)
       final result = await MessageCipherV2.decrypt(
         groupId: groupId,
         myUserId: myUserId,
@@ -992,6 +1401,11 @@ class ConversationProvider extends ChangeNotifier {
         decryptedText: decryptedText, // Pré-déchiffré via WebSocket
       );
       
+      // 🚀 OPTIMISATION SIGNAL: Sauvegarder le message chiffré localement (non-bloquant)
+      LocalMessageStorage.instance.saveMessage(msg).catchError((saveError) {
+        debugPrint('⚠️ Erreur sauvegarde message local (non-bloquant): $saveError');
+      });
+      
       // Mettre en cache mémoire uniquement (session courante)
       _decryptedCache[messageId] = decryptedText;
       
@@ -999,7 +1413,52 @@ class ConversationProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('❌ Erreur déchiffrement message WebSocket: $e');
       
-      // Créer un message avec erreur pour affichage
+      // CORRECTION: Même en cas d'erreur, ajouter le message avec un texte d'erreur
+      // pour que l'utilisateur voie qu'un message a été reçu
+      String errorText = '[❌ Erreur déchiffrement]';
+      
+      // Gérer spécifiquement l'erreur "No wrap for this device"
+      if (e.toString().contains('No wrap for this device')) {
+        debugPrint('🔑 Message WebSocket - Appareil manquant, tentative de synchronisation');
+        
+        try {
+          final groupId = payload['groupId'] as String;
+          final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+          
+          // Vérifier si notre appareil est dans le groupe
+          final groupDevices = await _keyDirectory.getGroupDevices(groupId);
+          final myDeviceInGroup = groupDevices.any((d) => d.deviceId == myDeviceId);
+          
+          if (!myDeviceInGroup) {
+            debugPrint('🔑 Appareil WebSocket non trouvé - Publication automatique des clés');
+            await _ensureMyDeviceKeysArePublished(groupId, myDeviceId);
+          }
+        } catch (syncError) {
+          debugPrint('❌ Erreur synchronisation clés WebSocket: $syncError');
+        }
+        
+        errorText = '[📱 Message envoyé avant votre connexion]';
+      } else if (e.toString().contains('MissingPluginException') || e.toString().contains('sqflite')) {
+        // Erreur liée à sqflite - ne pas bloquer, essayer de déchiffrer quand même
+        debugPrint('⚠️ Erreur sqflite détectée, tentative de déchiffrement sans sauvegarde locale');
+        try {
+          // Réessayer le déchiffrement sans sauvegarder localement
+          final result = await MessageCipherV2.decrypt(
+            groupId: payload['groupId'] as String,
+            myUserId: _authProvider.userId!,
+            myDeviceId: await SessionDeviceService.instance.getOrCreateDeviceId(),
+            messageV2: payload,
+            keyDirectory: _keyDirectory,
+          );
+          final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
+          errorText = decryptedText; // Succès du déchiffrement
+        } catch (decryptError) {
+          debugPrint('❌ Échec déchiffrement après erreur sqflite: $decryptError');
+          errorText = '[❌ Erreur déchiffrement]';
+        }
+      }
+      
+      // Créer un message avec erreur ou texte déchiffré pour affichage
       final msg = Message(
         id: payload['messageId'] as String,
         conversationId: payload['convId'] as String,
@@ -1011,8 +1470,17 @@ class ConversationProvider extends ChangeNotifier {
         senderPublicKey: null,
         timestamp: (payload['sentAt'] as num).toInt(),
         v2Data: payload,
-        decryptedText: '[❌ Erreur déchiffrement]',
+        decryptedText: errorText,
       );
+      
+      // Mettre en cache même en cas d'erreur
+      _decryptedCache[msg.id] = errorText;
+      
+      // Sauvegarder localement si possible (non-bloquant)
+      LocalMessageStorage.instance.saveMessage(msg).catchError((saveError) {
+        debugPrint('⚠️ Erreur sauvegarde message local (non-bloquant): $saveError');
+      });
+      
       addLocalMessage(msg);
     }
   }

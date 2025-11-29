@@ -4,7 +4,7 @@ import '../../core/models/group_info.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/group_provider.dart';
 import '../../core/services/websocket_service.dart';
-import 'group_detail_screen.dart';
+import 'group_nav_screen.dart';
 import 'group_screen.dart';
 import 'login_screen.dart';
 
@@ -109,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => GroupDetailScreen(
+                            builder: (_) => GroupNavScreen(
                               groupId: g.groupId,
                               groupName: g.name,
                             ),
