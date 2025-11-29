@@ -27,8 +27,11 @@ class GroupProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _members = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _myDevices = <Map<String, dynamic>>[];
 
+  final AuthProvider _authProvider;
+  
   GroupProvider(AuthProvider authProvider)
-      : _apiService = ApiService(authProvider),
+      : _authProvider = authProvider,
+        _apiService = ApiService(authProvider),
         _webSocketService = WebSocketService.instance {
     debugPrint('🏗️ [GroupProvider] Setting up WebSocket callbacks');
     _webSocketService.onGroupJoined = _onWebSocketGroupJoined;
@@ -244,16 +247,25 @@ class GroupProvider extends ChangeNotifier {
     }
   }
 
-  /// Liste mes devices actifs pour le groupe
+  /// Liste mes devices pour le groupe (actifs et révoqués)
   Future<void> fetchMyDevices(String groupId, String myUserId) async {
     try {
-      final entries = await _apiService.fetchGroupDeviceKeys(groupId);
-      _myDevices = entries
-          .where((e) => e['userId'] == myUserId)
-          .toList();
+      // CORRECTION: Utiliser le nouvel endpoint dédié qui retourne tous les devices de l'utilisateur
+      // Cela évite de récupérer tous les devices du groupe et de filtrer côté client
+      _myDevices = await _apiService.fetchMyGroupDeviceKeys(groupId);
       notifyListeners();
     } catch (e) {
       debugPrint('❌ GroupProvider.fetchMyDevices error: $e');
+      // Fallback: utiliser l'ancienne méthode si le nouvel endpoint n'existe pas encore
+      try {
+        final entries = await _apiService.fetchGroupDeviceKeys(groupId);
+        _myDevices = entries
+            .where((e) => e['userId'] == myUserId)
+            .toList();
+        notifyListeners();
+      } catch (fallbackError) {
+        debugPrint('❌ GroupProvider.fetchMyDevices fallback error: $fallbackError');
+      }
     }
   }
 
@@ -261,8 +273,16 @@ class GroupProvider extends ChangeNotifier {
   Future<void> revokeMyDevice(String groupId, String deviceId) async {
     try {
       await _apiService.revokeGroupDevice(groupId: groupId, deviceId: deviceId);
-      _myDevices.removeWhere((d) => d['deviceId'] == deviceId);
-      notifyListeners();
+      // CORRECTION: Rafraîchir depuis le serveur au lieu de supprimer localement
+      // Cela garantit que la liste est à jour et reflète le statut 'revoked' si nécessaire
+      final myUserId = _authProvider.userId;
+      if (myUserId != null) {
+        await fetchMyDevices(groupId, myUserId);
+      } else {
+        // Fallback: supprimer localement si userId n'est pas disponible
+        _myDevices.removeWhere((d) => d['deviceId'] == deviceId);
+        notifyListeners();
+      }
     } catch (e) {
       debugPrint('❌ GroupProvider.revokeMyDevice error: $e');
       rethrow;

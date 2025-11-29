@@ -166,13 +166,16 @@ class _GroupDetailInfoScreenState extends State<GroupDetailInfoScreen> {
             icon: const Icon(Icons.how_to_reg),
             tooltip: "Demandes d'adhésion",
             onPressed: () {
+              final bool isCreator = groupDetail != null && 
+                  currentUserId != null &&
+                  groupDetail['creatorId'] == currentUserId;
               Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (_) => JoinRequestsScreen(
                     groupId: widget.groupId,
                     groupName: widget.groupName,
-                    isCreator: true,
+                    isCreator: isCreator,
                   ),
                 ),
               ).then((_) {

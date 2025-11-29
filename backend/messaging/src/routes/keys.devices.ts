@@ -46,6 +46,40 @@ export default async function routes(app: FastifyInstance) {
     return rows;
   });
 
+  // CORRECTION: Nouvel endpoint pour récupérer tous les devices d'un utilisateur (y compris révoqués)
+  app.get('/api/keys/group/:groupId/my-devices', {
+    schema: {
+      params: Type.Object({ groupId: Type.String({ format: 'uuid' }) }),
+      response: { 200: Type.Array(Type.Object({
+        userId: Type.String({ format: 'uuid' }),
+        deviceId: Type.String(),
+        pk_sig: Type.String(),
+        pk_kem: Type.String(),
+        key_version: Type.Integer(),
+        status: Type.String()
+      })) }
+    }
+  }, async (req, reply) => {
+    const userId = (req.user as any).sub;
+    const { groupId } = req.params as any;
+    const rows = await app.db.any(
+      `SELECT user_id as "userId", device_id as "deviceId",
+              encode(pk_sig,'base64') as "pk_sig",
+              encode(pk_kem,'base64') as "pk_kem",
+              key_version as "key_version",
+              status
+         FROM group_device_keys
+         WHERE group_id = $1 AND user_id = $2
+           AND pk_sig IS NOT NULL 
+           AND pk_kem IS NOT NULL
+           AND length(pk_sig) = 32 
+           AND length(pk_kem) = 32
+         ORDER BY created_at DESC`,
+      [groupId, userId]
+    );
+    return rows;
+  });
+
   app.post('/api/keys/group/:groupId/devices', {
     schema: {
       params: Type.Object({ groupId: Type.String({ format: 'uuid' }) }),

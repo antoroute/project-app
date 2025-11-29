@@ -239,6 +239,19 @@ class ApiService {
     throw Exception('Erreur ${res.statusCode} lors du fetch des clés devices.');
   }
 
+  // CORRECTION: Nouvelle méthode pour récupérer uniquement les devices de l'utilisateur courant (y compris révoqués)
+  Future<List<Map<String, dynamic>>> fetchMyGroupDeviceKeys(String groupId) async {
+    final headers = await _buildHeaders();
+    final uri = Uri.parse('$_baseUrl/keys/group/$groupId/my-devices');
+    final res = await http.get(uri, headers: headers);
+    if (res.statusCode == 200) {
+      final List<dynamic> body = jsonDecode(res.body) as List<dynamic>;
+      return body.cast<Map<String, dynamic>>();
+    }
+    if (res.statusCode == 429) throw RateLimitException();
+    throw Exception('Erreur ${res.statusCode} lors du fetch de mes clés devices.');
+  }
+
   Future<void> publishGroupDeviceKey({
     required String groupId,
     required String deviceId,

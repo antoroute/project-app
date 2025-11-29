@@ -169,6 +169,7 @@ export default async function routes(app: FastifyInstance) {
   });
 
   // POST /api/groups/:id/requests/:rid/accept
+  // Route legacy - SEUL LE CRÉATEUR PEUT ACCEPTER
   app.post('/api/groups/:id/requests/:rid/accept', {
     schema: {
       params: Type.Object({
@@ -180,9 +181,16 @@ export default async function routes(app: FastifyInstance) {
     const approverId = (req.user as any).sub;
     const { id: groupId, rid } = req.params as any;
 
-    // Vérifie que l'approver est membre du groupe (politique simple)
+    // Vérifie que l'approver est membre du groupe
     const a = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [approverId, groupId]);
     if (!a.length) return reply.code(403).send({ error: 'forbidden' });
+
+    // Vérifie que l'approver est le créateur du groupe
+    const group = await app.db.oneOrNone(`SELECT creator_id FROM groups WHERE id=$1`, [groupId]);
+    if (!group) return reply.code(404).send({ error: 'group_not_found' });
+    if (group.creator_id !== approverId) {
+      return reply.code(403).send({ error: 'only_creator_can_handle' });
+    }
 
     const jr = await app.db.one(`SELECT * FROM join_requests WHERE id=$1 AND group_id=$2 AND status='pending'`, [rid, groupId]);
 
@@ -339,27 +347,80 @@ export default async function routes(app: FastifyInstance) {
 
     const rows = await app.db.any(
       `SELECT jr.id, jr.user_id, jr.device_id, jr.status, jr.created_at,
-              u.email, u.username
+              u.email, u.username,
+              COALESCE(COUNT(CASE WHEN jrv.vote = true THEN 1 END), 0)::int as "yesVotes",
+              COALESCE(COUNT(CASE WHEN jrv.vote = false THEN 1 END), 0)::int as "noVotes"
          FROM join_requests jr
          JOIN users u ON u.id = jr.user_id
+         LEFT JOIN join_request_votes jrv ON jrv.join_request_id = jr.id
         WHERE jr.group_id = $1 AND jr.status = 'pending'
+        GROUP BY jr.id, jr.user_id, jr.device_id, jr.status, jr.created_at, u.email, u.username
         ORDER BY jr.created_at DESC`,
       [groupId]
     );
     
-    return rows.map((row: { id: any; user_id: any; device_id: any; status: any; created_at: { toISOString: () => any; }; email: any; username: any; }) => ({
+    return rows.map((row: { id: any; user_id: any; device_id: any; status: any; created_at: { toISOString: () => any; }; email: any; username: any; yesVotes: any; noVotes: any; }) => ({
       id: row.id,
       userId: row.user_id,
       deviceId: row.device_id,
       status: row.status,
       createdAt: row.created_at.toISOString(),
       email: row.email,
-      username: row.username
+      username: row.username,
+      yesVotes: row.yesVotes,
+      noVotes: row.noVotes
     }));
   });
 
+  // POST /api/groups/:id/join-requests/:reqId/vote
+  // Permet aux membres du groupe de voter oui/non sur une demande de jointure
+  app.post('/api/groups/:id/join-requests/:reqId/vote', {
+    schema: {
+      params: Type.Object({ 
+        id: Type.String({ format: 'uuid' }),
+        reqId: Type.String({ format: 'uuid' })
+      }),
+      body: Type.Object({
+        vote: Type.Boolean()
+      })
+    }
+  }, async (req, reply) => {
+    const voterId = (req.user as any).sub;
+    const { id: groupId, reqId } = req.params as any;
+    const { vote } = req.body as any;
+
+    // Vérifie que le votant est membre du groupe
+    const membership = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [voterId, groupId]);
+    if (membership.length === 0) return reply.code(403).send({ error: 'forbidden' });
+
+    // Vérifie que la demande existe et est en attente
+    const jr = await app.db.oneOrNone(`SELECT id FROM join_requests WHERE id=$1 AND group_id=$2 AND status='pending'`, [reqId, groupId]);
+    if (!jr) return reply.code(404).send({ error: 'request_not_found' });
+
+    // Insère ou met à jour le vote (un utilisateur ne peut voter qu'une fois)
+    await app.db.none(
+      `INSERT INTO join_request_votes(join_request_id, user_id, vote)
+       VALUES($1, $2, $3)
+       ON CONFLICT (join_request_id, user_id) 
+       DO UPDATE SET vote = $3, created_at = NOW()`,
+      [reqId, voterId, vote]
+    );
+
+    // Récupère les compteurs mis à jour
+    const counts = await app.db.one(
+      `SELECT 
+         COALESCE(COUNT(CASE WHEN vote = true THEN 1 END), 0)::int as "yesVotes",
+         COALESCE(COUNT(CASE WHEN vote = false THEN 1 END), 0)::int as "noVotes"
+        FROM join_request_votes
+        WHERE join_request_id = $1`,
+      [reqId]
+    );
+
+    return { yesVotes: counts.yesVotes, noVotes: counts.noVotes };
+  });
+
   // POST /api/groups/:id/join-requests/:reqId/handle
-  // Route pour accepter/rejeter une demande de jointure (compatibilité frontend)
+  // Route pour accepter/rejeter une demande de jointure (SEUL LE CRÉATEUR PEUT DÉCIDER)
   app.post('/api/groups/:id/join-requests/:reqId/handle', {
     schema: {
       params: Type.Object({ 
@@ -378,6 +439,13 @@ export default async function routes(app: FastifyInstance) {
     // Vérifie que l'approver est membre du groupe
     const membership = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [approverId, groupId]);
     if (membership.length === 0) return reply.code(403).send({ error: 'forbidden' });
+
+    // Vérifie que l'approver est le créateur du groupe
+    const group = await app.db.oneOrNone(`SELECT creator_id FROM groups WHERE id=$1`, [groupId]);
+    if (!group) return reply.code(404).send({ error: 'group_not_found' });
+    if (group.creator_id !== approverId) {
+      return reply.code(403).send({ error: 'only_creator_can_handle' });
+    }
 
     if (action === 'accept') {
       // Code pour accepter la demande (identique à la route /accept)
@@ -452,6 +520,7 @@ export default async function routes(app: FastifyInstance) {
   });
 
   // POST /api/groups/:id/requests/:rid/reject
+  // Route legacy - SEUL LE CRÉATEUR PEUT REJETER
   app.post('/api/groups/:id/requests/:rid/reject', {
     schema: {
       params: Type.Object({
@@ -465,6 +534,13 @@ export default async function routes(app: FastifyInstance) {
 
     const a = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [approverId, groupId]);
     if (!a.length) return reply.code(403).send({ error: 'forbidden' });
+
+    // Vérifie que l'approver est le créateur du groupe
+    const group = await app.db.oneOrNone(`SELECT creator_id FROM groups WHERE id=$1`, [groupId]);
+    if (!group) return reply.code(404).send({ error: 'group_not_found' });
+    if (group.creator_id !== approverId) {
+      return reply.code(403).send({ error: 'only_creator_can_handle' });
+    }
 
     await app.db.none(`UPDATE join_requests SET status='rejected', handled_by=$1 WHERE id=$2`, [approverId, rid]);
     return { ok: true };

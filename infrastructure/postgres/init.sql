@@ -48,13 +48,19 @@ CREATE TABLE IF NOT EXISTS join_requests (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Votes sur les demandes de jointure (un membre peut voter une seule fois par demande)
 CREATE TABLE IF NOT EXISTS join_request_votes (
-  request_id UUID NOT NULL REFERENCES join_requests(id) ON DELETE CASCADE,
-  voter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  vote BOOLEAN NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (request_id, voter_id)
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  join_request_id UUID NOT NULL REFERENCES join_requests(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  vote BOOLEAN NOT NULL, -- true = oui, false = non
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(join_request_id, user_id)
 );
+
+-- Index pour améliorer les performances des requêtes de comptage
+CREATE INDEX IF NOT EXISTS idx_join_request_votes_request_id ON join_request_votes(join_request_id);
+CREATE INDEX IF NOT EXISTS idx_join_request_votes_user_id ON join_request_votes(user_id);
 
 -- Clés publiques par GROUPE, par UTILISATEUR, par APPAREIL
 CREATE TABLE IF NOT EXISTS group_device_keys (
