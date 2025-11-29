@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_message_app/core/services/api_service.dart';
 
 /// Structure d'une entrée (user, device) et clés publiques + empreintes
@@ -64,19 +63,8 @@ class KeyDirectoryService {
   /// Récupère et met en cache la liste (user,device,keys) d'un groupe
   Future<List<GroupDeviceKeyEntry>> fetchGroupDevices(String groupId) async {
     final raw = await _api.fetchGroupDeviceKeys(groupId);
-    debugPrint('🔍 fetchGroupDevices DEBUG pour group $groupId:');
-    debugPrint('  - raw devices count: ${raw.length}');
-    for (int i = 0; i < raw.length; i++) {
-      final device = raw[i];
-      debugPrint('    Device $i: ${device['userId']}/${device['deviceId']}');
-      debugPrint('      - pk_sig length: ${(device['pk_sig'] as String).length}');
-      debugPrint('      - pk_kem length: ${(device['pk_kem'] as String).length}');
-      debugPrint('      - status: ${device['status']}');
-    }
-    
     final entries = raw.map((e) => GroupDeviceKeyEntry.fromJson(e)).toList();
     _cache[groupId] = entries;
-    debugPrint('🔐 KeyDirectory cache updated for group $groupId: ${entries.length} devices');
     return entries;
   }
 
@@ -110,6 +98,12 @@ class KeyDirectoryService {
     final all = await getGroupDevices(groupId);
     final set = userIds.toSet();
     return all.where((e) => set.contains(e.userId) && e.status == 'active').toList();
+  }
+
+  /// Invalide le cache pour un groupe (utile après révocation d'un device)
+  void invalidateCache(String groupId) {
+    _cache.remove(groupId);
+    _pendingRequests.remove(groupId);
   }
 }
 

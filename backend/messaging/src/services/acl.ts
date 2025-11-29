@@ -24,6 +24,14 @@ export function initAclService(app: FastifyInstance) {
     );
     if (s.length === 0) return false;
 
+    // CORRECTION CRITIQUE: Vérifier que le device de l'expéditeur est actif
+    // Un device révoqué ne peut plus envoyer de messages
+    const senderDevice = await app.db.any(
+      `SELECT 1 FROM group_device_keys WHERE group_id=$1 AND user_id=$2 AND device_id=$3 AND status='active'`,
+      [groupId, senderUserId, senderDeviceId]
+    );
+    if (senderDevice.length === 0) return false;
+
     // 3) destinataires membres de la conv ET devices actifs
     for (const r of recipients) {
       const r1 = await app.db.any(

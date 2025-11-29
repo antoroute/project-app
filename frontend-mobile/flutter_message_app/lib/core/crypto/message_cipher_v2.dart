@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math' as math;
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart' as crypto;
@@ -128,18 +127,9 @@ class MessageCipherV2 {
     final ciphertextB64 = payload['ciphertext'] as String;
     final ciphertextHash = crypto.sha256.convert(utf8.encode(ciphertextB64)).toString();
     
-    // Logs de débogage pour les messages longs
-    if (ciphertextB64.length > 10000) {
-      debugPrint('🔍 Signature message long: ${ciphertextB64.length} chars Base64');
-      debugPrint('🔍 Hash du ciphertext: ${ciphertextHash.substring(0, 16)}...');
-    }
-    
     sb.write(ciphertextHash);
     
     final canonicalString = sb.toString();
-    if (canonicalString.length > 50000) {
-      debugPrint('⚠️ Chaîne canonique très longue: ${canonicalString.length} chars');
-    }
     
     return Uint8List.fromList(utf8.encode(canonicalString));
   }
@@ -184,6 +174,7 @@ class MessageCipherV2 {
     for (final entry in recipientsDevices) {
       // Skip recipients with empty keys (they haven't published their keys yet)
       if (entry.pkKemB64.isEmpty) {
+        // Skip recipients with empty keys
         continue;
       }
       
@@ -241,17 +232,10 @@ class MessageCipherV2 {
     };
 
     // sign
-    debugPrint('📝 Signature pour sender $senderDeviceId:');
     final edKey = await KeyManagerFinal.instance.loadEd25519KeyPair(groupId, senderDeviceId);
-    debugPrint('  - Ed25519 keypair obtenu: ✅');
     final ed = Ed25519();
     final signature = await ed.sign(_concatCanonical(payload), keyPair: edKey);
-    debugPrint('  - Signature créée: ${signature.bytes.length} bytes');
-    
     final sigB64 = _b64(Uint8List.fromList(signature.bytes));
-    debugPrint('  - Signature encoded length: ${sigB64.length} chars');
-    debugPrint('  - Signature encoded preview: ${sigB64.substring(0, math.min(20, sigB64.length))}...');
-    
     payload['sig'] = sigB64;
 
     return payload;
@@ -350,7 +334,17 @@ class MessageCipherV2 {
     final iv = base64.decode(ivB64);
     final ct = base64.decode(ctB64);
     final macLen2 = 16;
+    
+    // CORRECTION: Validation pour éviter RangeError
+    if (ct.length < macLen2) {
+      throw Exception('Ciphertext trop court: ${ct.length} < $macLen2');
+    }
+    
     final ctLen = ct.length - macLen2;
+    if (ctLen < 0) {
+      throw Exception('Longueur ciphertext invalide: $ctLen');
+    }
+    
     final contentBox = SecretBox(
       ct.sublist(0, ctLen),
       nonce: iv,
@@ -423,7 +417,17 @@ class MessageCipherV2 {
     final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
     final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
     final macLen = 16; // AES-GCM tag size
+    
+    // CORRECTION: Validation pour éviter RangeError
+    if (wrapBytes.length < macLen) {
+      throw Exception('Wrap bytes trop courts: ${wrapBytes.length} < $macLen');
+    }
+    
     final cipherLen = wrapBytes.length - macLen;
+    if (cipherLen < 0) {
+      throw Exception('Longueur cipher invalide: $cipherLen');
+    }
+    
     final wrapBox = SecretBox(
       wrapBytes.sublist(0, cipherLen),
       nonce: wrapNonce,
@@ -450,29 +454,13 @@ class MessageCipherV2 {
     final sigPubBytes = base64.decode(_cleanBase64(senderEntry.pkSigB64));
     final pub = SimplePublicKey(sigPubBytes, type: KeyPairType.ed25519);
     
-    // Debug de la signature avant décodage
     final sigString = messageV2['sig'] as String;
     final sigBytes = base64.decode(_cleanBase64(sigString));
-    
-    // Logs de débogage pour les messages longs
-    final ciphertextB64 = messageV2['ciphertext'] as String;
-    if (ciphertextB64.length > 10000) {
-      debugPrint('🔍 Validation signature message long: ${ciphertextB64.length} chars Base64');
-      debugPrint('🔍 Signature reçue: ${sigString.substring(0, math.min(20, sigString.length))}...');
-    }
     
     final verified = await ed.verify(
       _concatCanonical(messageV2),
       signature: Signature(sigBytes, publicKey: pub),
     );
-    
-    // Log du résultat de validation pour les messages longs
-    if (ciphertextB64.length > 10000) {
-      debugPrint('🔍 Signature validée: $verified');
-      if (!verified) {
-        debugPrint('❌ Échec validation signature pour message long');
-      }
-    }
 
     // decrypt content avec validation Base64
     String ivB64 = messageV2['iv'] as String;
@@ -485,7 +473,17 @@ class MessageCipherV2 {
     final iv = base64.decode(ivB64);
     final ct = base64.decode(ctB64);
     final macLen2 = 16;
+    
+    // CORRECTION: Validation pour éviter RangeError
+    if (ct.length < macLen2) {
+      throw Exception('Ciphertext trop court: ${ct.length} < $macLen2');
+    }
+    
     final ctLen = ct.length - macLen2;
+    if (ctLen < 0) {
+      throw Exception('Longueur ciphertext invalide: $ctLen');
+    }
+    
     final contentBox = SecretBox(
       ct.sublist(0, ctLen),
       nonce: iv,

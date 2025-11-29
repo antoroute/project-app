@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/group_provider.dart';
+import '../../core/providers/conversation_provider.dart';
 
 class MyDevicesScreen extends StatefulWidget {
   final String groupId;
@@ -80,6 +81,17 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
                                 // CORRECTION: Rafraîchir les données après révocation
                                 // revokeMyDevice appelle maintenant fetchMyDevices qui met à jour la liste
                                 await group.revokeMyDevice(widget.groupId, d['deviceId'] as String);
+                                
+                                // CORRECTION CRITIQUE: Invalider le cache des clés pour que les autres devices
+                                // ne puissent plus utiliser les clés du device révoqué
+                                try {
+                                  final conversationProvider = context.read<ConversationProvider>();
+                                  conversationProvider.keyDirectory.invalidateCache(widget.groupId);
+                                } catch (e) {
+                                  // Si ConversationProvider n'est pas disponible, ce n'est pas critique
+                                  // Le cache sera invalidé lors du prochain fetchGroupDevices
+                                }
+                                
                                 // Le notifyListeners() dans fetchMyDevices mettra à jour l'UI automatiquement
                                 // grâce à context.watch<GroupProvider>()
                               }

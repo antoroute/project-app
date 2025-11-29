@@ -45,7 +45,6 @@ class MessageKeyCache {
       // Vérifier si déjà en cache
       final cached = _cache[messageId];
       if (cached != null && !cached.isExpired) {
-        debugPrint('🔑 Message key récupérée depuis le cache: $messageId');
         return cached.key;
       }
 
@@ -68,7 +67,6 @@ class MessageKeyCache {
         // Nettoyer si nécessaire
         _cleanupIfNeeded();
         
-        debugPrint('✅ Message key dérivée et mise en cache: $messageId');
       }
 
       return messageKey;
@@ -138,7 +136,6 @@ class MessageKeyCache {
       
       if (mine == null) {
         // Message pas pour nous
-        debugPrint('⚠️ Message key non trouvée pour notre device');
         return null;
       }
 
@@ -147,7 +144,16 @@ class MessageKeyCache {
       final wrapBytes = base64.decode(mine['wrap'] as String);
       final wrapNonce = base64.decode(mine['nonce'] as String);
       final macLen = 16;
+      
+      // CORRECTION: Validation pour éviter RangeError
+      if (wrapBytes.length < macLen) {
+        return null;
+      }
+      
       final cipherLen = wrapBytes.length - macLen;
+      if (cipherLen < 0) {
+        return null;
+      }
       
       final wrapBox = SecretBox(
         wrapBytes.sublist(0, cipherLen),

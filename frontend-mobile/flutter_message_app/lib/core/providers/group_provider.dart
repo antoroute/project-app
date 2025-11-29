@@ -82,13 +82,9 @@ class GroupProvider extends ChangeNotifier {
       final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       
       // S'assurer que les clés device sont générées
-      debugPrint('🔑 Génération des clés device pour group: $groupId, device: $deviceId');
       await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);
       
       final pubKeys = await KeyManagerFinal.instance.publicKeysBase64(groupId, deviceId);
-      debugPrint('🔑 Clés générées - Sig: ${pubKeys['pk_sig']!.substring(0, 10)}..., KEM: ${pubKeys['pk_kem']!.substring(0, 10)}...');
-      debugPrint('🔑 Longueurs: Sig=${pubKeys['pk_sig']!.length}, KEM=${pubKeys['pk_kem']!.length}');
-      
       final sigPub = pubKeys['pk_sig']!;
       final kemPub = pubKeys['pk_kem']!;
       
@@ -98,8 +94,6 @@ class GroupProvider extends ChangeNotifier {
         pkSigB64: sigPub,
         pkKemB64: kemPub,
       );
-      
-      debugPrint('✅ Clés du créateur publiées pour le groupe $groupId');
       
       // Refresh groups list
       await fetchUserGroups();
@@ -143,15 +137,11 @@ class GroupProvider extends ChangeNotifier {
     try {
       // 🚀 NOUVEAU: Générer les clés device lors de la demande
       final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
-      
-      debugPrint('🔑 Génération des clés device pour la demande de jointure: group=$groupId, device=$deviceId');
       await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);
       
       final pubKeys = await KeyManagerFinal.instance.publicKeysBase64(groupId, deviceId);
       final deviceSigPub = pubKeys['pk_sig']!;
       final deviceKemPub = pubKeys['pk_kem']!;
-      
-      debugPrint('🔑 Clés device générées pour la demande - Sig: ${deviceSigPub.substring(0, 10)}..., KEM: ${deviceKemPub.substring(0, 10)}...');
       
       await _apiService.sendJoinRequestWithDeviceKeys(
         groupId: groupId,
@@ -161,8 +151,6 @@ class GroupProvider extends ChangeNotifier {
         deviceSigPubKeyB64: deviceSigPub,
         deviceKemPubKeyB64: deviceKemPub,
       );
-      
-      debugPrint('✅ Demande de jointure envoyée avec clés device');
     } catch (error) {
       debugPrint('❌ GroupProvider.sendJoinRequest error: $error');
       rethrow;
@@ -298,7 +286,6 @@ class GroupProvider extends ChangeNotifier {
         pkSigB64: pkSigB64,
         pkKemB64: pkKemB64,
       );
-      debugPrint('✅ Device keys published via GroupProvider.publishDeviceKeys');
     } catch (e) {
       debugPrint('❌ GroupProvider.publishDeviceKeys error: $e');
       rethrow;

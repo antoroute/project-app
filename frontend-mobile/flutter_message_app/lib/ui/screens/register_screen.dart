@@ -19,6 +19,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _confirmPasswordController = TextEditingController();
   final GlobalKey<FormState> _formKey                    = GlobalKey<FormState>();
   bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) {
@@ -85,12 +87,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Créer un compte')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: <Widget>[
+      resizeToAvoidBottomInset: true,
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: <Widget>[
               TextFormField(
                 controller: _usernameController,
                 autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -126,18 +130,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
               TextFormField(
                 controller: _passwordController,
                 autovalidateMode: AutovalidateMode.onUserInteraction,
-                decoration:
-                    const InputDecoration(labelText: 'Mot de passe'),
-                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Mot de passe',
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
+                ),
+                obscureText: _obscurePassword,
                 validator: _validatePassword,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _confirmPasswordController,
                 autovalidateMode: AutovalidateMode.onUserInteraction,
-                decoration:
-                    const InputDecoration(labelText: 'Confirmer le mot de passe'),
-                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Confirmer le mot de passe',
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscureConfirmPassword = !_obscureConfirmPassword;
+                      });
+                    },
+                  ),
+                ),
+                obscureText: _obscureConfirmPassword,
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Confirmez le mot de passe';
@@ -165,7 +191,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 },
                 child: const Text('Déjà inscrit ? Se connecter'),
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

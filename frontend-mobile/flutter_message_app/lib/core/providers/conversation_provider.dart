@@ -967,13 +967,27 @@ class ConversationProvider extends ChangeNotifier {
     try {
       // Note: syncState non utilisé pour l'instant, mais peut être utile pour optimisations futures
       await LocalMessageStorage.instance.getSyncState(conversationId);
-      final lastLocalTimestamp = await LocalMessageStorage.instance.getLastMessageTimestamp(conversationId);
+      
+      // CORRECTION: Utiliser le timestamp du dernier message en mémoire (même s'il vient d'un autre device)
+      // plutôt que le dernier message local, pour s'assurer de récupérer tous les messages
+      // envoyés par d'autres devices du même compte
+      int? cursorTimestamp;
+      final messagesInMemory = _messages[conversationId];
+      if (messagesInMemory != null && messagesInMemory.isNotEmpty) {
+        // Utiliser le timestamp du message le plus récent en mémoire
+        final lastMessage = messagesInMemory.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+        cursorTimestamp = lastMessage.timestamp;
+      } else {
+        // Fallback: utiliser le dernier timestamp local
+        final lastLocalTimestamp = await LocalMessageStorage.instance.getLastMessageTimestamp(conversationId);
+        cursorTimestamp = lastLocalTimestamp;
+      }
       
       // Charger les nouveaux messages depuis le serveur
       final items = await _apiService.fetchMessagesV2(
         conversationId: conversationId,
         limit: limit,
-        cursor: lastLocalTimestamp != null ? (lastLocalTimestamp * 1000).toString() : null,
+        cursor: cursorTimestamp != null ? (cursorTimestamp * 1000).toString() : null,
       );
       
       if (items.isEmpty) {
@@ -981,7 +995,7 @@ class ConversationProvider extends ChangeNotifier {
         await LocalMessageStorage.instance.updateSyncState(
           conversationId,
           DateTime.now().millisecondsSinceEpoch,
-          lastMessageTimestamp: lastLocalTimestamp,
+          lastMessageTimestamp: cursorTimestamp,
         );
         debugPrint('✅ Synchronisation serveur: aucun nouveau message');
         return;
@@ -1054,7 +1068,17 @@ class ConversationProvider extends ChangeNotifier {
       }
       
       // Mettre à jour l'état de sync
-      final latestTimestamp = items.isNotEmpty ? items.first.sentAt : lastLocalTimestamp;
+      // CORRECTION: Utiliser le timestamp du message le plus récent (en mémoire ou nouveau)
+      int? latestTimestamp;
+      if (items.isNotEmpty) {
+        latestTimestamp = items.first.sentAt;
+      } else if (messagesInMemory != null && messagesInMemory.isNotEmpty) {
+        final lastMessage = messagesInMemory.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+        latestTimestamp = lastMessage.timestamp;
+      } else {
+        latestTimestamp = cursorTimestamp;
+      }
+      
       await LocalMessageStorage.instance.updateSyncState(
         conversationId,
         DateTime.now().millisecondsSinceEpoch,
@@ -1174,15 +1198,27 @@ class ConversationProvider extends ChangeNotifier {
       final members = conversationDetail['members'] as List<dynamic>? ?? [];
       final memberUserIds = members.map((m) => m['userId'] as String).toList();
       
-      debugPrint('📋 Membres de la conversation: ${memberUserIds.length} utilisateurs');
+      // CORRECTION: Forcer un refresh du cache AVANT l'envoi pour s'assurer d'avoir tous les devices à jour
+      // Cela garantit que tous les devices de l'expéditeur (y compris les autres appareils) sont inclus
+      final allGroupDevices = await _keyDirectory.fetchGroupDevices(groupId);
       
       // Filtrer les devices pour ne garder que ceux des membres de la conversation
-      final allGroupDevices = await _keyDirectory.fetchGroupDevices(groupId);
-      final conversationDevices = allGroupDevices
+      var conversationDevices = allGroupDevices
           .where((device) => memberUserIds.contains(device.userId) && device.status == 'active')
           .toList();
       
-      debugPrint('🔑 Devices filtrés: ${conversationDevices.length} devices (sur ${allGroupDevices.length} du groupe)');
+      // CORRECTION CRITIQUE: Vérifier que notre propre device est bien dans la liste
+      // Si ce n'est pas le cas, c'est que le cache n'est pas à jour, on force un refresh
+      final myDeviceInList = conversationDevices.any((d) => d.userId == myUserId && d.deviceId == myDeviceId);
+      if (!myDeviceInList) {
+        // Attendre un peu pour que les clés soient propagées
+        await Future.delayed(const Duration(milliseconds: 100));
+        // Re-fetch depuis le serveur
+        final refreshedDevices = await _keyDirectory.fetchGroupDevices(groupId);
+        conversationDevices = refreshedDevices
+            .where((device) => memberUserIds.contains(device.userId) && device.status == 'active')
+            .toList();
+      }
       
       if (conversationDevices.isEmpty) {
         throw Exception('Aucun device actif trouvé pour les membres de la conversation');
