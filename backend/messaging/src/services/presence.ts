@@ -57,18 +57,41 @@ export function initPresenceService(io: Server, app: any) {
     broadcastPresenceToGroups(userId, true, count);
     broadcastPresenceToConversations(userId, true, count);
     
-    // CORRECTION: Envoyer l'état de présence actuel uniquement aux groupes de l'utilisateur
-    console.log(`[Presence] Broadcasting current presence state to user's groups`);
+    // CORRECTION: Envoyer l'état de présence actuel uniquement aux groupes communs
+    // Pour chaque utilisateur en ligne, vérifier s'il est dans les mêmes groupes que le nouvel utilisateur
+    console.log(`[Presence] Broadcasting current presence state to user's groups (filtered by membership)`);
     app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
       .then((userGroups: any[]) => {
         console.log(`[Presence] User ${userId} is in ${userGroups.length} groups`);
-        userGroups.forEach((group: any) => {
-          for (const [uid, socketSet] of state.entries()) {
-            if (socketSet.size > 0) {
-              io.to(`group:${group.group_id}`).emit('presence:update', { userId: uid, online: true, count: socketSet.size });
-            }
+        const userGroupIds = new Set(userGroups.map((g: any) => g.group_id));
+        
+        // Pour chaque utilisateur en ligne, vérifier s'il est dans les mêmes groupes
+        for (const [uid, socketSet] of state.entries()) {
+          if (socketSet.size > 0 && uid !== userId) {
+            // Vérifier si cet utilisateur est dans au moins un groupe commun
+            app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [uid])
+              .then((otherUserGroups: any[]) => {
+                const otherUserGroupIds = new Set(otherUserGroups.map((g: any) => g.group_id));
+                const commonGroups = Array.from(userGroupIds).filter(gid => otherUserGroupIds.has(gid));
+                
+                // Émettre la présence uniquement dans les groupes communs
+                commonGroups.forEach((groupId: string) => {
+                  io.to(`group:${groupId}`).emit('presence:update', { 
+                    userId: uid, 
+                    online: true, 
+                    count: socketSet.size 
+                  });
+                });
+                
+                if (commonGroups.length > 0) {
+                  console.log(`[Presence] Broadcasted presence of ${uid} to ${commonGroups.length} common groups`);
+                }
+              })
+              .catch((err: any) => {
+                console.error(`[Presence] Error checking groups for user ${uid}:`, err);
+              });
           }
-        });
+        }
       })
       .catch((err: any) => {
         console.error(`[Presence] Error broadcasting presence state for ${userId}:`, err);

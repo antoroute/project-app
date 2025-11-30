@@ -170,6 +170,9 @@ class ConversationProvider extends ChangeNotifier {
     // Ne définir les callbacks que s'ils ne sont pas déjà définis
     if (_webSocketService.onNewMessageV2 == null) {
       _webSocketService.onNewMessageV2 = _onWebSocketNewMessageV2;
+      debugPrint('✅ [ConversationProvider] Callback onNewMessageV2 branché');
+    } else {
+      debugPrint('⚠️ [ConversationProvider] Callback onNewMessageV2 déjà branché');
     }
     // Les callbacks de présence sont maintenant gérés par le service global
     debugPrint('👥 [ConversationProvider] Presence callbacks handled by global service');
@@ -1512,12 +1515,32 @@ class ConversationProvider extends ChangeNotifier {
   void _onWebSocketNewMessageV2(Map<String, dynamic> payload) async {
     try {
       final myUserId = _authProvider.userId;
-      if (myUserId == null) return;
+      if (myUserId == null) {
+        debugPrint('⚠️ [ConversationProvider] myUserId est null, impossible de traiter le message');
+        return;
+      }
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
       final groupId = payload['groupId'] as String;
       final messageId = payload['messageId'] as String;
       final convId = payload['convId'] as String;
-      final senderId = (payload['sender'] as Map)['userId'] as String;
+      
+      // Extraire le senderId avec vérification
+      final senderData = payload['sender'];
+      if (senderData == null || senderData is! Map) {
+        debugPrint('⚠️ [ConversationProvider] Payload sender invalide: $senderData');
+        return;
+      }
+      final senderId = senderData['userId'] as String?;
+      if (senderId == null) {
+        debugPrint('⚠️ [ConversationProvider] senderId est null dans le payload');
+        debugPrint('⚠️ [ConversationProvider] Payload sender: $senderData');
+        return;
+      }
+      
+      debugPrint('🔍 [ConversationProvider] Comparaison senderId:');
+      debugPrint('🔍 [ConversationProvider]   senderId du message: $senderId');
+      debugPrint('🔍 [ConversationProvider]   myUserId: $myUserId');
+      debugPrint('🔍 [ConversationProvider]   Sont-ils égaux? ${senderId == myUserId}');
       
       // 🚀 OPTIMISATION: Utiliser decryptFast() avec priorité haute pour affichage immédiat
       // Les nouveaux messages WebSocket doivent apparaître instantanément
@@ -1540,8 +1563,17 @@ class ConversationProvider extends ChangeNotifier {
         _notifyListenersBatched();
         
         // Afficher une notification si l'utilisateur n'est pas dans cette conversation
-        debugPrint('🔔 [ConversationProvider] Nouveau message reçu dans conversation $convId, vérification notification...');
+        debugPrint('🔔 [ConversationProvider] Nouveau message reçu dans conversation $convId');
+        debugPrint('🔔 [ConversationProvider] Expéditeur: $senderId, Message: ${decryptedText.length > 30 ? decryptedText.substring(0, 30) + "..." : decryptedText}');
+        
+        final tracker = NavigationTrackerService();
+        final isInConv = tracker.isInConversation(convId);
+        final currentScreen = tracker.currentScreen;
+        debugPrint('🔔 [ConversationProvider] Utilisateur dans conversation: $isInConv, Écran actuel: $currentScreen');
+        
         await _showNotificationIfNeeded(convId, senderId, decryptedText);
+      } else {
+        debugPrint('🔔 [ConversationProvider] Message ignoré (envoyé par nous-même)');
       }
       
       // Création du message avec texte déchiffré
@@ -1715,8 +1747,10 @@ class ConversationProvider extends ChangeNotifier {
         });
         
         debugPrint('🔔 [ConversationProvider] Notification in-app ajoutée pour nouvelle conversation: $convId');
-        // Notifier les listeners pour que l'UI puisse afficher la notification
-        _notifyListenersBatched();
+        debugPrint('🔔 [ConversationProvider] Total notifications en attente: ${_pendingInAppNotifications.length}');
+        
+        // Notifier les listeners IMMÉDIATEMENT pour que l'UI puisse afficher la notification
+        notifyListeners();
       }
     }).catchError((e) {
       debugPrint('❌ [ConversationProvider] Erreur lors du fetch des conversations: $e');
@@ -1782,8 +1816,12 @@ class ConversationProvider extends ChangeNotifier {
           'messageText': truncatedMessage,
         });
         
-        // Notifier les listeners pour que l'UI puisse afficher la notification
-        _notifyListenersBatched();
+        debugPrint('🔔 [ConversationProvider] Notification in-app ajoutée: $senderName - $truncatedMessage (conversation: $conversationId)');
+        debugPrint('🔔 [ConversationProvider] Total notifications en attente: ${_pendingInAppNotifications.length}');
+        
+        // Notifier les listeners IMMÉDIATEMENT pour que l'UI puisse afficher la notification
+        // Utiliser notifyListeners() au lieu de _notifyListenersBatched() pour les notifications
+        notifyListeners();
       }
     } catch (e) {
       debugPrint('❌ Erreur affichage notification: $e');
@@ -1796,6 +1834,9 @@ class ConversationProvider extends ChangeNotifier {
   /// Obtient et supprime les notifications in-app en attente
   List<Map<String, dynamic>> getPendingInAppNotifications() {
     final notifications = List<Map<String, dynamic>>.from(_pendingInAppNotifications);
+    if (notifications.isNotEmpty) {
+      debugPrint('🔔 [ConversationProvider] Récupération de ${notifications.length} notification(s) en attente');
+    }
     _pendingInAppNotifications.clear();
     return notifications;
   }
@@ -1803,17 +1844,43 @@ class ConversationProvider extends ChangeNotifier {
   /// Obtient le nom d'un utilisateur par son ID
   Future<String> _getSenderName(String userId) async {
     try {
-      // Chercher dans les membres des groupes
+      // Utiliser le cache des usernames si disponible
+      if (_userUsernames.containsKey(userId)) {
+        final username = _userUsernames[userId]!;
+        debugPrint('👤 [ConversationProvider] Username trouvé dans cache: $username');
+        return username;
+      }
+      
+      // Chercher dans les conversations pour trouver le nom
       for (final conversation in _conversations) {
-        // Cette logique devrait être améliorée pour récupérer le vrai nom
-        // Pour l'instant, on retourne l'ID tronqué
-        if (conversation.conversationId.isNotEmpty) {
-          return userId.length > 8 ? '${userId.substring(0, 8)}...' : userId;
+        // Essayer de récupérer les détails de la conversation pour obtenir les membres
+        try {
+          final detail = await _apiService.fetchConversationDetailRaw(conversation.conversationId);
+          if (detail['members'] != null) {
+            final members = detail['members'] as List<dynamic>;
+            for (final member in members) {
+              final memberMap = member as Map<String, dynamic>;
+              final memberUserId = memberMap['userId'] as String;
+              final username = memberMap['username'] as String;
+              _userUsernames[memberUserId] = username;
+              
+              if (memberUserId == userId) {
+                debugPrint('👤 [ConversationProvider] Username trouvé: $username');
+                return username;
+              }
+            }
+          }
+        } catch (e) {
+          // Ignorer les erreurs et continuer
         }
       }
     } catch (e) {
       debugPrint('❌ Erreur récupération nom expéditeur: $e');
     }
-    return userId.length > 8 ? '${userId.substring(0, 8)}...' : userId;
+    
+    // Fallback: utiliser l'ID tronqué
+    final fallback = userId.length > 8 ? '${userId.substring(0, 8)}...' : userId;
+    debugPrint('👤 [ConversationProvider] Username non trouvé, utilisation fallback: $fallback');
+    return fallback;
   }
 }

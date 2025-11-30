@@ -38,8 +38,15 @@ export default async function routes(app: FastifyInstance) {
         b.salt // Ajouter la salt au INSERT
       ]);
 
-      // Broadcast WS
-      app.io.to(`conv:${b.convId}`).emit('message:new', b);
+      // Broadcast WS - Émettre à tous les membres de la conversation SAUF l'expéditeur
+      // L'expéditeur a déjà reçu la confirmation via la réponse HTTP
+      app.io.to(`conv:${b.convId}`).except(`user:${b.sender.userId}`).emit('message:new', b);
+      app.log.info({ 
+        convId: b.convId, 
+        messageId: b.messageId, 
+        senderId: b.sender.userId,
+        event: 'message_broadcasted'
+      }, 'Message broadcasted to conversation (excluding sender)');
 
       // Hint presence/analytics (option)
       app.log.info({ convId: b.convId, messageId: b.messageId, wraps: b.recipients.length }, 'message stored');

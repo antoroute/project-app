@@ -66,6 +66,27 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
     });
   }
   
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Écouter les changements du ConversationProvider pour afficher les nouvelles notifications
+    final convProvider = context.read<ConversationProvider>();
+    convProvider.addListener(_onConversationProviderChanged);
+  }
+  
+  @override
+  void dispose() {
+    final convProvider = context.read<ConversationProvider>();
+    convProvider.removeListener(_onConversationProviderChanged);
+    super.dispose();
+  }
+  
+  void _onConversationProviderChanged() {
+    if (mounted) {
+      _checkPendingNotifications();
+    }
+  }
+  
   /// Vérifie et affiche les notifications in-app en attente
   void _checkPendingNotifications() {
     if (!mounted) return;
@@ -73,14 +94,24 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
     final convProvider = context.read<ConversationProvider>();
     final notifications = convProvider.getPendingInAppNotifications();
     
+    if (notifications.isEmpty) {
+      return; // Pas de nouvelles notifications
+    }
+    
+    debugPrint('🔔 [GroupConversationList] ${notifications.length} notification(s) en attente à afficher');
+    
     for (final notification in notifications) {
       if (!mounted) return;
       
       final type = notification['type'] as String;
+      debugPrint('🔔 [GroupConversationList] Affichage notification: $type');
+      
       if (type == 'new_message') {
         final conversationId = notification['conversationId'] as String;
         final senderName = notification['senderName'] as String;
         final messageText = notification['messageText'] as String;
+        
+        debugPrint('🔔 [GroupConversationList] Notification nouveau message: $senderName - $messageText');
         
         InAppNotificationService.showNewMessageNotification(
           context: context,
@@ -100,6 +131,8 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
       } else if (type == 'new_conversation') {
         final conversationId = notification['conversationId'] as String;
         final groupName = notification['groupName'] as String?;
+        
+        debugPrint('🔔 [GroupConversationList] Notification nouvelle conversation: $conversationId');
         
         InAppNotificationService.showNewConversationNotification(
           context: context,

@@ -83,7 +83,8 @@ class WebSocketService {
             .setRandomizationFactor(0.5) // Randomisation pour éviter les reconnexions simultanées
             .enableAutoConnect() // Reconnexion automatique activée
             .enableForceNew() // Forcer une nouvelle connexion si nécessaire
-            .setCompression(true) // 🚀 OPTIMISATION: Activer la compression WebSocket
+            // Note: setCompression n'est pas disponible dans socket_io_client 2.0.0
+            // La compression peut être gérée côté serveur si nécessaire
             .build(),
       );
       _registerListeners(context);
@@ -124,8 +125,8 @@ class WebSocketService {
         debugPrint('❌ [WebSocket] Reconnection error: $error');
         _handleError('Erreur de reconnexion: $error');
       })
-      ..onReconnectFailed(() {
-        debugPrint('❌ [WebSocket] Reconnection failed after all attempts');
+      ..onReconnectFailed((error) {
+        debugPrint('❌ [WebSocket] Reconnection failed after all attempts: $error');
         _updateStatus(SocketStatus.error);
       })
       // v2 message:new : payload v2 complet (Map<String,dynamic>)
@@ -133,9 +134,23 @@ class WebSocketService {
         _updateActivityMetrics();
         _messagesReceived++;
         
+        debugPrint('📨 [WebSocket] Message reçu via WebSocket (total: $_messagesReceived)');
+        
         if (data is Map) {
           final map = Map<String, dynamic>.from(data);
-          onNewMessageV2?.call(map);
+          final convId = map['convId'] as String?;
+          final messageId = map['messageId'] as String?;
+          debugPrint('📨 [WebSocket] Message détails: convId=$convId, messageId=$messageId');
+          debugPrint('📨 [WebSocket] Callback onNewMessageV2: ${onNewMessageV2 != null ? "branché" : "NON BRANCHÉ"}');
+          
+          if (onNewMessageV2 != null) {
+            onNewMessageV2!(map);
+            debugPrint('📨 [WebSocket] Callback onNewMessageV2 appelé');
+          } else {
+            debugPrint('⚠️ [WebSocket] Callback onNewMessageV2 non branché !');
+          }
+        } else {
+          debugPrint('⚠️ [WebSocket] Message reçu mais format invalide: ${data.runtimeType}');
         }
       })
       ..on('presence:update', (data) {

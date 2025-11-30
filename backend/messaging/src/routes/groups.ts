@@ -43,9 +43,10 @@ export default async function routes(app: FastifyInstance) {
     app.io.in(`user:${userId}`).socketsJoin(`group:${g.id}`);
     app.log.info({ groupId: g.id, userId }, 'Creator joined group room');
 
-    // CORRECTION: Émettre uniquement aux membres du groupe (le créateur est maintenant dans la room)
-    app.io.to(`group:${g.id}`).emit('group:created', { groupId: g.id, creatorId: userId });
-    app.log.info({ groupId: g.id, userId }, 'Group created and broadcasted to group members');
+    // CORRECTION: Émettre uniquement au créateur (il est le seul membre pour l'instant)
+    // Les autres utilisateurs recevront la notification quand ils rejoindront le groupe
+    app.io.to(`user:${userId}`).emit('group:created', { groupId: g.id, creatorId: userId });
+    app.log.info({ groupId: g.id, userId }, 'Group created and notified to creator only (other users will be notified when they join)');
 
     reply.code(201); // Explicitement retourner le code 201 Created
     return { groupId: g.id, name };

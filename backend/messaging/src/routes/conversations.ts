@@ -35,17 +35,30 @@ export default async function routes(app: FastifyInstance) {
       );
     }
 
-    // CORRECTION: S'assurer que tous les membres du groupe sont dans la room AVANT d'émettre l'événement
-    // Rejoindre tous les membres du groupe à la room du groupe
+    // CORRECTION: S'assurer que tous les membres de la conversation sont dans la room du groupe AVANT d'émettre l'événement
+    // Vérifier que tous les membres sont bien membres du groupe (sécurité)
+    const groupMembers = await app.db.any(
+      `SELECT user_id FROM user_groups WHERE group_id = $1`,
+      [groupId]
+    );
+    const groupMemberIds = new Set(groupMembers.map((m: any) => m.user_id));
+    
+    // Rejoindre uniquement les membres qui sont dans le groupe
     for (const uid of allMembers) {
-      app.io.in(`user:${uid}`).socketsJoin(`group:${groupId}`);
+      if (groupMemberIds.has(uid)) {
+        app.io.in(`user:${uid}`).socketsJoin(`group:${groupId}`);
+        app.log.debug({ groupId, userId: uid }, 'User joined group room for conversation creation');
+      } else {
+        app.log.warn({ groupId, userId: uid }, 'User is not a group member, skipping room join');
+      }
     }
-    app.log.info({ groupId, memberCount: allMembers.length }, 'All group members joined group room');
+    app.log.info({ groupId, memberCount: allMembers.length, groupMemberCount: groupMemberIds.size }, 'All conversation members joined group room');
 
     // CORRECTION: Émettre uniquement aux membres du groupe (qui peuvent voir la conversation)
-    app.log.info({ convId: conv.id, groupId, userId }, 'About to emit conversation:created event');
+    // Vérifier que seuls les membres du groupe reçoivent l'événement
+    app.log.info({ convId: conv.id, groupId, userId, memberCount: groupMemberIds.size }, 'About to emit conversation:created event');
     app.io.to(`group:${groupId}`).emit('conversation:created', { convId: conv.id, groupId, creatorId: userId });
-    app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created and broadcasted to group members');
+    app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created and broadcasted to group members only');
 
     return { id: conv.id };
   });
@@ -132,8 +145,9 @@ export default async function routes(app: FastifyInstance) {
 
     const ts = await app.services.acl.markConversationRead(convId, userId);
 
-    // Notifie les autres membres
-    app.io.to(`conv:${convId}`).emit('conv:read', { convId, userId, at: ts });
+    // Notifie les autres membres de la conversation (exclure l'utilisateur qui a marqué comme lu)
+    app.io.to(`conv:${convId}`).except(`user:${userId}`).emit('conv:read', { convId, userId, at: ts });
+    app.log.info({ convId, userId, at: ts }, 'Read receipt broadcasted to conversation members (excluding reader)');
 
     return { ok: true, at: ts };
   });

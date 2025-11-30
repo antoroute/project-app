@@ -12,6 +12,7 @@ class WebSocketHeartbeatService {
 
   Timer? _heartbeatTimer;
   StreamSubscription<bool>? _networkSubscription;
+  final StreamController<HeartbeatState> _stateController = StreamController<HeartbeatState>.broadcast();
   
   // Intervalles de heartbeat selon le mode
   static const Duration _heartbeatIntervalForeground = Duration(seconds: 30); // Normal en avant-plan
@@ -22,6 +23,16 @@ class WebSocketHeartbeatService {
   DateTime? _lastHeartbeatTime;
   int _consecutiveFailures = 0;
   static const int _maxFailures = 3;
+  
+  /// Stream pour écouter les changements d'état du heartbeat
+  Stream<HeartbeatState> get stateStream => _stateController.stream;
+  
+  /// État actuel du heartbeat
+  HeartbeatState get currentState => HeartbeatState(
+    isActive: isActive,
+    isConnectionHealthy: isConnectionHealthy,
+    timeSinceLastHeartbeat: timeSinceLastHeartbeat,
+  );
 
   /// Démarre le heartbeat pour maintenir la connexion active
   void start() {
@@ -57,6 +68,9 @@ class WebSocketHeartbeatService {
         ? _heartbeatIntervalBackground 
         : _heartbeatIntervalForeground;
     
+    // Émettre l'état initial immédiatement
+    _stateController.add(currentState);
+    
     _heartbeatTimer = Timer.periodic(interval, (timer) {
       if (!_isNetworkAvailable) {
         debugPrint('🌐 [Heartbeat] Réseau indisponible, arrêt du heartbeat');
@@ -71,9 +85,15 @@ class WebSocketHeartbeatService {
         _consecutiveFailures = 0;
         // Note: socket.io gère automatiquement les pings, mais on vérifie juste l'état
         debugPrint('💓 [Heartbeat] WebSocket connection is alive (${_isBackgroundMode ? "background" : "foreground"})');
+        
+        // Émettre l'état mis à jour à chaque heartbeat
+        _stateController.add(currentState);
       } else if (ws.status == SocketStatus.disconnected) {
         _consecutiveFailures++;
         debugPrint('⚠️ [Heartbeat] WebSocket disconnected (failures: $_consecutiveFailures/$_maxFailures)');
+        
+        // Émettre l'état mis à jour même en cas de déconnexion
+        _stateController.add(currentState);
         
         if (_consecutiveFailures >= _maxFailures) {
           debugPrint('❌ [Heartbeat] Trop d\'échecs, arrêt du heartbeat');
@@ -95,6 +115,9 @@ class WebSocketHeartbeatService {
     // Redémarrer avec le nouvel intervalle
     if (_heartbeatTimer != null && _heartbeatTimer!.isActive) {
       _startHeartbeat();
+    } else {
+      // Émettre l'état même si le timer n'est pas actif
+      _stateController.add(currentState);
     }
   }
 
@@ -104,7 +127,14 @@ class WebSocketHeartbeatService {
     _heartbeatTimer = null;
     _networkSubscription?.cancel();
     _networkSubscription = null;
+    _stateController.add(currentState); // Émettre l'état final
     debugPrint('💓 [Heartbeat] Stopped heartbeat service');
+  }
+  
+  /// Dispose le service
+  void dispose() {
+    stop();
+    _stateController.close();
   }
 
   /// Vérifie si le heartbeat est actif
@@ -126,5 +156,18 @@ class WebSocketHeartbeatService {
         : _heartbeatIntervalForeground * 2;
     return timeSince < maxInterval;
   }
+}
+
+/// État du heartbeat pour l'affichage
+class HeartbeatState {
+  final bool isActive;
+  final bool isConnectionHealthy;
+  final Duration? timeSinceLastHeartbeat;
+  
+  HeartbeatState({
+    required this.isActive,
+    required this.isConnectionHealthy,
+    this.timeSinceLastHeartbeat,
+  });
 }
 
