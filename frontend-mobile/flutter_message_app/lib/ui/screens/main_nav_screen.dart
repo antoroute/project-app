@@ -4,6 +4,8 @@ import '../../core/models/group_info.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/group_provider.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/websocket_heartbeat_service.dart';
+import '../../core/services/network_monitor_service.dart';
 import '../widgets/bottom_nav_bar.dart';
 import 'group_conversation_list.dart';
 import 'group_screen.dart';
@@ -119,25 +121,8 @@ class _MainNavScreenState extends State<MainNavScreen> {
           children: [
             const Text('Mes Groupes'),
             const SizedBox(width: 8),
-            // Indicateur de statut WebSocket
-            StreamBuilder<SocketStatus>(
-              stream: WebSocketService.instance.statusStream,
-              builder: (context, snapshot) {
-                final status = snapshot.data ?? SocketStatus.disconnected;
-                return Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: status == SocketStatus.connected 
-                        ? Colors.green 
-                        : status == SocketStatus.connecting 
-                            ? Colors.orange 
-                            : Colors.red,
-                  ),
-                );
-              },
-            ),
+            // Indicateur de statut WebSocket avec heartbeat
+            _buildWebSocketStatusIndicator(),
           ],
         ),
         actions: <Widget>[
@@ -260,6 +245,62 @@ class _MainNavScreenState extends State<MainNavScreen> {
         ],
         centerTabIndex: 2, // Le 3ème onglet (index 2) est décentré
       ),
+    );
+  }
+  
+  /// Widget pour afficher le statut de connexion WebSocket avec heartbeat
+  Widget _buildWebSocketStatusIndicator() {
+    return StreamBuilder<SocketStatus>(
+      stream: WebSocketService.instance.statusStream,
+      builder: (context, snapshot) {
+        final wsStatus = snapshot.data ?? SocketStatus.disconnected;
+        final heartbeatService = WebSocketHeartbeatService();
+        final isHealthy = heartbeatService.isConnectionHealthy;
+        final networkService = NetworkMonitorService();
+        final hasNetwork = networkService.isConnected;
+        
+        // Déterminer la couleur selon l'état
+        Color statusColor;
+        String tooltip;
+        
+        if (!hasNetwork) {
+          statusColor = Colors.grey;
+          tooltip = 'Pas de connexion réseau';
+        } else if (wsStatus == SocketStatus.connected) {
+          if (isHealthy) {
+            statusColor = Colors.green;
+            tooltip = 'Connecté au serveur';
+          } else {
+            statusColor = Colors.orange;
+            tooltip = 'Connexion instable';
+          }
+        } else if (wsStatus == SocketStatus.connecting) {
+          statusColor = Colors.orange;
+          tooltip = 'Connexion en cours...';
+        } else {
+          statusColor = Colors.red;
+          tooltip = 'Déconnecté';
+        }
+        
+        return Tooltip(
+          message: tooltip,
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: statusColor,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: statusColor.withOpacity(0.5),
+                  blurRadius: 4,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

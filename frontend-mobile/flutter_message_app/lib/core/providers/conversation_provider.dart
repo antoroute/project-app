@@ -14,6 +14,7 @@ import 'package:flutter_message_app/core/services/global_presence_service.dart';
 import 'package:flutter_message_app/core/services/local_message_storage.dart';
 import 'package:flutter_message_app/core/services/message_key_cache.dart';
 import 'package:flutter_message_app/core/services/performance_benchmark.dart';
+import 'package:flutter_message_app/core/services/navigation_tracker_service.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
@@ -1518,27 +1519,19 @@ class ConversationProvider extends ChangeNotifier {
       final convId = payload['convId'] as String;
       final senderId = (payload['sender'] as Map)['userId'] as String;
       
-      // 🚀 OPTIMISATION SIGNAL: Pré-dériver la message key immédiatement
-      await MessageKeyCache.instance.deriveAndCacheMessageKey(
-        messageId: messageId,
+      // 🚀 OPTIMISATION: Utiliser decryptFast() avec priorité haute pour affichage immédiat
+      // Les nouveaux messages WebSocket doivent apparaître instantanément
+      final fastResult = await MessageCipherV2.decryptFast(
         groupId: groupId,
         myUserId: myUserId,
         myDeviceId: myDeviceId,
         messageV2: payload,
         keyDirectory: _keyDirectory,
+        priority: 1, // Haute priorité pour les nouveaux messages
       );
       
-      // Déchiffrement immédiat (utilisera la clé en cache si disponible)
-      final result = await MessageCipherV2.decrypt(
-        groupId: groupId,
-        myUserId: myUserId,
-        myDeviceId: myDeviceId,
-        messageV2: payload,
-        keyDirectory: _keyDirectory,
-      );
-      
-      final decryptedText = utf8.decode(result['decryptedText'] as Uint8List);
-      final signatureValid = result['signatureValid'] as bool;
+      final decryptedText = utf8.decode(fastResult['decryptedText'] as Uint8List);
+      final signatureValid = false; // Temporairement non vérifié, vérification en arrière-plan
       
       // Incrémenter le compteur de messages non lus si ce n'est pas notre message
       if (senderId != myUserId) {
@@ -1547,6 +1540,7 @@ class ConversationProvider extends ChangeNotifier {
         _notifyListenersBatched();
         
         // Afficher une notification si l'utilisateur n'est pas dans cette conversation
+        debugPrint('🔔 [ConversationProvider] Nouveau message reçu dans conversation $convId, vérification notification...');
         await _showNotificationIfNeeded(convId, senderId, decryptedText);
       }
       
@@ -1573,7 +1567,36 @@ class ConversationProvider extends ChangeNotifier {
       // Mettre en cache mémoire uniquement (session courante)
       _decryptedCache[messageId] = decryptedText;
       
+      // Ajouter le message et notifier immédiatement pour affichage instantané
       addLocalMessage(msg);
+      
+      // 🚀 OPTIMISATION: Vérifier la signature en arrière-plan (non-bloquant)
+      // pour ne pas ralentir l'affichage du nouveau message
+      MessageCipherV2.decrypt(
+        groupId: groupId,
+        myUserId: myUserId,
+        myDeviceId: myDeviceId,
+        messageV2: payload,
+        keyDirectory: _keyDirectory,
+      ).then((result) {
+        final verifiedSignatureValid = result['signatureValid'] as bool;
+        // Mettre à jour le message avec la signature vérifiée
+        final messages = _messages[convId];
+        if (messages != null) {
+          final index = messages.indexWhere((m) => m.id == messageId);
+          if (index >= 0) {
+            messages[index].signatureValid = verifiedSignatureValid;
+            // Sauvegarder la mise à jour localement
+            LocalMessageStorage.instance.saveMessage(messages[index]).catchError((e) {
+              debugPrint('⚠️ Erreur sauvegarde signatureValid: $e');
+            });
+            // Notifier les listeners de la mise à jour de signature
+            _notifyListenersBatched();
+          }
+        }
+      }).catchError((e) {
+        debugPrint('⚠️ Erreur vérification signature message WebSocket: $e');
+      });
     } catch (e) {
       debugPrint('❌ Erreur déchiffrement message WebSocket: $e');
       
@@ -1658,17 +1681,46 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   void _onWebSocketGroupCreated(String groupId, String creatorId) {
-    debugPrint('🏗️ [WebSocket] Nouveau groupe créé: $groupId par $creatorId');
+    debugPrint('🏗️ [ConversationProvider] Nouveau groupe créé: $groupId par $creatorId');
     // CORRECTION: Rafraîchir la liste des groupes via le GroupProvider
     // Note: Le GroupProvider sera notifié via son propre callback WebSocket
+    // On ne fait rien ici car c'est le GroupProvider qui gère les groupes
   }
 
   void _onWebSocketConversationCreated(String convId, String groupId, String creatorId) {
-    debugPrint('💬 [WebSocket] Nouvelle conversation créée: $convId dans $groupId par $creatorId');
+    debugPrint('💬 [ConversationProvider] Nouvelle conversation créée: $convId dans $groupId par $creatorId');
     // CORRECTION: Rafraîchir immédiatement la liste des conversations
-    fetchConversations();
-    // 🚀 OPTIMISATION: Batching pour les événements WebSocket (non-critique)
-    _notifyListenersBatched();
+    fetchConversations().then((_) {
+      // Après avoir récupéré les conversations, ajouter la notification
+      final tracker = NavigationTrackerService();
+      if (!tracker.isInConversation(convId)) {
+        // Trouver le nom du groupe depuis les conversations mises à jour
+        String? groupName;
+        try {
+          final conversation = _conversations.firstWhere(
+            (c) => c.conversationId == convId,
+            orElse: () => throw Exception('Conversation not found'),
+          );
+          groupName = conversation.groupId; // On pourrait améliorer pour avoir le vrai nom
+        } catch (e) {
+          // Ignorer si la conversation n'est pas encore chargée
+          debugPrint('⚠️ [ConversationProvider] Conversation $convId pas encore dans la liste après fetch');
+        }
+        
+        _pendingInAppNotifications.add({
+          'type': 'new_conversation',
+          'conversationId': convId,
+          'groupId': groupId,
+          'groupName': groupName,
+        });
+        
+        debugPrint('🔔 [ConversationProvider] Notification in-app ajoutée pour nouvelle conversation: $convId');
+        // Notifier les listeners pour que l'UI puisse afficher la notification
+        _notifyListenersBatched();
+      }
+    }).catchError((e) {
+      debugPrint('❌ [ConversationProvider] Erreur lors du fetch des conversations: $e');
+    });
   }
 
   // Presence + read receipts hooks (UI can observe derived state later)
@@ -1695,11 +1747,13 @@ class ConversationProvider extends ChangeNotifier {
     _notifyListenersBatched();
   }
   
-  /// Affiche une notification si nécessaire
+  /// Affiche une notification si nécessaire (push + in-app)
   Future<void> _showNotificationIfNeeded(String conversationId, String senderId, String messageText) async {
     try {
+      final tracker = NavigationTrackerService();
+      
       // Vérifier si l'utilisateur est actuellement dans cette conversation
-      final isInCurrentConversation = _isUserInCurrentConversation(conversationId);
+      final isInCurrentConversation = tracker.isInConversation(conversationId);
       
       if (!isInCurrentConversation) {
         // Obtenir le nom de l'expéditeur
@@ -1710,23 +1764,40 @@ class ConversationProvider extends ChangeNotifier {
             ? '${messageText.substring(0, 50)}...'
             : messageText;
         
+        // Afficher une notification push (si l'app est en arrière-plan)
         await NotificationService.showMessageNotification(
           title: senderName.isNotEmpty ? senderName : 'Nouveau message',
           body: truncatedMessage,
           conversationId: conversationId,
           senderName: senderName,
         );
+        
+        // Afficher une notification in-app si l'utilisateur est dans l'app mais pas sur la bonne conversation
+        // Note: On ne peut pas utiliser BuildContext ici, donc on stocke les infos pour que l'UI les affiche
+        // L'UI écoutera les changements et affichera les notifications
+        _pendingInAppNotifications.add({
+          'type': 'new_message',
+          'conversationId': conversationId,
+          'senderName': senderName,
+          'messageText': truncatedMessage,
+        });
+        
+        // Notifier les listeners pour que l'UI puisse afficher la notification
+        _notifyListenersBatched();
       }
     } catch (e) {
       debugPrint('❌ Erreur affichage notification: $e');
     }
   }
   
-  /// Vérifie si l'utilisateur est actuellement dans la conversation spécifiée
-  bool _isUserInCurrentConversation(String conversationId) {
-    // Cette méthode devrait être implémentée pour vérifier l'état de l'UI
-    // Pour l'instant, on retourne false pour toujours afficher les notifications
-    return false;
+  /// Liste des notifications in-app en attente d'affichage
+  final List<Map<String, dynamic>> _pendingInAppNotifications = [];
+  
+  /// Obtient et supprime les notifications in-app en attente
+  List<Map<String, dynamic>> getPendingInAppNotifications() {
+    final notifications = List<Map<String, dynamic>>.from(_pendingInAppNotifications);
+    _pendingInAppNotifications.clear();
+    return notifications;
   }
   
   /// Obtient le nom d'un utilisateur par son ID

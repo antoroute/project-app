@@ -6,6 +6,9 @@ import 'core/providers/auth_provider.dart';
 import 'core/providers/group_provider.dart';
 import 'core/providers/conversation_provider.dart';
 import 'core/services/websocket_service.dart';
+import 'core/services/websocket_heartbeat_service.dart';
+import 'core/services/network_monitor_service.dart';
+import 'core/services/message_queue_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/global_presence_service.dart';
 import 'core/crypto/key_manager_final.dart';
@@ -63,6 +66,12 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    
+    // Nettoyer les services
+    WebSocketHeartbeatService().stop();
+    NetworkMonitorService().dispose();
+    MessageQueueService().dispose();
+    
     // 🚀 OPTIMISATION: Nettoyer l'Isolate crypto à la fermeture de l'app
     CryptoIsolateService.instance.dispose();
     super.dispose();
@@ -70,9 +79,60 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.detached || state == AppLifecycleState.paused) {
-      // Optionnel: Nettoyer l'Isolate quand l'app est en arrière-plan
-      // CryptoIsolateService.instance.dispose();
+    final ws = WebSocketService.instance;
+    
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // App revient au premier plan : reconnecter le WebSocket si nécessaire
+        // Repasser en mode normal (heartbeat plus fréquent)
+        debugPrint('▶️ [AppLifecycle] App resumed, switching to normal mode');
+        WebSocketHeartbeatService().setBackgroundMode(false);
+        
+        if (context.mounted) {
+          final auth = context.read<AuthProvider>();
+          if (auth.isAuthenticated) {
+            // Vérifier la connectivité de manière asynchrone
+            NetworkMonitorService().hasInternetConnection().then((hasNetwork) {
+              if (hasNetwork) {
+                if (ws.status != SocketStatus.connected) {
+                  debugPrint('🔄 [AppLifecycle] App resumed, reconnecting WebSocket...');
+                  ws.connect(context).then((_) {
+                    WebSocketHeartbeatService().start();
+                  });
+                } else {
+                  // Si déjà connecté, redémarrer le heartbeat en mode normal
+                  WebSocketHeartbeatService().start();
+                }
+              } else {
+                debugPrint('⚠️ [AppLifecycle] Pas de connexion réseau disponible');
+              }
+            });
+          }
+        }
+        break;
+        
+      case AppLifecycleState.paused:
+        // App passe en arrière-plan : garder la connexion ouverte pour recevoir les notifications
+        // Mais passer en mode économie d'énergie (heartbeat moins fréquent)
+        debugPrint('⏸️ [AppLifecycle] App paused, switching to power-saving mode');
+        WebSocketHeartbeatService().setBackgroundMode(true);
+        break;
+        
+      case AppLifecycleState.inactive:
+        // App est inactive (ex: notification drawer ouvert)
+        // Garder la connexion ouverte
+        break;
+        
+      case AppLifecycleState.detached:
+        // App est sur le point d'être fermée
+        debugPrint('🔌 [AppLifecycle] App detached, disconnecting WebSocket');
+        WebSocketHeartbeatService().stop();
+        ws.disconnect();
+        break;
+        
+      case AppLifecycleState.hidden:
+        // App est cachée (Android)
+        break;
     }
   }
 
@@ -82,11 +142,33 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
     final auth = context.watch<AuthProvider>();
       if (auth.isAuthenticated && !_socketInitialized) {
         _socketInitialized = true;
-        // Initialiser le service de présence global
-        GlobalPresenceService().initialize();
-        // Initialiser la connexion WebSocket une seule fois au niveau de l'app
-        WebSocketService.instance.connect(context);
+        
+        // Initialiser les services
+        _initializeServices(context);
       }
+  }
+  
+  Future<void> _initializeServices(BuildContext context) async {
+    // Initialiser le service de surveillance réseau
+    await NetworkMonitorService().initialize();
+    
+    // Initialiser la queue de messages
+    await MessageQueueService().initialize();
+    
+    // Initialiser le service de présence global
+    GlobalPresenceService().initialize();
+    
+    // Vérifier la connectivité avant de connecter le WebSocket
+    final hasNetwork = await NetworkMonitorService().hasInternetConnection();
+    if (hasNetwork) {
+      // Initialiser la connexion WebSocket une seule fois au niveau de l'app
+      WebSocketService.instance.connect(context).then((_) {
+        // Démarrer le heartbeat une fois connecté
+        WebSocketHeartbeatService().start();
+      });
+    } else {
+      debugPrint('⚠️ [App] Pas de connexion réseau, WebSocket non connecté');
+    }
   }
 
   @override

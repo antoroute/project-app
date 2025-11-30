@@ -26,6 +26,9 @@ class GroupProvider extends ChangeNotifier {
   /// Liste des membres du groupe.
   List<Map<String, dynamic>> _members = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _myDevices = <Map<String, dynamic>>[];
+  
+  /// Liste des notifications in-app en attente d'affichage
+  final List<Map<String, dynamic>> _pendingInAppNotifications = [];
 
   final AuthProvider _authProvider;
   
@@ -295,7 +298,48 @@ class GroupProvider extends ChangeNotifier {
   void _onWebSocketGroupCreated(String groupId, String creatorId) {
     debugPrint('🏗️ [GroupProvider] Group created event received: $groupId by $creatorId');
     // CORRECTION: Rafraîchir immédiatement la liste des groupes
-    fetchUserGroups();
+    fetchUserGroups().then((_) {
+      // Après avoir récupéré les groupes, ajouter la notification
+      final myUserId = _authProvider.userId;
+      
+      // Ne pas notifier si c'est nous qui avons créé le groupe (on est déjà dessus)
+      if (myUserId != null && creatorId == myUserId) {
+        debugPrint('🏗️ [GroupProvider] Groupe créé par nous-même, pas de notification');
+        return;
+      }
+      
+      // Trouver le nom du groupe depuis la liste mise à jour
+      String? groupName;
+      try {
+        final group = _groups.firstWhere(
+          (g) => g.groupId == groupId,
+          orElse: () => throw Exception('Group not found'),
+        );
+        groupName = group.name;
+      } catch (e) {
+        // Le groupe n'est pas encore dans la liste, on utilisera juste l'ID
+        debugPrint('⚠️ [GroupProvider] Groupe $groupId pas encore dans la liste après fetch');
+      }
+      
+      _pendingInAppNotifications.add({
+        'type': 'new_group',
+        'groupId': groupId,
+        'groupName': groupName,
+      });
+      
+      debugPrint('🔔 [GroupProvider] Notification in-app ajoutée pour nouveau groupe: $groupId');
+      // Notifier les listeners pour que l'UI puisse afficher la notification
+      notifyListeners();
+    }).catchError((e) {
+      debugPrint('❌ [GroupProvider] Erreur lors du fetch des groupes: $e');
+    });
+  }
+  
+  /// Obtient et supprime les notifications in-app en attente
+  List<Map<String, dynamic>> getPendingInAppNotifications() {
+    final notifications = List<Map<String, dynamic>>.from(_pendingInAppNotifications);
+    _pendingInAppNotifications.clear();
+    return notifications;
   }
   
   void _onWebSocketGroupMemberJoined(String groupId, String userId, String approverId) {

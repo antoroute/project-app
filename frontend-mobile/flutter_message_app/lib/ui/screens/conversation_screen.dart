@@ -10,6 +10,11 @@ import '../../core/models/message.dart';
 import '../../core/crypto/message_cipher_v2.dart';
 import '../../core/services/session_device_service.dart';
 import '../../core/services/performance_benchmark.dart';
+import '../../core/services/navigation_tracker_service.dart';
+import '../../core/services/in_app_notification_service.dart';
+import '../../core/services/websocket_service.dart';
+import '../../core/services/websocket_heartbeat_service.dart';
+import '../../core/services/network_monitor_service.dart';
 import '../helpers/extensions.dart';
 import '../widgets/message_bubble.dart';
 
@@ -45,6 +50,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
     super.initState();
     _conversationProvider = context.read<ConversationProvider>();
 
+    // Enregistrer que cette conversation est ouverte
+    NavigationTrackerService().setConversationOpen(widget.conversationId);
+    NavigationTrackerService().setCurrentScreen('ConversationScreen');
+
     // Pas d'écoute du scroll - géré par NotificationListener
     
     // WebSocket déjà connecté au niveau de l'app, juste s'abonner à la conversation
@@ -56,7 +65,42 @@ class _ConversationScreenState extends State<ConversationScreen> {
     // Les messages s'afficheront progressivement via les notifications du provider
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
+      _checkPendingNotifications();
     });
+  }
+  
+  /// Vérifie et affiche les notifications in-app en attente
+  void _checkPendingNotifications() {
+    final notifications = _conversationProvider.getPendingInAppNotifications();
+    for (final notification in notifications) {
+      if (!mounted) return;
+      
+      final type = notification['type'] as String;
+      if (type == 'new_message') {
+        final conversationId = notification['conversationId'] as String;
+        final senderName = notification['senderName'] as String;
+        final messageText = notification['messageText'] as String;
+        
+        // Ne pas afficher si c'est pour cette conversation (on est déjà dedans)
+        if (conversationId != widget.conversationId) {
+          InAppNotificationService.showNewMessageNotification(
+            context: context,
+            senderName: senderName,
+            messageText: messageText,
+            conversationId: conversationId,
+            onTap: () {
+              // Naviguer vers la conversation
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ConversationScreen(conversationId: conversationId),
+                ),
+              );
+            },
+          );
+        }
+      }
+    }
   }
 
   /// Vérifie si l'utilisateur est proche du bas (reverse:true)
@@ -400,7 +444,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   void _onMessagesUpdated() {
-    if (!_initialDecryptDone) return;
+    // 🚀 CORRECTION: Toujours permettre les mises à jour pour les nouveaux messages WebSocket
+    // Même si le déchiffrement initial n'est pas terminé, les nouveaux messages doivent s'afficher
     
     // Auto-scroll seulement si l'utilisateur est proche du bas (reverse:true)
     if (_isNearBottom()) {
@@ -492,6 +537,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   @override
   void dispose() {
+    // Désenregistrer la conversation
+    NavigationTrackerService().setConversationClosed(widget.conversationId);
+    
     _conversationProvider.unsubscribe(widget.conversationId);
     _conversationProvider.removeListener(_onMessagesUpdated);
     _textController.dispose();
@@ -714,17 +762,61 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 }
 
-/// Widget pour afficher le statut de connexion WebSocket
+/// Widget pour afficher le statut de connexion WebSocket avec heartbeat
 class _WebSocketStatusIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(
-        color: Colors.green, // Simplifié pour l'instant
-        shape: BoxShape.circle,
-      ),
+    return StreamBuilder<SocketStatus>(
+      stream: WebSocketService.instance.statusStream,
+      builder: (context, snapshot) {
+        final wsStatus = snapshot.data ?? SocketStatus.disconnected;
+        final heartbeatService = WebSocketHeartbeatService();
+        final isHealthy = heartbeatService.isConnectionHealthy;
+        final networkService = NetworkMonitorService();
+        final hasNetwork = networkService.isConnected;
+        
+        // Déterminer la couleur selon l'état
+        Color statusColor;
+        String tooltip;
+        
+        if (!hasNetwork) {
+          statusColor = Colors.grey;
+          tooltip = 'Pas de connexion réseau';
+        } else if (wsStatus == SocketStatus.connected) {
+          if (isHealthy) {
+            statusColor = Colors.green;
+            tooltip = 'Connecté au serveur';
+          } else {
+            statusColor = Colors.orange;
+            tooltip = 'Connexion instable';
+          }
+        } else if (wsStatus == SocketStatus.connecting) {
+          statusColor = Colors.orange;
+          tooltip = 'Connexion en cours...';
+        } else {
+          statusColor = Colors.red;
+          tooltip = 'Déconnecté';
+        }
+        
+        return Tooltip(
+          message: tooltip,
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: statusColor,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: statusColor.withOpacity(0.5),
+                  blurRadius: 4,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

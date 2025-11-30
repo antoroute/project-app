@@ -38,7 +38,12 @@ export default async function routes(app: FastifyInstance) {
       [userId, g.id]
     );
 
-    // CORRECTION: Émettre uniquement aux membres du groupe (le créateur est déjà membre)
+    // CORRECTION: S'assurer que le créateur est dans la room AVANT d'émettre l'événement
+    // Rejoindre le créateur à la room du groupe
+    app.io.in(`user:${userId}`).socketsJoin(`group:${g.id}`);
+    app.log.info({ groupId: g.id, userId }, 'Creator joined group room');
+
+    // CORRECTION: Émettre uniquement aux membres du groupe (le créateur est maintenant dans la room)
     app.io.to(`group:${g.id}`).emit('group:created', { groupId: g.id, creatorId: userId });
     app.log.info({ groupId: g.id, userId }, 'Group created and broadcasted to group members');
 

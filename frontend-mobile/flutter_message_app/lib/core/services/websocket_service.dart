@@ -79,6 +79,11 @@ class WebSocketService {
             .setTimeout(10000)
             .setReconnectionDelay(3000)
             .setReconnectionAttempts(5)
+            .setReconnectionDelayMax(10000) // Délai max entre tentatives
+            .setRandomizationFactor(0.5) // Randomisation pour éviter les reconnexions simultanées
+            .enableAutoConnect() // Reconnexion automatique activée
+            .enableForceNew() // Forcer une nouvelle connexion si nécessaire
+            .setCompression(true) // 🚀 OPTIMISATION: Activer la compression WebSocket
             .build(),
       );
       _registerListeners(context);
@@ -99,11 +104,29 @@ class WebSocketService {
       })
       ..onDisconnect((_) {
         _updateStatus(SocketStatus.disconnected);
+        debugPrint('🔌 [WebSocket] Disconnected, will attempt reconnection in 3s');
+        // Reconnexion automatique seulement si l'app est toujours montée
         Future.delayed(const Duration(seconds: 3), () {
           if (context.mounted) {
+            debugPrint('🔄 [WebSocket] Attempting reconnection...');
             connect(context);
           }
         });
+      })
+      ..onReconnect((attempt) {
+        debugPrint('🔄 [WebSocket] Reconnecting (attempt $attempt)...');
+        _updateStatus(SocketStatus.connecting);
+      })
+      ..onReconnectAttempt((attempt) {
+        debugPrint('🔄 [WebSocket] Reconnection attempt $attempt');
+      })
+      ..onReconnectError((error) {
+        debugPrint('❌ [WebSocket] Reconnection error: $error');
+        _handleError('Erreur de reconnexion: $error');
+      })
+      ..onReconnectFailed(() {
+        debugPrint('❌ [WebSocket] Reconnection failed after all attempts');
+        _updateStatus(SocketStatus.error);
       })
       // v2 message:new : payload v2 complet (Map<String,dynamic>)
       ..on('message:new', (data) {

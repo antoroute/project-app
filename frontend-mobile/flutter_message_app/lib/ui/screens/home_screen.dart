@@ -4,6 +4,10 @@ import '../../core/models/group_info.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/group_provider.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/websocket_heartbeat_service.dart';
+import '../../core/services/network_monitor_service.dart';
+import '../../core/services/navigation_tracker_service.dart';
+import '../../core/services/in_app_notification_service.dart';
 import 'group_nav_screen.dart';
 import 'group_screen.dart';
 import 'login_screen.dart';
@@ -21,7 +25,58 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    
+    // Enregistrer l'écran actuel
+    NavigationTrackerService().setCurrentScreen('HomeScreen');
+    
     _loadData();
+    
+    // Vérifier les notifications en attente après le premier frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkPendingNotifications();
+    });
+  }
+  
+  /// Vérifie et affiche les notifications in-app en attente
+  void _checkPendingNotifications() {
+    if (!mounted) return;
+    
+    final groupProvider = context.read<GroupProvider>();
+    final notifications = groupProvider.getPendingInAppNotifications();
+    
+    for (final notification in notifications) {
+      if (!mounted) return;
+      
+      final type = notification['type'] as String;
+      if (type == 'new_group') {
+        final groupId = notification['groupId'] as String;
+        final groupName = notification['groupName'] as String?;
+        
+        InAppNotificationService.showNewGroupNotification(
+          context: context,
+          groupId: groupId,
+          groupName: groupName,
+          onTap: () {
+            // Trouver le groupe dans la liste et naviguer
+            final groups = context.read<GroupProvider>().groups;
+            final group = groups.firstWhere(
+              (g) => g.groupId == groupId,
+              orElse: () => throw Exception('Group not found'),
+            );
+            
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => GroupNavScreen(
+                  groupId: group.groupId,
+                  groupName: group.name,
+                ),
+              ),
+            );
+          },
+        );
+      }
+    }
   }
 
   Future<void> _loadData() async {
@@ -58,25 +113,8 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Text('Mes Groupes'),
             const SizedBox(width: 8),
-            // Indicateur de statut WebSocket
-            StreamBuilder<SocketStatus>(
-              stream: WebSocketService.instance.statusStream,
-              builder: (context, snapshot) {
-                final status = snapshot.data ?? SocketStatus.disconnected;
-                return Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: status == SocketStatus.connected 
-                        ? Colors.green 
-                        : status == SocketStatus.connecting 
-                            ? Colors.orange 
-                            : Colors.red,
-                  ),
-                );
-              },
-            ),
+            // Indicateur de statut WebSocket avec heartbeat
+            _buildWebSocketStatusIndicator(),
           ],
         ),
         actions: <Widget>[
@@ -132,6 +170,62 @@ class _HomeScreenState extends State<HomeScreen> {
         child: const Icon(Icons.group_add),
         tooltip: 'Créer / Rejoindre un groupe',
       ),
+    );
+  }
+  
+  /// Widget pour afficher le statut de connexion WebSocket avec heartbeat
+  Widget _buildWebSocketStatusIndicator() {
+    return StreamBuilder<SocketStatus>(
+      stream: WebSocketService.instance.statusStream,
+      builder: (context, snapshot) {
+        final wsStatus = snapshot.data ?? SocketStatus.disconnected;
+        final heartbeatService = WebSocketHeartbeatService();
+        final isHealthy = heartbeatService.isConnectionHealthy;
+        final networkService = NetworkMonitorService();
+        final hasNetwork = networkService.isConnected;
+        
+        // Déterminer la couleur selon l'état
+        Color statusColor;
+        String tooltip;
+        
+        if (!hasNetwork) {
+          statusColor = Colors.grey;
+          tooltip = 'Pas de connexion réseau';
+        } else if (wsStatus == SocketStatus.connected) {
+          if (isHealthy) {
+            statusColor = Colors.green;
+            tooltip = 'Connecté au serveur';
+          } else {
+            statusColor = Colors.orange;
+            tooltip = 'Connexion instable';
+          }
+        } else if (wsStatus == SocketStatus.connecting) {
+          statusColor = Colors.orange;
+          tooltip = 'Connexion en cours...';
+        } else {
+          statusColor = Colors.red;
+          tooltip = 'Déconnecté';
+        }
+        
+        return Tooltip(
+          message: tooltip,
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: statusColor,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: statusColor.withOpacity(0.5),
+                  blurRadius: 4,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

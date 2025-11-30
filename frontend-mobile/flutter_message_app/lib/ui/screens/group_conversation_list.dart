@@ -8,6 +8,8 @@ import '../../core/providers/group_provider.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/services/snackbar_service.dart';
 import '../../core/services/websocket_service.dart';
+import '../../core/services/navigation_tracker_service.dart';
+import '../../core/services/in_app_notification_service.dart';
 import 'conversation_screen.dart';
 
 /// Écran de liste des conversations d'un groupe : liste des conversations et création de conversation.
@@ -43,6 +45,10 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
   @override
   void initState() {
     super.initState();
+    
+    // Enregistrer l'écran actuel
+    NavigationTrackerService().setCurrentScreen('GroupConversationListScreen');
+    
     _loadGroupData();
     WebSocketService.instance.onGroupJoined = (groupId, userId, approverId) {
       if (mounted) {
@@ -53,6 +59,64 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
         );
       }
     };
+    
+    // Vérifier les notifications en attente après le premier frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkPendingNotifications();
+    });
+  }
+  
+  /// Vérifie et affiche les notifications in-app en attente
+  void _checkPendingNotifications() {
+    if (!mounted) return;
+    
+    final convProvider = context.read<ConversationProvider>();
+    final notifications = convProvider.getPendingInAppNotifications();
+    
+    for (final notification in notifications) {
+      if (!mounted) return;
+      
+      final type = notification['type'] as String;
+      if (type == 'new_message') {
+        final conversationId = notification['conversationId'] as String;
+        final senderName = notification['senderName'] as String;
+        final messageText = notification['messageText'] as String;
+        
+        InAppNotificationService.showNewMessageNotification(
+          context: context,
+          senderName: senderName,
+          messageText: messageText,
+          conversationId: conversationId,
+          onTap: () {
+            // Naviguer vers la conversation
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ConversationScreen(conversationId: conversationId),
+              ),
+            );
+          },
+        );
+      } else if (type == 'new_conversation') {
+        final conversationId = notification['conversationId'] as String;
+        final groupName = notification['groupName'] as String?;
+        
+        InAppNotificationService.showNewConversationNotification(
+          context: context,
+          conversationId: conversationId,
+          groupName: groupName ?? widget.groupName,
+          onTap: () {
+            // Naviguer vers la conversation
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ConversationScreen(conversationId: conversationId),
+              ),
+            );
+          },
+        );
+      }
+    }
   }
 
   Future<void> _loadGroupData() async {
