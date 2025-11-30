@@ -151,9 +151,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final messages = _conversationProvider.messagesFor(widget.conversationId);
     if (messages.isEmpty) return;
     
-    // 🚀 PRIORITÉ 1: Déchiffrer les 10 derniers messages (visibles) IMMÉDIATEMENT en parallèle
-    final visibleMessages = messages.length > 10 
-        ? messages.sublist(messages.length - 10)
+    // 🚀 PRIORITÉ 1: Déchiffrer les 5 derniers messages (visibles) IMMÉDIATEMENT en parallèle
+    // 🚀 OPTIMISATION: Réduit de 10 à 5 pour éviter les freezes sur mobile
+    final visibleMessages = messages.length > 5 
+        ? messages.sublist(messages.length - 5)
         : messages;
     
     // 🚀 OPTIMISATION: Déchiffrer seulement les messages non déchiffrés ou sans signature vérifiée
@@ -184,10 +185,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
     });
     
     // 🚀 PRIORITÉ 2: Déchiffrer les autres messages en arrière-plan par petits lots
-    // CORRECTION: Commencer par les messages les plus récents (juste avant les 10 visibles)
+    // CORRECTION: Commencer par les messages les plus récents (juste avant les 5 visibles)
     // puis remonter vers les plus anciens
-    if (messages.length > 10) {
-      final backgroundMessages = messages.sublist(0, messages.length - 10);
+    if (messages.length > 5) {
+      final backgroundMessages = messages.sublist(0, messages.length - 5);
       // CORRECTION: Inverser l'ordre pour déchiffrer d'abord les plus récents
       final reversedBackgroundMessages = backgroundMessages.reversed.toList();
       _decryptBackgroundMessages(reversedBackgroundMessages);
@@ -197,9 +198,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   /// Déchiffre les messages en arrière-plan par lots pour éviter de bloquer l'UI
   /// CORRECTION: Les messages sont passés dans l'ordre inverse (plus récents en premier)
   void _decryptBackgroundMessages(List<Message> messages) {
-    // 🚀 OPTIMISATION: Augmenter la taille des lots pour plus de parallélisme
-    const batchSize = 10; // Déchiffrer 10 messages à la fois (au lieu de 5)
-    const delayBetweenBatches = 30; // 30ms entre chaque lot (au lieu de 50ms)
+    // 🚀 OPTIMISATION MOBILE: Réduire le parallélisme et augmenter le délai pour éviter les freezes
+    const batchSize = 3; // Déchiffrer seulement 3 messages à la fois (au lieu de 10)
+    const delayBetweenBatches = 150; // 150ms entre chaque lot (au lieu de 30ms) pour laisser respirer l'UI
     
     int batchIndex = 0;
     

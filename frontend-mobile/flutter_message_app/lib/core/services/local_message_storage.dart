@@ -220,49 +220,48 @@ class LocalMessageStorage {
       
       final List<Map<String, dynamic>> rows = await _database!.rawQuery(query, args);
       
-      // 🚀 OPTIMISATION: Parser les messages de manière optimisée
-      // On évite de créer des objets inutiles et on parse seulement ce qui est nécessaire
-      final messages = <Message>[];
-      for (final row in rows) {
-        try {
-          // 🚀 OPTIMISATION: Parser JSON de manière non-bloquante
-          // Si le parsing échoue, on skip ce message plutôt que de bloquer
-          final v2DataJson = row['v2_data'] as String;
-          if (v2DataJson.isEmpty) {
-            debugPrint('⚠️ Message ${row['message_id']} a un v2_data vide, ignoré');
-            continue;
+      // 🚀 OPTIMISATION: Parser JSON en batch dans un Isolate pour éviter de bloquer l'UI
+      // Si on a peu de messages, on parse directement (overhead d'Isolate trop important)
+      if (rows.length <= 5) {
+        final messages = <Message>[];
+        for (final row in rows) {
+          try {
+            final v2DataJson = row['v2_data'] as String;
+            if (v2DataJson.isEmpty) {
+              debugPrint('⚠️ Message ${row['message_id']} a un v2_data vide, ignoré');
+              continue;
+            }
+            
+            final v2Data = jsonDecode(v2DataJson) as Map<String, dynamic>;
+            final signatureValid = (row['signature_valid'] as int? ?? 0) == 1;
+            
+            messages.add(Message(
+              id: row['message_id'] as String,
+              conversationId: row['conversation_id'] as String,
+              senderId: row['sender_id'] as String,
+              encrypted: null,
+              iv: null,
+              encryptedKeys: const {},
+              signatureValid: signatureValid,
+              senderPublicKey: null,
+              timestamp: row['timestamp'] as int,
+              v2Data: v2Data,
+              decryptedText: null,
+            ));
+          } catch (e) {
+            debugPrint('⚠️ Erreur parsing message local ${row['message_id']}: $e');
           }
-          
-          final v2Data = jsonDecode(v2DataJson) as Map<String, dynamic>;
-          
-          // Restaurer signatureValid depuis la base de données
-          final signatureValid = (row['signature_valid'] as int? ?? 0) == 1;
-          
-          messages.add(Message(
-            id: row['message_id'] as String,
-            conversationId: row['conversation_id'] as String,
-            senderId: row['sender_id'] as String,
-            encrypted: null,
-            iv: null,
-            encryptedKeys: const {},
-            signatureValid: signatureValid,
-            senderPublicKey: null,
-            timestamp: row['timestamp'] as int,
-            v2Data: v2Data,
-            decryptedText: null, // Toujours null dans le stockage (sécurité)
-          ));
-        } catch (e) {
-          debugPrint('⚠️ Erreur parsing message local ${row['message_id']}: $e');
-          // Continuer avec les autres messages plutôt que d'échouer complètement
         }
+        final reversedMessages = messages.reversed.toList();
+        debugPrint('📥 ${reversedMessages.length} messages chargés depuis le stockage local pour $conversationId (limite: $effectiveLimit)');
+        return reversedMessages;
       }
       
-      // 🚀 OPTIMISATION: Pas besoin de trier si on a déjà ORDER BY timestamp DESC
-      // On inverse juste l'ordre pour avoir chronologique (plus ancien en premier)
-      // Plus efficace que sort() car on sait déjà que c'est trié par timestamp DESC
-      final reversedMessages = messages.reversed.toList();
-      debugPrint('📥 ${reversedMessages.length} messages chargés depuis le stockage local pour $conversationId (limite: $effectiveLimit)');
-      return reversedMessages;
+      // Pour plus de 5 messages, utiliser compute() pour parser en Isolate
+      // La fonction _parseMessagesFromRows retourne déjà les messages dans le bon ordre
+      final messages = await compute(_parseMessagesFromRows, rows);
+      debugPrint('📥 ${messages.length} messages chargés depuis le stockage local pour $conversationId (limite: $effectiveLimit)');
+      return messages;
     } catch (e) {
       debugPrint('❌ Erreur chargement messages locaux: $e');
       return [];
@@ -418,5 +417,39 @@ class LocalMessageStorage {
     _database = null;
     debugPrint('🔒 LocalMessageStorage fermé');
   }
+}
+
+/// 🚀 OPTIMISATION: Fonction top-level pour parser les messages dans un Isolate
+/// Parse les messages depuis les rows de la DB en batch
+List<Message> _parseMessagesFromRows(List<Map<String, dynamic>> rows) {
+  final messages = <Message>[];
+  for (final row in rows) {
+    try {
+      final v2DataJson = row['v2_data'] as String;
+      if (v2DataJson.isEmpty) {
+        continue;
+      }
+      
+      final v2Data = jsonDecode(v2DataJson) as Map<String, dynamic>;
+      final signatureValid = (row['signature_valid'] as int? ?? 0) == 1;
+      
+      messages.add(Message(
+        id: row['message_id'] as String,
+        conversationId: row['conversation_id'] as String,
+        senderId: row['sender_id'] as String,
+        encrypted: null,
+        iv: null,
+        encryptedKeys: const {},
+        signatureValid: signatureValid,
+        senderPublicKey: null,
+        timestamp: row['timestamp'] as int,
+        v2Data: v2Data,
+        decryptedText: null,
+      ));
+    } catch (e) {
+      // Ignorer les erreurs de parsing individuelles
+    }
+  }
+  return messages.reversed.toList();
 }
 

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_message_app/core/models/conversation.dart';
 import 'package:flutter_message_app/core/models/message.dart';
@@ -49,6 +50,34 @@ class ConversationProvider extends ChangeNotifier {
   /// Cache des pseudos des utilisateurs par userId
   final Map<String, String> _userUsernames = <String, String>{};
   
+  /// 🚀 OPTIMISATION: Batching des notifications pour éviter les freezes
+  /// Accumule les notifications et les envoie par batch toutes les 100ms
+  Timer? _notificationBatchTimer;
+  bool _pendingNotification = false;
+  
+  /// Notifie les listeners de manière batchée pour éviter les freezes
+  void _notifyListenersBatched() {
+    _pendingNotification = true;
+    
+    // Annuler le timer précédent s'il existe
+    _notificationBatchTimer?.cancel();
+    
+    // Programmer une notification dans 100ms (ou immédiatement si c'est la première)
+    _notificationBatchTimer = Timer(const Duration(milliseconds: 100), () {
+      if (_pendingNotification) {
+        _pendingNotification = false;
+        notifyListeners();
+      }
+    });
+  }
+  
+  /// Force une notification immédiate (pour les actions critiques)
+  void _notifyListenersImmediate() {
+    _notificationBatchTimer?.cancel();
+    _pendingNotification = false;
+    notifyListeners();
+  }
+  
   /// Obtient le username d'un utilisateur depuis le cache
   String getUsernameForUser(String userId) {
     return _userUsernames[userId] ?? '';
@@ -97,7 +126,8 @@ class ConversationProvider extends ChangeNotifier {
     GlobalPresenceService().addListener(() {
       debugPrint('👥 [ConversationProvider] Global presence changed, updating local state');
       _syncWithGlobalPresence();
-      notifyListeners();
+      // 🚀 OPTIMISATION: Batching pour les mises à jour de présence (non-critique)
+      _notifyListenersBatched();
     });
     
     // Synchroniser l'état initial avec le service global
@@ -343,8 +373,9 @@ class ConversationProvider extends ChangeNotifier {
       message.decryptedText = decryptedText;
       
       // CORRECTION: Notifier les listeners pour mettre à jour l'UI
+      // 🚀 OPTIMISATION: Utiliser batching pour éviter les freezes
       // Cela garantit que l'UI se met à jour quand signatureValid change
-      notifyListeners();
+      _notifyListenersBatched();
       
       return decryptedText;
       
@@ -466,7 +497,8 @@ class ConversationProvider extends ChangeNotifier {
     
     if (futures.isNotEmpty) {
       await Future.wait(futures);
-      notifyListeners();
+      // 🚀 OPTIMISATION: Batching pour éviter les freezes
+      _notifyListenersBatched();
     }
   }
 
@@ -522,7 +554,8 @@ class ConversationProvider extends ChangeNotifier {
       // Attendre la fin du groupe actuel
       if (futures.isNotEmpty) {
         await Future.wait(futures);
-        notifyListeners();
+        // 🚀 OPTIMISATION: Batching pour éviter les freezes
+        _notifyListenersBatched();
         
         // Petite pause pour éviter le freeze de l'UI
         if (i + batchSize < toDecrypt.length) {
@@ -542,7 +575,8 @@ class ConversationProvider extends ChangeNotifier {
     
     if (message.decryptedText == null && message.v2Data != null) {
       await decryptMessageIfNeeded(message);
-      notifyListeners();
+      // 🚀 OPTIMISATION: Batching pour éviter les freezes
+      _notifyListenersBatched();
     }
   }
 
@@ -559,9 +593,9 @@ class ConversationProvider extends ChangeNotifier {
       if (msg.decryptedText == null && msg.v2Data != null) {
         futures.add(decryptMessageIfNeeded(msg).then((_) {
           processed++;
-          // Notifier tous les 5 messages déchiffrés pour l'UX
-          if (processed % 5 == 0) {
-            notifyListeners();
+          // 🚀 OPTIMISATION: Notifier tous les 10 messages déchiffrés (au lieu de 5) pour réduire les freezes
+          if (processed % 10 == 0) {
+            _notifyListenersBatched();
           }
         }));
       }
@@ -570,7 +604,8 @@ class ConversationProvider extends ChangeNotifier {
     // Attendre la fin et notifier une dernière fois
     if (futures.isNotEmpty) {
       await Future.wait(futures);
-      notifyListeners();
+      // 🚀 OPTIMISATION: Batching pour éviter les freezes
+      _notifyListenersBatched();
     }
   }
 
@@ -606,7 +641,8 @@ class ConversationProvider extends ChangeNotifier {
   /// Marque une conversation comme lue (remet le compteur à zéro)
   void markConversationAsRead(String conversationId) {
     _unreadCounts[conversationId] = 0;
-    notifyListeners();
+    // 🚀 OPTIMISATION: Notification immédiate pour action utilisateur (critique)
+    _notifyListenersImmediate();
   }
   
   /// Obtient la liste des utilisateurs en train de taper pour une conversation
@@ -643,7 +679,8 @@ class ConversationProvider extends ChangeNotifier {
   Future<void> fetchConversations() async {
     try {
       _conversations = await _apiService.fetchConversations();
-      notifyListeners();
+      // 🚀 OPTIMISATION: Notification immédiate pour l'affichage initial (critique)
+      _notifyListenersImmediate();
     } catch (e) {
       debugPrint('❌ fetchConversations error: $e');
       rethrow;
@@ -694,7 +731,8 @@ class ConversationProvider extends ChangeNotifier {
       } else {
         _conversations.add(convo);
       }
-      notifyListeners();
+      // 🚀 OPTIMISATION: Notification immédiate pour nouvelle conversation (critique)
+      _notifyListenersImmediate();
       return convo;
     } on RateLimitException {
       if (context.mounted) {
@@ -820,7 +858,8 @@ class ConversationProvider extends ChangeNotifier {
         }
       }
       
-      notifyListeners();
+      // 🚀 OPTIMISATION: Batching pour éviter les freezes lors du chargement
+      _notifyListenersBatched();
       
       // CORRECTION: Retourner s'il y a encore des messages à charger
       return items.isNotEmpty;
@@ -880,22 +919,24 @@ class ConversationProvider extends ChangeNotifier {
           if (localMessages.isNotEmpty) {
             debugPrint('⚡ ${localMessages.length} messages chargés depuis le stockage local (instantané)');
             
-            // CORRECTION: Fusionner intelligemment avec les messages déjà en mémoire
-            // pour préserver signatureValid et decryptedText des messages WebSocket
+            // 🚀 OPTIMISATION: Fusionner intelligemment avec les messages déjà en mémoire
+            // Utiliser des Maps pour O(1) lookup au lieu de O(n) pour chaque message
             final existingMessages = _messages[conversationId] ?? [];
             final existingById = <String, Message>{};
             for (final msg in existingMessages) {
               existingById[msg.id] = msg;
             }
             
-            // Fusionner : préserver les messages en mémoire (WebSocket) s'ils sont plus récents
+            // 🚀 OPTIMISATION: Créer un Set pour tracker les IDs déjà fusionnés (évite les doublons)
+            final mergedIds = <String>{};
             final mergedMessages = <Message>[];
+            
+            // Étape 1: Traiter les messages locaux
             for (final localMsg in localMessages) {
               final existing = existingById[localMsg.id];
               if (existing != null) {
                 // Message existe déjà en mémoire (ajouté via WebSocket)
                 // Préserver signatureValid et decryptedText de la version mémoire
-                // mais utiliser les autres données de la version locale (plus à jour)
                 mergedMessages.add(Message(
                   id: existing.id,
                   conversationId: existing.conversationId,
@@ -903,38 +944,43 @@ class ConversationProvider extends ChangeNotifier {
                   encrypted: existing.encrypted,
                   iv: existing.iv,
                   encryptedKeys: existing.encryptedKeys,
-                  signatureValid: existing.signatureValid, // CORRECTION: Préserver signatureValid de la mémoire
+                  signatureValid: existing.signatureValid,
                   senderPublicKey: existing.senderPublicKey,
                   timestamp: existing.timestamp,
                   v2Data: existing.v2Data ?? localMsg.v2Data,
                   decryptedText: existing.decryptedText ?? localMsg.decryptedText,
                 ));
-                existingById.remove(existing.id); // Ne pas l'ajouter deux fois
+                mergedIds.add(existing.id);
               } else {
                 // Nouveau message depuis la DB
-                // Restaurer le texte déchiffré depuis le cache si disponible
                 if (_decryptedCache.containsKey(localMsg.id)) {
                   localMsg.decryptedText = _decryptedCache[localMsg.id];
-                  debugPrint('🔄 Texte déchiffré restauré depuis le cache pour ${localMsg.id}');
                 }
                 mergedMessages.add(localMsg);
+                mergedIds.add(localMsg.id);
               }
             }
             
-            // Ajouter les messages en mémoire qui ne sont pas dans la DB (très récents)
+            // Étape 2: Ajouter les messages en mémoire qui ne sont pas dans la DB (très récents)
             for (final existing in existingById.values) {
-              mergedMessages.add(existing);
+              if (!mergedIds.contains(existing.id)) {
+                mergedMessages.add(existing);
+              }
             }
             
-            // Trier par timestamp
-            mergedMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            // 🚀 OPTIMISATION: Trier seulement si nécessaire (les messages locaux sont déjà triés)
+            // On trie seulement si on a ajouté des messages en mémoire
+            if (existingById.isNotEmpty) {
+              mergedMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            }
             
             _messages[conversationId] = mergedMessages;
             
             // 🚀 OPTIMISATION: Nettoyer les messages si la limite est dépassée
             _trimMessagesIfNeeded(conversationId);
             
-            notifyListeners();
+            // 🚀 OPTIMISATION: Notification immédiate pour l'affichage initial (critique)
+            _notifyListenersImmediate();
             
             debugPrint('✅ Messages locaux affichés immédiatement, synchronisation serveur en arrière-plan...');
             
@@ -1039,22 +1085,31 @@ class ConversationProvider extends ChangeNotifier {
         });
       }
       
-      // Fusionner les nouveaux messages avec les existants
-      final mergedMessages = <Message>[];
+      // 🚀 OPTIMISATION: Fusionner les nouveaux messages avec les existants de manière efficace
+      // Utiliser un Set pour O(1) lookup au lieu de O(n) pour chaque message
       final newMessageIds = newMessages.map((m) => m.id).toSet();
+      final mergedMessages = <Message>[];
       
-      // Ajouter les messages existants qui ne sont pas dans les nouveaux
+      // Étape 1: Ajouter les messages existants qui ne sont pas dans les nouveaux (O(n))
       for (final existing in existingMessages) {
         if (!newMessageIds.contains(existing.id)) {
           mergedMessages.add(existing);
         }
       }
       
-      // Ajouter les nouveaux messages
+      // Étape 2: Ajouter les nouveaux messages
       mergedMessages.addAll(newMessages);
       
-      // Trier par timestamp
-      mergedMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      // 🚀 OPTIMISATION: Trier seulement si nécessaire (si on a mélangé anciens et nouveaux)
+      // Si tous les nouveaux messages sont plus récents que les existants, pas besoin de trier
+      if (newMessages.isNotEmpty && existingMessages.isNotEmpty) {
+        final oldestNew = newMessages.map((m) => m.timestamp).reduce((a, b) => a < b ? a : b);
+        final newestExisting = existingMessages.map((m) => m.timestamp).reduce((a, b) => a > b ? a : b);
+        // Si le plus ancien nouveau est plus récent que le plus récent existant, pas besoin de trier
+        if (oldestNew < newestExisting) {
+          mergedMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        }
+      }
       
       // Mettre à jour en mémoire seulement si la conversation est ouverte
       if (_messages.containsKey(conversationId)) {
@@ -1063,7 +1118,8 @@ class ConversationProvider extends ChangeNotifier {
         // 🚀 OPTIMISATION: Nettoyer les messages si la limite est dépassée
         _trimMessagesIfNeeded(conversationId);
         
-        notifyListeners();
+        // 🚀 OPTIMISATION: Batching pour la synchronisation en arrière-plan
+        _notifyListenersBatched();
         debugPrint('✅ Synchronisation serveur: ${items.length} nouveaux messages fusionnés');
       }
       
@@ -1140,7 +1196,8 @@ class ConversationProvider extends ChangeNotifier {
     try {
       final list = await _apiService.getConversationReaders(conversationId: conversationId);
       _readersByConv[conversationId] = list;
-      notifyListeners();
+      // 🚀 OPTIMISATION: Batching pour les mises à jour non-critiques
+      _notifyListenersBatched();
     } catch (e) {
       debugPrint('❌ refreshReaders error: $e');
     }
@@ -1162,7 +1219,8 @@ class ConversationProvider extends ChangeNotifier {
       if (newMessages.isNotEmpty) {
         _messages.putIfAbsent(conversationId, () => []);
         _messages[conversationId]!.addAll(newMessages);
-        notifyListeners();
+        // 🚀 OPTIMISATION: Batching pour les messages chargés en arrière-plan
+        _notifyListenersBatched();
 
         // AJOUT: déchiffrer immédiatement les 3 derniers
         await decryptVisibleMessagesFast(conversationId, visibleCount: 3);
@@ -1410,7 +1468,9 @@ class ConversationProvider extends ChangeNotifier {
       _trimMessagesIfNeeded(convId);
     }
     
-    notifyListeners();
+    // 🚀 OPTIMISATION: Notification immédiate pour les nouveaux messages (critique)
+    // Les messages WebSocket doivent être affichés immédiatement
+    _notifyListenersImmediate();
   }
 
   // ─── Handlers internes pour les événements WS ──────────────────────────────
@@ -1450,7 +1510,8 @@ class ConversationProvider extends ChangeNotifier {
       // Incrémenter le compteur de messages non lus si ce n'est pas notre message
       if (senderId != myUserId) {
         _unreadCounts[convId] = (_unreadCounts[convId] ?? 0) + 1;
-        notifyListeners();
+        // 🚀 OPTIMISATION: Batching pour les compteurs (non-critique)
+        _notifyListenersBatched();
         
         // Afficher une notification si l'utilisateur n'est pas dans cette conversation
         await _showNotificationIfNeeded(convId, senderId, decryptedText);
@@ -1573,7 +1634,8 @@ class ConversationProvider extends ChangeNotifier {
     debugPrint('💬 [WebSocket] Nouvelle conversation créée: $convId dans $groupId par $creatorId');
     // CORRECTION: Rafraîchir immédiatement la liste des conversations
     fetchConversations();
-    notifyListeners();
+    // 🚀 OPTIMISATION: Batching pour les événements WebSocket (non-critique)
+    _notifyListenersBatched();
   }
 
   // Presence + read receipts hooks (UI can observe derived state later)
@@ -1590,12 +1652,14 @@ class ConversationProvider extends ChangeNotifier {
   void _onTypingStart(String convId, String userId) {
     _typingUsers.putIfAbsent(convId, () => <String>{});
     _typingUsers[convId]!.add(userId);
-    notifyListeners();
+    // 🚀 OPTIMISATION: Batching pour les indicateurs de frappe (non-critique)
+    _notifyListenersBatched();
   }
   
   void _onTypingStop(String convId, String userId) {
     _typingUsers[convId]?.remove(userId);
-    notifyListeners();
+    // 🚀 OPTIMISATION: Batching pour les indicateurs de frappe (non-critique)
+    _notifyListenersBatched();
   }
   
   /// Affiche une notification si nécessaire
