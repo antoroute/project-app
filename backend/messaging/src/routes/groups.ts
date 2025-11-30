@@ -43,10 +43,11 @@ export default async function routes(app: FastifyInstance) {
     app.io.in(`user:${userId}`).socketsJoin(`group:${g.id}`);
     app.log.info({ groupId: g.id, userId }, 'Creator joined group room');
 
-    // CORRECTION: Émettre uniquement au créateur (il est le seul membre pour l'instant)
+    // SÉCURITÉ: Émettre uniquement un ping minimal (pas de données sensibles)
+    // Le créateur n'a pas besoin de notification car il vient de créer le groupe
     // Les autres utilisateurs recevront la notification quand ils rejoindront le groupe
-    app.io.to(`user:${userId}`).emit('group:created', { groupId: g.id, creatorId: userId });
-    app.log.info({ groupId: g.id, userId }, 'Group created and notified to creator only (other users will be notified when they join)');
+    // Note: On n'émet rien ici car le créateur est déjà au courant
+    app.log.info({ groupId: g.id, userId }, 'Group created (no notification needed for creator)');
 
     reply.code(201); // Explicitement retourner le code 201 Created
     return { groupId: g.id, name };
@@ -231,33 +232,32 @@ export default async function routes(app: FastifyInstance) {
     app.log.info({ groupId, userId: jr.user_id }, 'User auto-joined group room after acceptance');
 
     // CORRECTION: Notifier tous les utilisateurs du groupe qu'un nouvel utilisateur a rejoint
-    app.log.info({ groupId, userId: jr.user_id, approverId }, 'About to emit group:member_joined event');
-    app.io.to(`group:${groupId}`).emit('group:member_joined', { 
-      groupId, 
-      userId: jr.user_id, 
-      approverId 
-    });
-    app.log.info({ groupId, userId: jr.user_id, approverId }, 'User joined group - broadcasted');
-    
-    // CORRECTION: Notifier spécifiquement l'utilisateur accepté qu'il a rejoint le groupe
-    app.log.info({ groupId, userId: jr.user_id }, 'About to emit group:joined event to accepted user');
-    
-    // Vérifier si l'utilisateur est dans la room user:${userId}
-    const userRoom = `user:${jr.user_id}`;
-    const socketsInRoom = app.io.sockets.adapter.rooms.get(userRoom);
-    app.log.info({ 
-      groupId, 
-      userId: jr.user_id, 
-      userRoom, 
-      socketsInRoom: socketsInRoom ? socketsInRoom.size : 0 
-    }, 'Checking user room before emitting group:joined');
-    
-    app.io.to(`user:${jr.user_id}`).emit('group:joined', { 
-      groupId, 
-      userId: jr.user_id, 
-      approverId 
-    });
-    app.log.info({ groupId, userId: jr.user_id }, 'User accepted - notified of group join');
+      // SÉCURITÉ: Émettre uniquement un ping minimal pour les membres du groupe
+      app.log.info({ groupId, userId: jr.user_id, approverId }, 'About to emit group:member_joined ping');
+      app.io.to(`group:${groupId}`).emit('group:member_joined', {
+        type: 'group:member_joined',
+        // Pas de groupId, pas de userId, pas de approverId - juste un ping
+      });
+      app.log.info({ groupId, userId: jr.user_id, approverId }, 'Group member joined ping sent (no sensitive data)');
+      
+      // SÉCURITÉ: Notifier spécifiquement l'utilisateur accepté qu'il a rejoint le groupe (ping minimal)
+      app.log.info({ groupId, userId: jr.user_id }, 'About to emit group:joined ping to accepted user');
+      
+      // Vérifier si l'utilisateur est dans la room user:${userId}
+      const userRoom = `user:${jr.user_id}`;
+      const socketsInRoom = app.io.sockets.adapter.rooms.get(userRoom);
+      app.log.info({ 
+        groupId, 
+        userId: jr.user_id, 
+        userRoom, 
+        socketsInRoom: socketsInRoom ? socketsInRoom.size : 0 
+      }, 'Checking user room before emitting group:joined ping');
+      
+      app.io.to(`user:${jr.user_id}`).emit('group:joined', {
+        type: 'group:joined',
+        // Pas de groupId, pas de userId, pas de approverId - juste un ping
+      });
+      app.log.info({ groupId, userId: jr.user_id }, 'User accepted - notified of group join (ping only)');
 
     // CORRECTION: Broadcaster la présence de l'utilisateur accepté aux autres membres du groupe
     if (app.services.presence && app.services.presence.broadcastUserPresence) {
@@ -475,17 +475,16 @@ export default async function routes(app: FastifyInstance) {
       app.io.in(`user:${jr.user_id}`).socketsJoin(`group:${groupId}`);
       app.log.info({ groupId, userId: jr.user_id }, 'User auto-joined group room after acceptance');
 
-      // CORRECTION: Notifier tous les utilisateurs du groupe qu'un nouvel utilisateur a rejoint
-      app.log.info({ groupId, userId: jr.user_id, approverId }, 'About to emit group:member_joined event');
-      app.io.to(`group:${groupId}`).emit('group:member_joined', { 
-        groupId, 
-        userId: jr.user_id, 
-        approverId 
+      // SÉCURITÉ: Émettre uniquement un ping minimal pour les membres du groupe
+      app.log.info({ groupId, userId: jr.user_id, approverId }, 'About to emit group:member_joined ping');
+      app.io.to(`group:${groupId}`).emit('group:member_joined', {
+        type: 'group:member_joined',
+        // Pas de groupId, pas de userId, pas de approverId - juste un ping
       });
-      app.log.info({ groupId, userId: jr.user_id, approverId }, 'User joined group - broadcasted');
+      app.log.info({ groupId, userId: jr.user_id, approverId }, 'Group member joined ping sent (no sensitive data)');
       
-      // CORRECTION: Notifier spécifiquement l'utilisateur accepté qu'il a rejoint le groupe
-      app.log.info({ groupId, userId: jr.user_id }, 'About to emit group:joined event to accepted user');
+      // SÉCURITÉ: Notifier spécifiquement l'utilisateur accepté qu'il a rejoint le groupe (ping minimal)
+      app.log.info({ groupId, userId: jr.user_id }, 'About to emit group:joined ping to accepted user');
       
       // Vérifier si l'utilisateur est dans la room user:${userId}
       const userRoom = `user:${jr.user_id}`;
@@ -495,12 +494,11 @@ export default async function routes(app: FastifyInstance) {
         userId: jr.user_id, 
         userRoom, 
         socketsInRoom: socketsInRoom ? socketsInRoom.size : 0 
-      }, 'Checking user room before emitting group:joined');
+      }, 'Checking user room before emitting group:joined ping');
       
-      app.io.to(`user:${jr.user_id}`).emit('group:joined', { 
-        groupId, 
-        userId: jr.user_id, 
-        approverId 
+      app.io.to(`user:${jr.user_id}`).emit('group:joined', {
+        type: 'group:joined',
+        // Pas de groupId, pas de userId, pas de approverId - juste un ping
       });
       app.log.info({ groupId, userId: jr.user_id }, 'User accepted - notified of group join');
 

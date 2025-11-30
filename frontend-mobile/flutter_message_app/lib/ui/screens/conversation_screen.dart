@@ -12,6 +12,7 @@ import '../../core/services/session_device_service.dart';
 import '../../core/services/performance_benchmark.dart';
 import '../../core/services/navigation_tracker_service.dart';
 import '../../core/services/in_app_notification_service.dart';
+import '../../core/services/notification_badge_service.dart';
 import 'dart:async';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/websocket_heartbeat_service.dart';
@@ -34,7 +35,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
   static const int _messagesPerPage = 20;  // Messages chargés par pagination
   
   bool _isLoading = false;
-  bool _initialDecryptDone = false;
   bool _hasMoreOlderMessages = true;
   
   // Timer pour les indicateurs de frappe
@@ -54,6 +54,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
     // Enregistrer que cette conversation est ouverte
     NavigationTrackerService().setConversationOpen(widget.conversationId);
     NavigationTrackerService().setCurrentScreen('ConversationScreen');
+
+    // Marquer la conversation comme lue (plus de badge)
+    NotificationBadgeService().markConversationAsRead(widget.conversationId);
 
     // Pas d'écoute du scroll - géré par NotificationListener
     
@@ -549,7 +552,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
     // Désenregistrer la conversation
     NavigationTrackerService().setConversationClosed(widget.conversationId);
     
-    _conversationProvider.unsubscribe(widget.conversationId);
+    // SÉCURITÉ: Ne pas se désabonner quand on quitte la conversation
+    // L'abonnement est géré automatiquement par fetchConversations()
+    // et reste actif pour recevoir les notifications même quand on n'est pas sur l'écran
+    // Le backend vérifie les permissions avant d'envoyer les messages
+    
     _conversationProvider.removeListener(_onMessagesUpdated);
     _textController.dispose();
     _scrollController.dispose();

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../themes/app_colors.dart';
+import '../../core/services/notification_badge_service.dart';
 
 /// Onglet de navigation avec icône et label optionnel
 class NavTab {
@@ -38,6 +40,18 @@ class _BottomNavBarState extends State<BottomNavBar> {
 
   @override
   Widget build(BuildContext context) {
+    // Écouter les changements du service de badges pour mettre à jour l'UI
+    return ChangeNotifierProvider.value(
+      value: NotificationBadgeService(),
+      child: Consumer<NotificationBadgeService>(
+        builder: (context, badgeService, child) {
+          return _buildNavBar(context);
+        },
+      ),
+    );
+  }
+
+  Widget _buildNavBar(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
@@ -67,35 +81,43 @@ class _BottomNavBarState extends State<BottomNavBar> {
         children: [
           // Les 4 premiers onglets alignés répartis uniformément
           // (tous sauf celui à centerTabIndex)
-          Row(
-            children: [
-              // Afficher les onglets 0, 1, 2, 3 (sauf celui à centerTabIndex)
-              for (int i = 0; i < widget.tabs.length; i++)
-                if (i != widget.centerTabIndex) ...[
-                  Expanded(
-                    child: _buildTab(
-                      index: i,
-                      isSelected: widget.currentIndex == i,
-                      theme: theme,
-                      isDark: isDark,
-                    ),
-                  ),
-                  // Ajouter un espacement après les 2 premiers onglets (Messages et Calendrier)
-                  // pour éloigner du centre
-                  if (i == 1) const SizedBox(width: 30),
+          Consumer<NotificationBadgeService>(
+            builder: (context, badgeService, child) {
+              return Row(
+                children: [
+                  // Afficher les onglets 0, 1, 2, 3 (sauf celui à centerTabIndex)
+                  for (int i = 0; i < widget.tabs.length; i++)
+                    if (i != widget.centerTabIndex) ...[
+                      Expanded(
+                        child: _buildTab(
+                          index: i,
+                          isSelected: widget.currentIndex == i,
+                          theme: theme,
+                          isDark: isDark,
+                          badgeService: badgeService,
+                        ),
+                      ),
+                      // Ajouter un espacement après les 2 premiers onglets (Messages et Calendrier)
+                      // pour éloigner du centre
+                      if (i == 1) const SizedBox(width: 30),
+                    ],
                 ],
-            ],
+              );
+            },
           ),
           // Tab central décentré vers le haut avec encadré
           Positioned(
             left: 0,
             right: 0,
             top: -8, // Décalage vers le haut pour le tab central
-            child: Center(
-              child: _buildCenterTab(
-                isSelected: widget.currentIndex == widget.centerTabIndex,
-                theme: theme,
-              ),
+            child: Consumer<NotificationBadgeService>(
+              builder: (context, badgeService, child) {
+                return _buildCenterTab(
+                  isSelected: widget.currentIndex == widget.centerTabIndex,
+                  theme: theme,
+                  badgeService: badgeService,
+                );
+              },
             ),
           ),
         ],
@@ -109,6 +131,7 @@ class _BottomNavBarState extends State<BottomNavBar> {
     required bool isSelected,
     required ThemeData theme,
     required bool isDark,
+    NotificationBadgeService? badgeService,
   }) {
     if (index >= widget.tabs.length) {
       return const SizedBox.shrink();
@@ -118,6 +141,9 @@ class _BottomNavBarState extends State<BottomNavBar> {
     final color = isSelected
         ? (isDark ? AppColors.blue[300] : AppColors.blue[500])
         : (isDark ? AppColors.grey[400] : AppColors.grey[600]);
+
+    // Badge pour l'onglet Messages (index 2)
+    final showBadge = index == 2 && (badgeService?.newMessagesCount ?? 0) > 0;
 
     return GestureDetector(
       onTap: tab.onTap,
@@ -130,22 +156,54 @@ class _BottomNavBarState extends State<BottomNavBar> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             // Container pour garantir la même taille et alignement pour tous les icônes
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
-              width: 24,
-              height: 24,
-              transform: Matrix4.identity()
-                ..scale(isSelected ? 1.15 : 1.0),
-              alignment: Alignment.center,
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: Icon(
-                  tab.icon,
-                  color: color,
-                  size: 24,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeInOut,
+                  width: 24,
+                  height: 24,
+                  transform: Matrix4.identity()
+                    ..scale(isSelected ? 1.15 : 1.0),
+                  alignment: Alignment.center,
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    child: Icon(
+                      tab.icon,
+                      color: color,
+                      size: 24,
+                    ),
+                  ),
                 ),
-              ),
+                // Badge pour nouveaux messages
+                if (showBadge)
+                  Positioned(
+                    right: -6,
+                    top: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Text(
+                        (badgeService?.newMessagesCount ?? 0) > 99 ? '99+' : '${badgeService?.newMessagesCount ?? 0}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             if (tab.label != null) ...[
               const SizedBox(height: 4),
@@ -172,6 +230,7 @@ class _BottomNavBarState extends State<BottomNavBar> {
   Widget _buildCenterTab({
     required bool isSelected,
     required ThemeData theme,
+    NotificationBadgeService? badgeService,
   }) {
     if (widget.centerTabIndex >= widget.tabs.length) {
       return const SizedBox.shrink();
@@ -179,45 +238,66 @@ class _BottomNavBarState extends State<BottomNavBar> {
 
     final tab = widget.tabs[widget.centerTabIndex];
     final isDark = theme.brightness == Brightness.dark;
+    final showBadge = badgeService?.hasNewGroups ?? false;
 
     return GestureDetector(
       onTap: tab.onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        width: isSelected ? 50 : 46,
-        height: isSelected ? 50 : 46,
-        decoration: BoxDecoration(
-          // Carré gris avec coins arrondis (assombri)
-          color: isDark ? AppColors.grey[600] : AppColors.grey[400],
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.5),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Center(
-          child: AnimatedContainer(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
-            width: isSelected ? 28 : 24,
-            height: isSelected ? 28 : 24,
+            width: isSelected ? 50 : 46,
+            height: isSelected ? 50 : 46,
             decoration: BoxDecoration(
-              // Rond vide (cercle avec bordure) au centre
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: isSelected 
-                    ? AppColors.purple[400]! 
-                    : AppColors.purple[300]!,
-                width: isSelected ? 3 : 2.5,
+              // Carré gris avec coins arrondis (assombri)
+              color: isDark ? AppColors.grey[600] : AppColors.grey[400],
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                width: isSelected ? 28 : 24,
+                height: isSelected ? 28 : 24,
+                decoration: BoxDecoration(
+                  // Rond vide (cercle avec bordure) au centre
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isSelected 
+                        ? AppColors.purple[400]! 
+                        : AppColors.purple[300]!,
+                    width: isSelected ? 3 : 2.5,
+                  ),
+                ),
               ),
             ),
           ),
-        ),
+          // Badge pour nouveaux groupes
+          if (showBadge)
+            Positioned(
+              right: -4,
+              top: -4,
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

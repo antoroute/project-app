@@ -10,6 +10,7 @@ import 'package:flutter_message_app/core/services/websocket_service.dart';
 import 'package:flutter_message_app/core/services/key_directory_service.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/notification_service.dart';
+import 'package:flutter_message_app/core/services/notification_badge_service.dart';
 import 'package:flutter_message_app/core/services/global_presence_service.dart';
 import 'package:flutter_message_app/core/services/local_message_storage.dart';
 import 'package:flutter_message_app/core/services/message_key_cache.dart';
@@ -681,9 +682,27 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   /// Appelle GET /conversations
+  /// SÉCURITÉ: S'abonne automatiquement à toutes les conversations auxquelles l'utilisateur a accès
+  /// pour recevoir TOUS les événements (messages, typing, read receipts, etc.) même sans ouvrir la conversation
+  /// 
+  /// Événements reçus via ces abonnements :
+  /// - message:new (nouveaux messages)
+  /// - typing:start/stop (indicateurs de frappe)
+  /// - conv:read (messages lus)
+  /// - presence:conversation (présence dans les conversations)
   Future<void> fetchConversations() async {
     try {
       _conversations = await _apiService.fetchConversations();
+      
+      // SÉCURITÉ: S'abonner automatiquement à toutes les conversations
+      // Le backend vérifie les permissions dans conv:subscribe avant d'autoriser l'abonnement
+      // Une fois abonné, l'utilisateur reçoit TOUS les événements de cette conversation
+      debugPrint('📡 [ConversationProvider] Abonnement automatique à ${_conversations.length} conversations');
+      debugPrint('📡 [ConversationProvider] Événements qui seront reçus: message:new, typing:start/stop, conv:read, presence:conversation');
+      for (final conv in _conversations) {
+        subscribe(conv.conversationId);
+      }
+      
       // 🚀 OPTIMISATION: Notification immédiate pour l'affichage initial (critique)
       _notifyListenersImmediate();
     } catch (e) {
@@ -1006,8 +1025,10 @@ class ConversationProvider extends ChangeNotifier {
             
             debugPrint('✅ Messages locaux affichés immédiatement, synchronisation serveur en arrière-plan...');
             
-            // Synchroniser avec le serveur en arrière-plan (non-bloquant)
-            _syncMessagesFromServer(context, conversationId, limit: limit).catchError((e) {
+            // CORRECTION CRITIQUE: Toujours charger depuis le serveur pour récupérer les messages récents
+            // même si on a des messages locaux (l'app peut avoir été fermée)
+            // On charge les messages les plus récents (sans curseur) pour s'assurer de tout récupérer
+            _syncMessagesFromServer(context, conversationId, limit: limit, forceRecent: true).catchError((e) {
               debugPrint('⚠️ Erreur synchronisation serveur: $e');
             });
             
@@ -1030,36 +1051,76 @@ class ConversationProvider extends ChangeNotifier {
   }
   
   /// Synchronise les messages depuis le serveur en arrière-plan
+  /// [forceRecent] : Si true, charge toujours les messages les plus récents (sans curseur)
+  ///                 pour s'assurer de récupérer tous les messages même si l'app était fermée
   Future<void> _syncMessagesFromServer(
     BuildContext context,
     String conversationId, {
     int limit = 20,
+    bool forceRecent = false,
   }) async {
     try {
       // Note: syncState non utilisé pour l'instant, mais peut être utile pour optimisations futures
       await LocalMessageStorage.instance.getSyncState(conversationId);
       
-      // CORRECTION: Utiliser le timestamp du dernier message en mémoire (même s'il vient d'un autre device)
-      // plutôt que le dernier message local, pour s'assurer de récupérer tous les messages
-      // envoyés par d'autres devices du même compte
       int? cursorTimestamp;
       final messagesInMemory = _messages[conversationId];
-      if (messagesInMemory != null && messagesInMemory.isNotEmpty) {
-        // Utiliser le timestamp du message le plus récent en mémoire
-        final lastMessage = messagesInMemory.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
-        cursorTimestamp = lastMessage.timestamp;
+      
+      // CORRECTION CRITIQUE: Si forceRecent est true, ne pas utiliser de curseur
+      // pour charger les messages les plus récents (cas où l'app était fermée)
+      if (forceRecent) {
+        debugPrint('🔄 [Sync] Mode forceRecent: chargement des $limit messages les plus récents (sans curseur)');
+        cursorTimestamp = null;
       } else {
-        // Fallback: utiliser le dernier timestamp local
-        final lastLocalTimestamp = await LocalMessageStorage.instance.getLastMessageTimestamp(conversationId);
-        cursorTimestamp = lastLocalTimestamp;
+        // CORRECTION: Utiliser le timestamp du dernier message en mémoire (même s'il vient d'un autre device)
+        // plutôt que le dernier message local, pour s'assurer de récupérer tous les messages
+        // envoyés par d'autres devices du même compte
+        if (messagesInMemory != null && messagesInMemory.isNotEmpty) {
+          // Utiliser le timestamp du message le plus récent en mémoire
+          final lastMessage = messagesInMemory.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+          final lastTimestamp = lastMessage.timestamp;
+          
+          // CORRECTION: Vérifier si le dernier message est trop ancien (plus de 1 heure)
+          // Si oui, charger les messages récents sans curseur pour s'assurer de tout récupérer
+          final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+          final oneHourAgo = now - 3600;
+          
+          if (lastTimestamp < oneHourAgo) {
+            debugPrint('🔄 [Sync] Dernier message trop ancien (${now - lastTimestamp}s), chargement des messages récents');
+            cursorTimestamp = null;
+          } else {
+            cursorTimestamp = lastTimestamp;
+            debugPrint('🔄 [Sync] Utilisation du dernier message en mémoire: timestamp=$cursorTimestamp');
+          }
+        } else {
+          // Fallback: utiliser le dernier timestamp local
+          final lastLocalTimestamp = await LocalMessageStorage.instance.getLastMessageTimestamp(conversationId);
+          if (lastLocalTimestamp != null) {
+            final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+            final oneHourAgo = now - 3600;
+            
+            if (lastLocalTimestamp < oneHourAgo) {
+              debugPrint('🔄 [Sync] Dernier message local trop ancien, chargement des messages récents');
+              cursorTimestamp = null;
+            } else {
+              cursorTimestamp = lastLocalTimestamp;
+              debugPrint('🔄 [Sync] Utilisation du dernier message local: timestamp=$cursorTimestamp');
+            }
+          } else {
+            debugPrint('🔄 [Sync] Aucun message connu, chargement des $limit derniers messages');
+          }
+        }
       }
       
       // Charger les nouveaux messages depuis le serveur
+      // Si cursorTimestamp est null, on charge les messages les plus récents
       final items = await _apiService.fetchMessagesV2(
         conversationId: conversationId,
         limit: limit,
         cursor: cursorTimestamp != null ? (cursorTimestamp * 1000).toString() : null,
       );
+      
+      debugPrint('🔄 [Sync] ${items.length} message(s) reçu(s) depuis le serveur');
       
       if (items.isEmpty) {
         // Pas de nouveaux messages, mettre à jour l'état de sync
@@ -1573,6 +1634,31 @@ class ConversationProvider extends ChangeNotifier {
       debugPrint('📨 [ConversationProvider] _onWebSocketNewMessageV2 appelé');
       debugPrint('📨 [ConversationProvider] Payload reçu: ${payload.keys.join(", ")}');
       
+      // SÉCURITÉ: Vérifier si c'est un ping minimal (pas de données sensibles)
+      final type = payload['type'] as String?;
+      if (type == 'message:new') {
+        // C'est un ping minimal - pas de données sensibles
+        debugPrint('📨 [ConversationProvider] Ping reçu pour nouveau message (pas de données sensibles)');
+        
+        // Marquer qu'il y a de nouveaux messages et rafraîchir les conversations
+        final badgeService = NotificationBadgeService();
+        badgeService.incrementNewMessages();
+        
+        // Rafraîchir toutes les conversations pour récupérer les nouveaux messages
+        // L'utilisateur devra ouvrir la conversation pour voir les messages
+        await fetchConversations();
+        
+        // Marquer toutes les conversations comme ayant de nouveaux messages
+        // (on ne sait pas laquelle a reçu le message car c'est un ping)
+        for (final conv in _conversations) {
+          badgeService.markConversationAsNew(conv.conversationId);
+        }
+        
+        notifyListeners();
+        return;
+      }
+      
+      // Ancien format avec données complètes (pour compatibilité, mais ne devrait plus arriver)
       final myUserId = _authProvider.userId;
       if (myUserId == null) {
         debugPrint('⚠️ [ConversationProvider] myUserId est null, impossible de traiter le message');
@@ -1779,14 +1865,28 @@ class ConversationProvider extends ChangeNotifier {
     fetchConversations();
   }
 
-  void _onWebSocketGroupCreated(String groupId, String creatorId) {
+  void _onWebSocketGroupCreated(String? groupId, String? creatorId) {
+    // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
+    if (groupId == null || creatorId == null) {
+      debugPrint('🏗️ [ConversationProvider] Ping reçu pour nouveau groupe (pas de données sensibles)');
+      return;
+    }
+    
     debugPrint('🏗️ [ConversationProvider] Nouveau groupe créé: $groupId par $creatorId');
     // CORRECTION: Rafraîchir la liste des groupes via le GroupProvider
     // Note: Le GroupProvider sera notifié via son propre callback WebSocket
     // On ne fait rien ici car c'est le GroupProvider qui gère les groupes
   }
 
-  void _onWebSocketConversationCreated(String convId, String groupId, String creatorId) {
+  void _onWebSocketConversationCreated(String? convId, String? groupId, String? creatorId) {
+    // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
+    if (convId == null || groupId == null || creatorId == null) {
+      debugPrint('💬 [ConversationProvider] Ping reçu pour nouvelle conversation (pas de données sensibles)');
+      // Rafraîchir les conversations pour récupérer la nouvelle
+      fetchConversations();
+      return;
+    }
+    
     debugPrint('💬 [ConversationProvider] Nouvelle conversation créée: $convId dans $groupId par $creatorId');
     // CORRECTION: Rafraîchir immédiatement la liste des conversations
     fetchConversations().then((_) {

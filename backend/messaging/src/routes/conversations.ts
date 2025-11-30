@@ -54,11 +54,14 @@ export default async function routes(app: FastifyInstance) {
     }
     app.log.info({ groupId, memberCount: allMembers.length, groupMemberCount: groupMemberIds.size }, 'All conversation members joined group room');
 
-    // CORRECTION: Émettre uniquement aux membres du groupe (qui peuvent voir la conversation)
-    // Vérifier que seuls les membres du groupe reçoivent l'événement
-    app.log.info({ convId: conv.id, groupId, userId, memberCount: groupMemberIds.size }, 'About to emit conversation:created event');
-    app.io.to(`group:${groupId}`).emit('conversation:created', { convId: conv.id, groupId, creatorId: userId });
-    app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created and broadcasted to group members only');
+    // SÉCURITÉ: Émettre uniquement un ping minimal (pas de données sensibles)
+    // Les clients devront récupérer les conversations via l'API après avoir reçu le ping
+    app.log.info({ convId: conv.id, groupId, userId, memberCount: groupMemberIds.size }, 'About to emit conversation:created ping');
+    app.io.to(`group:${groupId}`).emit('conversation:created', {
+      type: 'conversation:created',
+      // Pas de convId, pas de groupId, pas de creatorId - juste un ping
+    });
+    app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created ping sent to group members (no sensitive data)');
 
     return { id: conv.id };
   });

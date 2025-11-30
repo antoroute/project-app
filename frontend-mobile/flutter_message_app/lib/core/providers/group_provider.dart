@@ -4,6 +4,7 @@ import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/services/api_service.dart';
 import 'package:flutter_message_app/core/services/websocket_service.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
+import 'package:flutter_message_app/core/services/notification_badge_service.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 
 /// Gère les opérations liées aux groupes et aux demandes de jointure.
@@ -295,7 +296,17 @@ class GroupProvider extends ChangeNotifier {
     }
   }
     
-  void _onWebSocketGroupCreated(String groupId, String creatorId) {
+  void _onWebSocketGroupCreated(String? groupId, String? creatorId) {
+    // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
+    if (groupId == null || creatorId == null) {
+      debugPrint('🏗️ [GroupProvider] Ping reçu pour nouveau groupe (pas de données sensibles)');
+      // Rafraîchir les groupes pour récupérer le nouveau
+      fetchUserGroups();
+      // Marquer qu'il y a de nouveaux groupes
+      NotificationBadgeService().setHasNewGroups(true);
+      return;
+    }
+    
     debugPrint('🏗️ [GroupProvider] Group created event received: $groupId by $creatorId');
     // CORRECTION: Rafraîchir immédiatement la liste des groupes
     fetchUserGroups().then((_) {
@@ -307,6 +318,9 @@ class GroupProvider extends ChangeNotifier {
         debugPrint('🏗️ [GroupProvider] Groupe créé par nous-même, pas de notification');
         return;
       }
+      
+      // Marquer qu'il y a de nouveaux groupes
+      NotificationBadgeService().setHasNewGroups(true);
       
       // Trouver le nom du groupe depuis la liste mise à jour
       String? groupName;
@@ -342,7 +356,15 @@ class GroupProvider extends ChangeNotifier {
     return notifications;
   }
   
-  void _onWebSocketGroupMemberJoined(String groupId, String userId, String approverId) {
+  void _onWebSocketGroupMemberJoined(String? groupId, String? userId, String? approverId) {
+    // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
+    if (groupId == null || userId == null || approverId == null) {
+      debugPrint('👥 [GroupProvider] Ping reçu pour membre rejoint (pas de données sensibles)');
+      // Rafraîchir les groupes
+      fetchUserGroups();
+      return;
+    }
+    
     debugPrint('👥 [GroupProvider] Group member joined event received: $userId in $groupId by $approverId');
     debugPrint('👥 [GroupProvider] Refreshing groups list...');
     // CORRECTION: Rafraîchir immédiatement la liste des groupes
@@ -350,11 +372,23 @@ class GroupProvider extends ChangeNotifier {
     debugPrint('👥 [GroupProvider] Groups list refreshed');
   }
   
-  void _onWebSocketGroupJoined(String groupId, String userId, String approverId) {
+  void _onWebSocketGroupJoined(String? groupId, String? userId, String? approverId) {
+    // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
+    if (groupId == null || userId == null || approverId == null) {
+      debugPrint('👥 [GroupProvider] Ping reçu pour groupe rejoint (pas de données sensibles)');
+      // Rafraîchir les groupes pour récupérer le nouveau
+      fetchUserGroups();
+      // Marquer qu'il y a de nouveaux groupes
+      NotificationBadgeService().setHasNewGroups(true);
+      return;
+    }
+    
     debugPrint('👥 [GroupProvider] Group joined event received: $userId in $groupId by $approverId');
     debugPrint('👥 [GroupProvider] Refreshing groups list for joined user...');
     // CORRECTION: Rafraîchir immédiatement la liste des groupes pour l'utilisateur qui a rejoint
     fetchUserGroups();
+    // Marquer qu'il y a de nouveaux groupes
+    NotificationBadgeService().setHasNewGroups(true);
     debugPrint('👥 [GroupProvider] Groups list refreshed for joined user');
   }
 }

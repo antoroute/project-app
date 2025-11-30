@@ -38,15 +38,18 @@ export default async function routes(app: FastifyInstance) {
         b.salt // Ajouter la salt au INSERT
       ]);
 
-      // Broadcast WS - Émettre à tous les membres de la conversation SAUF l'expéditeur
-      // L'expéditeur a déjà reçu la confirmation via la réponse HTTP
-      app.io.to(`conv:${b.convId}`).except(`user:${b.sender.userId}`).emit('message:new', b);
+      // SÉCURITÉ: Émettre uniquement un ping minimal (pas de données sensibles)
+      // Les clients devront récupérer les messages via l'API après avoir reçu le ping
+      app.io.to(`conv:${b.convId}`).except(`user:${b.sender.userId}`).emit('message:new', {
+        type: 'message:new',
+        // Pas de convId, pas de messageId, pas de contenu - juste un ping
+      });
       app.log.info({ 
         convId: b.convId, 
         messageId: b.messageId, 
         senderId: b.sender.userId,
-        event: 'message_broadcasted'
-      }, 'Message broadcasted to conversation (excluding sender)');
+        event: 'message_ping_sent'
+      }, 'Message ping sent to conversation (excluding sender, no sensitive data)');
 
       // Hint presence/analytics (option)
       app.log.info({ convId: b.convId, messageId: b.messageId, wraps: b.recipients.length }, 'message stored');

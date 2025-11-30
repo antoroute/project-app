@@ -10,6 +10,7 @@ import '../../core/services/snackbar_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/navigation_tracker_service.dart';
 import '../../core/services/in_app_notification_service.dart';
+import '../../core/services/notification_badge_service.dart';
 import 'conversation_screen.dart';
 
 /// Écran de liste des conversations d'un groupe : liste des conversations et création de conversation.
@@ -169,6 +170,9 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
       
       await convProv.fetchConversations();
       debugPrint('✅ Conversations loaded');
+      // Note: L'abonnement aux conversations est géré automatiquement par fetchConversations()
+      // qui s'abonne à toutes les conversations auxquelles l'utilisateur a accès
+      // Le backend vérifie les permissions avant d'envoyer les messages
 
       // v2: creator flag unused
     } catch (error) {
@@ -229,6 +233,19 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
     final convProv  = context.watch<ConversationProvider>();
     final String? currentUserId = context.read<AuthProvider>().userId;
     
+    // Écouter les changements du service de badges
+    return ChangeNotifierProvider.value(
+      value: NotificationBadgeService(),
+      child: Consumer<NotificationBadgeService>(
+        builder: (context, badgeService, child) {
+          return _buildContent(context, groupProv, convProv, currentUserId);
+        },
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context, GroupProvider groupProv, ConversationProvider convProv, String? currentUserId) {
+    
     // Debug info - seulement si les valeurs ont changé
     final membersCount = groupProv.members.length;
     final convosCount = convProv.conversations.length;
@@ -248,7 +265,6 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
     final convs = convProv.conversations
         .where((c) => c.groupId == widget.groupId)
         .toList();
-
 
     return Scaffold(
       appBar: AppBar(
@@ -389,22 +405,77 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
                     ),
                   ),
                   Expanded(
-                    child: ListView.builder(
-                      itemCount: convs.length,
-                      itemBuilder: (context, index) {
-                        final conv = convs[index];
-                        return ListTile(
-                          leading: const Icon(Icons.chat),
-                          title: Text('Conversation ${conv.conversationId.substring(0, 8)}...'),
-                          subtitle: Text('Type: ${conv.type}'),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ConversationScreen(
-                                  conversationId: conv.conversationId,
-                                ),
+                    child: Consumer<NotificationBadgeService>(
+                      builder: (context, badgeService, child) {
+                        return ListView.builder(
+                          itemCount: convs.length,
+                          itemBuilder: (context, index) {
+                            final conv = convs[index];
+                            final hasNewMessages = badgeService.conversationsWithNewMessages.contains(conv.conversationId);
+                            
+                            return ListTile(
+                              leading: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  const Icon(Icons.chat),
+                                  if (hasNewMessages)
+                                    Positioned(
+                                      right: -4,
+                                      top: -4,
+                                      child: Container(
+                                        width: 10,
+                                        height: 10,
+                                        decoration: BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle,
+                                          border: Border.all(color: Colors.white, width: 1),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Conversation ${conv.conversationId.substring(0, 8)}...',
+                                      style: TextStyle(
+                                        fontWeight: hasNewMessages ? FontWeight.bold : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ),
+                                  if (hasNewMessages)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Text(
+                                        'Nouveau',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              subtitle: Text('Type: ${conv.type}'),
+                              onTap: () {
+                                // Marquer la conversation comme lue
+                                badgeService.markConversationAsRead(conv.conversationId);
+                                
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ConversationScreen(
+                                      conversationId: conv.conversationId,
+                                    ),
+                                  ),
+                                );
+                              },
                             );
                           },
                         );

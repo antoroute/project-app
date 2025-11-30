@@ -7,6 +7,7 @@ import 'dart:async';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/websocket_heartbeat_service.dart';
 import '../../core/services/network_monitor_service.dart';
+import '../../core/services/notification_badge_service.dart';
 import '../widgets/bottom_nav_bar.dart';
 import 'group_conversation_list.dart';
 import 'group_screen.dart';
@@ -222,7 +223,11 @@ class _MainNavScreenState extends State<MainNavScreen> {
           NavTab(
             icon: Icons.home_outlined,
             label: 'Accueil',
-            onTap: () => setState(() => _currentIndex = 0),
+            onTap: () {
+              setState(() => _currentIndex = 0);
+              // Réinitialiser le badge des nouveaux groupes quand on ouvre l'accueil
+              NotificationBadgeService().setHasNewGroups(false);
+            },
           ),
           NavTab(
             icon: Icons.shopping_bag_outlined,
@@ -231,7 +236,11 @@ class _MainNavScreenState extends State<MainNavScreen> {
           ),
           NavTab(
             icon: Icons.chat_bubble_outline,
-            onTap: () => setState(() => _currentIndex = 2),
+            onTap: () {
+              setState(() => _currentIndex = 2);
+              // Réinitialiser le compteur de nouveaux messages quand on ouvre l'onglet Messages
+              NotificationBadgeService().clearNewMessages();
+            },
           ),
           NavTab(
             icon: Icons.grid_view_outlined,

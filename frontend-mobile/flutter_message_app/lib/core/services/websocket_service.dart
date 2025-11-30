@@ -44,14 +44,16 @@ class WebSocketService {
   void Function(String conversationId, String userId)? onUserAdded;
   VoidCallback? onNotificationNew;
   VoidCallback? onConversationJoined;
-  Function(String groupId, String userId, String approverId)? onGroupJoined;
+  // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
+  void Function(String? groupId, String? userId, String? approverId)? onGroupJoined;
   // Nouveaux callbacks pour les indicateurs de frappe
   void Function(String convId, String userId)? onTypingStart;
   void Function(String convId, String userId)? onTypingStop;
   // Nouveaux callbacks pour les groupes et conversations
-  void Function(String groupId, String creatorId)? onGroupCreated;
-  void Function(String convId, String groupId, String creatorId)? onConversationCreated;
-  void Function(String groupId, String userId, String approverId)? onGroupMemberJoined;
+  // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
+  void Function(String? groupId, String? creatorId)? onGroupCreated;
+  void Function(String? convId, String? groupId, String? creatorId)? onConversationCreated;
+  void Function(String? groupId, String? userId, String? approverId)? onGroupMemberJoined;
 
   /// Établit la connexion WS
   Future<void> connect(BuildContext context) async {
@@ -245,35 +247,39 @@ class WebSocketService {
       ..on('group:created', (data) {
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
-          final groupId = m['groupId'] as String;
-          final creatorId = m['creatorId'] as String;
+          // SÉCURITÉ: Les données peuvent être minimales (ping uniquement)
+          final groupId = m['groupId'] as String?;
+          final creatorId = m['creatorId'] as String?;
           onGroupCreated?.call(groupId, creatorId);
         }
       })
       ..on('conversation:created', (data) {
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
-          final convId = m['convId'] as String;
-          final groupId = m['groupId'] as String;
-          final creatorId = m['creatorId'] as String;
+          // SÉCURITÉ: Les données peuvent être minimales (ping uniquement)
+          final convId = m['convId'] as String?;
+          final groupId = m['groupId'] as String?;
+          final creatorId = m['creatorId'] as String?;
           onConversationCreated?.call(convId, groupId, creatorId);
         }
       })
       ..on('group:member_joined', (data) {
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
-          final groupId = m['groupId'] as String;
-          final userId = m['userId'] as String;
-          final approverId = m['approverId'] as String;
+          // SÉCURITÉ: Les données peuvent être minimales (ping uniquement)
+          final groupId = m['groupId'] as String?;
+          final userId = m['userId'] as String?;
+          final approverId = m['approverId'] as String?;
           onGroupMemberJoined?.call(groupId, userId, approverId);
         }
       })
       ..on('group:joined', (data) {
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
-          final groupId = m['groupId'] as String;
-          final userId = m['userId'] as String;
-          final approverId = m['approverId'] as String;
+          // SÉCURITÉ: Les données peuvent être minimales (ping uniquement)
+          final groupId = m['groupId'] as String?;
+          final userId = m['userId'] as String?;
+          final approverId = m['approverId'] as String?;
           onGroupJoined?.call(groupId, userId, approverId);
         }
       })
