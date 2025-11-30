@@ -154,6 +154,7 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
   }
 
   Future<void> _loadGroupData() async {
+    if (!mounted) return;
     setState(() => _loading = true);
 
     // final String? currentUserId = context.read<AuthProvider>().userId; // unused
@@ -163,12 +164,15 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
     try {
       debugPrint('🔄 Loading group detail for ${widget.groupId}');
       await groupProv.fetchGroupDetail(widget.groupId);
+      if (!mounted) return;
       debugPrint('✅ Group detail loaded');
       
       await groupProv.fetchGroupMembers(widget.groupId);
+      if (!mounted) return;
       debugPrint('✅ Group members loaded');
       
       await convProv.fetchConversations();
+      if (!mounted) return;
       debugPrint('✅ Conversations loaded');
       // Note: L'abonnement aux conversations est géré automatiquement par fetchConversations()
       // qui s'abonne à toutes les conversations auxquelles l'utilisateur a accès
@@ -176,10 +180,12 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
 
       // v2: creator flag unused
     } catch (error) {
-      SnackbarService.showError(
-        context,
-        'Erreur chargement : $error',
-      );
+      if (mounted) {
+        SnackbarService.showError(
+          context,
+          'Erreur chargement : $error',
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -411,7 +417,9 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
                           itemCount: convs.length,
                           itemBuilder: (context, index) {
                             final conv = convs[index];
-                            final hasNewMessages = badgeService.conversationsWithNewMessages.contains(conv.conversationId);
+                            // Filtrer les badges par groupe : ne montrer que les conversations du groupe actuel
+                            final hasNewMessages = badgeService.conversationsWithNewMessages.contains(conv.conversationId) &&
+                                                  conv.groupId == widget.groupId;
                             
                             return ListTile(
                               leading: Stack(
@@ -464,7 +472,8 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
                               ),
                               subtitle: Text('Type: ${conv.type}'),
                               onTap: () {
-                                // Marquer la conversation comme lue
+                                // Marquer la conversation comme lue AVANT de naviguer
+                                // Cela décrémente le compteur global
                                 badgeService.markConversationAsRead(conv.conversationId);
                                 
                                 Navigator.push(

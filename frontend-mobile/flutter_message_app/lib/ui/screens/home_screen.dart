@@ -9,6 +9,7 @@ import '../../core/services/websocket_heartbeat_service.dart';
 import '../../core/services/network_monitor_service.dart';
 import '../../core/services/navigation_tracker_service.dart';
 import '../../core/services/in_app_notification_service.dart';
+import '../../core/services/notification_badge_service.dart';
 import 'group_nav_screen.dart';
 import 'group_screen.dart';
 import 'login_screen.dart';
@@ -172,22 +173,66 @@ class _HomeScreenState extends State<HomeScreen> {
                       Center(child: Text('Aucun groupe trouvé')),
                     ],
                   )
-                : ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: groups.length,
-                    itemBuilder: (context, index) {
-                      final GroupInfo g = groups[index];
-                      return ListTile(
-                        title: Text(g.name),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => GroupNavScreen(
-                              groupId: g.groupId,
-                              groupName: g.name,
+                : Consumer<NotificationBadgeService>(
+                    builder: (context, badgeService, child) {
+                      return ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        itemCount: groups.length,
+                        itemBuilder: (context, index) {
+                          final GroupInfo g = groups[index];
+                          final updatesCount = badgeService.getUpdatesCountForGroup(g.groupId);
+                          final hasUpdates = updatesCount > 0;
+                          
+                          return ListTile(
+                            leading: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                const Icon(Icons.group),
+                                if (hasUpdates)
+                                  Positioned(
+                                    right: -4,
+                                    top: -4,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: Colors.white, width: 1.5),
+                                      ),
+                                      constraints: const BoxConstraints(
+                                        minWidth: 16,
+                                        minHeight: 16,
+                                      ),
+                                      child: Text(
+                                        updatesCount > 99 ? '99+' : '$updatesCount',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
-                          ),
-                        ),
+                            title: Text(g.name),
+                            onTap: () {
+                              // Marquer le groupe comme lu quand on l'ouvre
+                              badgeService.markGroupAsRead(g.groupId);
+                              
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => GroupNavScreen(
+                                    groupId: g.groupId,
+                                    groupName: g.name,
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
                       );
                     },
                   ),

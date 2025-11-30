@@ -38,11 +38,14 @@ export default async function routes(app: FastifyInstance) {
         b.salt // Ajouter la salt au INSERT
       ]);
 
-      // SÉCURITÉ: Émettre uniquement un ping minimal (pas de données sensibles)
+      // SÉCURITÉ: Émettre un ping avec convId et groupId (identifiants, pas de contenu sensible)
       // Les clients devront récupérer les messages via l'API après avoir reçu le ping
+      // Le convId et groupId sont nécessaires pour identifier quelle conversation a reçu le message
       app.io.to(`conv:${b.convId}`).except(`user:${b.sender.userId}`).emit('message:new', {
         type: 'message:new',
-        // Pas de convId, pas de messageId, pas de contenu - juste un ping
+        convId: b.convId,
+        groupId: b.groupId,
+        // Pas de messageId, pas de contenu, pas de senderId - juste les identifiants nécessaires
       });
       app.log.info({ 
         convId: b.convId, 

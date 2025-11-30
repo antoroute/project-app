@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../widgets/bottom_nav_bar.dart';
+import '../../core/services/notification_badge_service.dart';
 import 'group_conversation_list.dart';
 import 'group_calendar_screen.dart';
 import 'group_map_screen.dart';
@@ -26,6 +27,11 @@ class _GroupNavScreenState extends State<GroupNavScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Marquer le groupe comme lu quand on l'ouvre
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      NotificationBadgeService().markGroupAsRead(widget.groupId);
+    });
+    
     // Liste des écrans correspondant aux onglets
     final List<Widget> screens = [
       // Onglet 1 : Messages (conversations)
@@ -57,6 +63,7 @@ class _GroupNavScreenState extends State<GroupNavScreen> {
       ),
       bottomNavigationBar: BottomNavBar(
         currentIndex: _currentIndex,
+        currentGroupId: widget.groupId, // Passer le groupId pour filtrer les badges
         tabs: [
           // Onglet 1 : Messages
           NavTab(

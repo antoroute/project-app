@@ -1637,21 +1637,33 @@ class ConversationProvider extends ChangeNotifier {
       // SÉCURITÉ: Vérifier si c'est un ping minimal (pas de données sensibles)
       final type = payload['type'] as String?;
       if (type == 'message:new') {
-        // C'est un ping minimal - pas de données sensibles
-        debugPrint('📨 [ConversationProvider] Ping reçu pour nouveau message (pas de données sensibles)');
+        // CORRECTION: Le ping contient maintenant convId et groupId pour identifier précisément la conversation
+        final convId = payload['convId'] as String?;
+        final groupId = payload['groupId'] as String?;
         
-        // Marquer qu'il y a de nouveaux messages et rafraîchir les conversations
-        final badgeService = NotificationBadgeService();
-        badgeService.incrementNewMessages();
+        // Vérifier si l'utilisateur est déjà dans cette conversation
+        final tracker = NavigationTrackerService();
+        final isInThisConversation = convId != null && tracker.isInConversation(convId);
         
-        // Rafraîchir toutes les conversations pour récupérer les nouveaux messages
-        // L'utilisateur devra ouvrir la conversation pour voir les messages
-        await fetchConversations();
-        
-        // Marquer toutes les conversations comme ayant de nouveaux messages
-        // (on ne sait pas laquelle a reçu le message car c'est un ping)
-        for (final conv in _conversations) {
-          badgeService.markConversationAsNew(conv.conversationId);
+        if (convId != null && groupId != null) {
+          // On connaît la conversation concernée, marquer seulement celle-ci si l'utilisateur n'est pas dedans
+          if (!isInThisConversation) {
+            final badgeService = NotificationBadgeService();
+            badgeService.markConversationAsNew(convId, groupId: groupId);
+            debugPrint('🔔 [ConversationProvider] Conversation $convId (groupe $groupId) marquée comme nouvelle (ping reçu)');
+          } else {
+            debugPrint('🔔 [ConversationProvider] Ping ignoré (utilisateur déjà dans la conversation $convId)');
+          }
+        } else {
+          // Fallback: si les identifiants ne sont pas présents, rafraîchir toutes les conversations
+          debugPrint('⚠️ [ConversationProvider] Ping reçu sans convId/groupId, rafraîchissement de toutes les conversations');
+          if (!tracker.isInAnyConversation()) {
+            await fetchConversations();
+            final badgeService = NotificationBadgeService();
+            for (final conv in _conversations) {
+              badgeService.markConversationAsNew(conv.conversationId, groupId: conv.groupId);
+            }
+          }
         }
         
         notifyListeners();
@@ -1879,15 +1891,25 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   void _onWebSocketConversationCreated(String? convId, String? groupId, String? creatorId) {
-    // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
-    if (convId == null || groupId == null || creatorId == null) {
-      debugPrint('💬 [ConversationProvider] Ping reçu pour nouvelle conversation (pas de données sensibles)');
-      // Rafraîchir les conversations pour récupérer la nouvelle
-      fetchConversations();
+    // CORRECTION: Le ping contient maintenant convId et groupId pour identifier précisément la conversation
+    if (convId == null || groupId == null) {
+      debugPrint('⚠️ [ConversationProvider] Ping reçu pour nouvelle conversation sans convId/groupId');
+      // Fallback: rafraîchir toutes les conversations
+      fetchConversations().then((_) {
+        final badgeService = NotificationBadgeService();
+        for (final conv in _conversations) {
+          badgeService.markNewConversation(conv.conversationId, conv.groupId);
+        }
+      });
       return;
     }
     
     debugPrint('💬 [ConversationProvider] Nouvelle conversation créée: $convId dans $groupId par $creatorId');
+    
+    // Marquer seulement la nouvelle conversation comme nouvelle dans le badge service
+    final badgeService = NotificationBadgeService();
+    badgeService.markNewConversation(convId, groupId);
+    
     // CORRECTION: Rafraîchir immédiatement la liste des conversations
     fetchConversations().then((_) {
       // Après avoir récupéré les conversations, ajouter la notification

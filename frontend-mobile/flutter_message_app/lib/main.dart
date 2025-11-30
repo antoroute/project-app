@@ -11,6 +11,7 @@ import 'core/services/network_monitor_service.dart';
 import 'core/services/message_queue_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/global_presence_service.dart';
+import 'core/services/notification_badge_service.dart';
 import 'core/crypto/key_manager_final.dart';
 import 'core/crypto/crypto_isolate_service.dart';
 import 'ui/screens/home_screen.dart';
@@ -40,6 +41,9 @@ Future<void> main() async {
         ),
         ChangeNotifierProvider<ConversationProvider>(
           create: (context) => ConversationProvider(context.read<AuthProvider>()),
+        ),
+        ChangeNotifierProvider<NotificationBadgeService>.value(
+          value: NotificationBadgeService(),
         ),
       ],
       child: const SecureChatApp(),

@@ -22,12 +22,14 @@ class BottomNavBar extends StatefulWidget {
   final int currentIndex;
   final List<NavTab> tabs;
   final int centerTabIndex; // Index du tab décentré (par défaut 2, le 3ème)
+  final String? currentGroupId; // ID du groupe actuel (pour filtrer les badges)
 
   const BottomNavBar({
     Key? key,
     required this.currentIndex,
     required this.tabs,
     this.centerTabIndex = 2,
+    this.currentGroupId,
   }) : super(key: key);
 
   @override
@@ -40,18 +42,6 @@ class _BottomNavBarState extends State<BottomNavBar> {
 
   @override
   Widget build(BuildContext context) {
-    // Écouter les changements du service de badges pour mettre à jour l'UI
-    return ChangeNotifierProvider.value(
-      value: NotificationBadgeService(),
-      child: Consumer<NotificationBadgeService>(
-        builder: (context, badgeService, child) {
-          return _buildNavBar(context);
-        },
-      ),
-    );
-  }
-
-  Widget _buildNavBar(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
@@ -63,65 +53,70 @@ class _BottomNavBarState extends State<BottomNavBar> {
     // Obtenir le padding de la barre de navigation système Android
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
-    return Container(
-      padding: EdgeInsets.only(bottom: bottomPadding),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SizedBox(
-        height: 60,
-        child: Stack(
-        children: [
-          // Les 4 premiers onglets alignés répartis uniformément
-          // (tous sauf celui à centerTabIndex)
-          Consumer<NotificationBadgeService>(
-            builder: (context, badgeService, child) {
-              return Row(
-                children: [
-                  // Afficher les onglets 0, 1, 2, 3 (sauf celui à centerTabIndex)
-                  for (int i = 0; i < widget.tabs.length; i++)
-                    if (i != widget.centerTabIndex) ...[
-                      Expanded(
-                        child: _buildTab(
-                          index: i,
-                          isSelected: widget.currentIndex == i,
-                          theme: theme,
-                          isDark: isDark,
-                          badgeService: badgeService,
-                        ),
-                      ),
-                      // Ajouter un espacement après les 2 premiers onglets (Messages et Calendrier)
-                      // pour éloigner du centre
-                      if (i == 1) const SizedBox(width: 30),
-                    ],
-                ],
-              );
-            },
-          ),
-          // Tab central décentré vers le haut avec encadré
-          Positioned(
-            left: 0,
-            right: 0,
-            top: -8, // Décalage vers le haut pour le tab central
-            child: Consumer<NotificationBadgeService>(
-              builder: (context, badgeService, child) {
-                return _buildCenterTab(
-                  isSelected: widget.currentIndex == widget.centerTabIndex,
-                  theme: theme,
-                  badgeService: badgeService,
-                );
-              },
+    return ChangeNotifierProvider.value(
+      value: NotificationBadgeService(),
+      child: Container(
+        padding: EdgeInsets.only(bottom: bottomPadding),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
             ),
+          ],
+        ),
+        child: SizedBox(
+          height: 60,
+          child: Stack(
+            children: [
+              // Les 4 premiers onglets alignés répartis uniformément
+              // (tous sauf celui à centerTabIndex)
+              Consumer<NotificationBadgeService>(
+                builder: (context, badgeService, child) {
+                  return Row(
+                    children: [
+                      // Afficher les onglets 0, 1, 2, 3 (sauf celui à centerTabIndex)
+                      for (int i = 0; i < widget.tabs.length; i++)
+                        if (i != widget.centerTabIndex) ...[
+                          Expanded(
+                            child: _buildTab(
+                              index: i,
+                              isSelected: widget.currentIndex == i,
+                              theme: theme,
+                              isDark: isDark,
+                              badgeService: badgeService,
+                            ),
+                          ),
+                          // Ajouter un espacement après les 2 premiers onglets
+                          // pour éloigner du centre
+                          if (i == 1) const SizedBox(width: 30),
+                        ],
+                    ],
+                  );
+                },
+              ),
+              // Tab central décentré vers le haut avec encadré
+              Positioned(
+                left: 0,
+                right: 0,
+                top: -8, // Décalage vers le haut pour le tab central
+                child: Center(
+                  child: Consumer<NotificationBadgeService>(
+                    builder: (context, badgeService, child) {
+                      return _buildCenterTab(
+                        isSelected: widget.currentIndex == widget.centerTabIndex,
+                        theme: theme,
+                        badgeService: badgeService,
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
       ),
     );
   }
@@ -142,8 +137,20 @@ class _BottomNavBarState extends State<BottomNavBar> {
         ? (isDark ? AppColors.blue[300] : AppColors.blue[500])
         : (isDark ? AppColors.grey[400] : AppColors.grey[600]);
 
-    // Badge pour l'onglet Messages (index 2)
-    final showBadge = index == 2 && (badgeService?.newMessagesCount ?? 0) > 0;
+    // Badge pour nouveaux messages : afficher sur l'onglet Messages
+    // Dans group_nav_screen : index 0 (Messages avec Icons.message_outlined)
+    // Dans main_nav_screen : index 2 (Messages avec Icons.chat_bubble_outline) mais c'est le tab central
+    // On détecte l'onglet Messages par son icône
+    final isMessagesTab = tab.icon == Icons.message_outlined || 
+                         tab.icon == Icons.chat_bubble_outline;
+    // Afficher le badge seulement si ce n'est PAS le tab central (car le tab central est géré séparément)
+    // Si on est dans un groupe (currentGroupId != null), afficher seulement les updates de ce groupe (messages + nouvelles conversations)
+    final updatesCount = widget.currentGroupId != null
+        ? (badgeService?.getUpdatesCountForGroup(widget.currentGroupId!) ?? 0)
+        : (badgeService?.newMessagesCount ?? 0);
+    final showMessagesBadge = isMessagesTab && 
+                             index != widget.centerTabIndex && 
+                             updatesCount > 0;
 
     return GestureDetector(
       onTap: tab.onTap,
@@ -176,8 +183,8 @@ class _BottomNavBarState extends State<BottomNavBar> {
                     ),
                   ),
                 ),
-                // Badge pour nouveaux messages
-                if (showBadge)
+                // Badge pour nouveaux messages sur l'onglet Messages
+                if (showMessagesBadge)
                   Positioned(
                     right: -6,
                     top: -6,
@@ -193,7 +200,9 @@ class _BottomNavBarState extends State<BottomNavBar> {
                         minHeight: 16,
                       ),
                       child: Text(
-                        (badgeService?.newMessagesCount ?? 0) > 99 ? '99+' : '${badgeService?.newMessagesCount ?? 0}',
+                        updatesCount > 99 
+                            ? '99+' 
+                            : '$updatesCount',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
@@ -238,7 +247,20 @@ class _BottomNavBarState extends State<BottomNavBar> {
 
     final tab = widget.tabs[widget.centerTabIndex];
     final isDark = theme.brightness == Brightness.dark;
-    final showBadge = badgeService?.hasNewGroups ?? false;
+    
+    // Badge pour nouveaux groupes OU nouveaux messages selon le tab central
+    // Dans group_nav_screen : centerTabIndex == 4 (Retour home) -> badge AUTRES groupes avec updates
+    // Dans main_nav_screen : centerTabIndex == 2 (Messages) -> badge messages
+    final isHomeTab = tab.icon == Icons.home;
+    final isMessagesTab = tab.icon == Icons.chat_bubble_outline;
+    
+    // Pour l'icône home dans group_nav_screen, afficher un badge si des AUTRES groupes ont des updates
+    final otherGroupsUpdatesCount = widget.currentGroupId != null
+        ? (badgeService?.getOtherGroupsUpdatesCount(widget.currentGroupId!) ?? 0)
+        : 0;
+    final showNewGroupsBadge = isHomeTab && otherGroupsUpdatesCount > 0;
+    final showNewMessagesBadge = isMessagesTab && (badgeService?.newMessagesCount ?? 0) > 0;
+    final showBadge = showNewGroupsBadge || showNewMessagesBadge;
 
     return GestureDetector(
       onTap: tab.onTap,
@@ -282,20 +304,68 @@ class _BottomNavBarState extends State<BottomNavBar> {
               ),
             ),
           ),
-          // Badge pour nouveaux groupes
+          // Badge pour nouveaux groupes ou nouveaux messages sur le tab central
           if (showBadge)
             Positioned(
               right: -4,
               top: -4,
-              child: Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1.5),
-                ),
-              ),
+              child: showNewMessagesBadge
+                  ? Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Text(
+                        (badgeService?.newMessagesCount ?? 0) > 99 
+                            ? '99+' 
+                            : '${badgeService?.newMessagesCount ?? 0}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  : showNewGroupsBadge
+                      ? Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 16,
+                            minHeight: 16,
+                          ),
+                          child: Text(
+                            otherGroupsUpdatesCount > 99 
+                                ? '99+' 
+                                : '$otherGroupsUpdatesCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      : Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                        ),
             ),
         ],
       ),

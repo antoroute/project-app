@@ -865,11 +865,11 @@ class _WebSocketStatusIndicatorState extends State<_WebSocketStatusIndicator> {
     return Tooltip(
       message: tooltip,
       child: Container(
-        width: 8,
-        height: 8,
-        decoration: BoxDecoration(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
           color: statusColor,
-          shape: BoxShape.circle,
+        shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
               color: statusColor.withOpacity(0.5),

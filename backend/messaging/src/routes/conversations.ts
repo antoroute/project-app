@@ -54,12 +54,15 @@ export default async function routes(app: FastifyInstance) {
     }
     app.log.info({ groupId, memberCount: allMembers.length, groupMemberCount: groupMemberIds.size }, 'All conversation members joined group room');
 
-    // SÉCURITÉ: Émettre uniquement un ping minimal (pas de données sensibles)
+    // SÉCURITÉ: Émettre un ping avec convId et groupId (identifiants, pas de données sensibles)
     // Les clients devront récupérer les conversations via l'API après avoir reçu le ping
+    // Le convId et groupId sont nécessaires pour identifier quelle conversation a été créée
     app.log.info({ convId: conv.id, groupId, userId, memberCount: groupMemberIds.size }, 'About to emit conversation:created ping');
     app.io.to(`group:${groupId}`).emit('conversation:created', {
       type: 'conversation:created',
-      // Pas de convId, pas de groupId, pas de creatorId - juste un ping
+      convId: conv.id,
+      groupId: groupId,
+      // Pas de creatorId, pas de contenu - juste les identifiants nécessaires
     });
     app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created ping sent to group members (no sensitive data)');
 

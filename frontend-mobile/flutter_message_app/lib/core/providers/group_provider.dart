@@ -357,12 +357,19 @@ class GroupProvider extends ChangeNotifier {
   }
   
   void _onWebSocketGroupMemberJoined(String? groupId, String? userId, String? approverId) {
-    // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
-    if (groupId == null || userId == null || approverId == null) {
-      debugPrint('👥 [GroupProvider] Ping reçu pour membre rejoint (pas de données sensibles)');
-      // Rafraîchir les groupes
+    // CORRECTION: Le ping contient maintenant groupId pour identifier précisément le groupe
+    if (groupId == null) {
+      debugPrint('⚠️ [GroupProvider] Ping reçu pour membre rejoint sans groupId');
+      // Fallback: rafraîchir tous les groupes
       fetchUserGroups();
       return;
+    }
+    
+    // userId et approverId peuvent être null dans le ping, mais groupId est maintenant toujours présent
+    if (userId == null || approverId == null) {
+      debugPrint('👥 [GroupProvider] Ping reçu pour membre rejoint: groupe $groupId (sans userId/approverId)');
+    } else {
+      debugPrint('👥 [GroupProvider] Group member joined event received: $userId in $groupId by $approverId');
     }
     
     debugPrint('👥 [GroupProvider] Group member joined event received: $userId in $groupId by $approverId');
@@ -373,14 +380,20 @@ class GroupProvider extends ChangeNotifier {
   }
   
   void _onWebSocketGroupJoined(String? groupId, String? userId, String? approverId) {
-    // SÉCURITÉ: Les paramètres peuvent être null si c'est un ping minimal
-    if (groupId == null || userId == null || approverId == null) {
-      debugPrint('👥 [GroupProvider] Ping reçu pour groupe rejoint (pas de données sensibles)');
-      // Rafraîchir les groupes pour récupérer le nouveau
+    // CORRECTION: Le ping contient maintenant groupId pour identifier précisément le groupe
+    if (groupId == null) {
+      debugPrint('⚠️ [GroupProvider] Ping reçu pour groupe rejoint sans groupId');
+      // Fallback: rafraîchir tous les groupes
       fetchUserGroups();
-      // Marquer qu'il y a de nouveaux groupes
       NotificationBadgeService().setHasNewGroups(true);
       return;
+    }
+    
+    // userId et approverId peuvent être null dans le ping, mais groupId est maintenant toujours présent
+    if (userId == null || approverId == null) {
+      debugPrint('👥 [GroupProvider] Ping reçu pour groupe rejoint: $groupId (sans userId/approverId)');
+    } else {
+      debugPrint('👥 [GroupProvider] Group joined event received: $userId in $groupId by $approverId');
     }
     
     debugPrint('👥 [GroupProvider] Group joined event received: $userId in $groupId by $approverId');
