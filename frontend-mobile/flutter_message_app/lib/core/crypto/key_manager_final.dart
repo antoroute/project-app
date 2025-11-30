@@ -157,6 +157,20 @@ class KeyManagerFinal {
     return edKeyPair;
   }
 
+  /// 🚀 OPTIMISATION: Extrait les bytes de la clé privée X25519 (sans créer KeyPair)
+  /// Utilisé pour sérialisation vers Isolate
+  Future<Uint8List> getX25519PrivateKeyBytes(String groupId, String deviceId) async {
+    final seedB64 = await _storage.read(key: _ns(groupId, deviceId, 'x25519'));
+    if (seedB64 == null) {
+      throw Exception('X25519 key not found for $groupId:$deviceId');
+    }
+    final seedBytes = base64Decode(seedB64);
+    if (seedBytes.length != 32) {
+      throw Exception('Invalid X25519 seed length: ${seedBytes.length}');
+    }
+    return seedBytes; // 32 bytes
+  }
+  
   /// 🎉 SOLUTION FINALE: Charge la clé X25519 avec reconstruction depuis le seed
   Future<SimpleKeyPair> loadX25519KeyPair(String groupId, String deviceId) async {
     final cacheKey = _cacheKey(groupId, deviceId);

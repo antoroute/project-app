@@ -9,6 +9,7 @@ import 'core/services/websocket_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/global_presence_service.dart';
 import 'core/crypto/key_manager_final.dart';
+import 'core/crypto/crypto_isolate_service.dart';
 import 'ui/screens/home_screen.dart';
 import 'ui/screens/login_screen.dart';
 import 'ui/themes/app_theme.dart';
@@ -50,8 +51,30 @@ class SecureChatApp extends StatefulWidget {
   State<SecureChatApp> createState() => _SecureChatAppState();
 }
 
-class _SecureChatAppState extends State<SecureChatApp> {
+class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserver {
   bool _socketInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // 🚀 OPTIMISATION: Nettoyer l'Isolate crypto à la fermeture de l'app
+    CryptoIsolateService.instance.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached || state == AppLifecycleState.paused) {
+      // Optionnel: Nettoyer l'Isolate quand l'app est en arrière-plan
+      // CryptoIsolateService.instance.dispose();
+    }
+  }
 
   @override
   void didChangeDependencies() {

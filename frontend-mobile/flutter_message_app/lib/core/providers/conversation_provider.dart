@@ -13,6 +13,7 @@ import 'package:flutter_message_app/core/services/notification_service.dart';
 import 'package:flutter_message_app/core/services/global_presence_service.dart';
 import 'package:flutter_message_app/core/services/local_message_storage.dart';
 import 'package:flutter_message_app/core/services/message_key_cache.dart';
+import 'package:flutter_message_app/core/services/performance_benchmark.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
@@ -889,6 +890,19 @@ class ConversationProvider extends ChangeNotifier {
         int limit = 20,  // Charger seulement les 20 derniers messages
         String? cursor,
       }) async {
+    // 📊 BENCHMARK: Mesurer le chargement initial complet
+    return await PerformanceBenchmark.instance.measureAsync(
+      cursor == null ? 'fetchMessages_initial' : 'fetchMessages_pagination',
+      () async => _fetchMessagesImpl(context, conversationId, limit: limit, cursor: cursor),
+    );
+  }
+  
+  Future<void> _fetchMessagesImpl(
+      BuildContext context,
+      String conversationId, {
+        int limit = 20,
+        String? cursor,
+      }) async {
     // 🚀 OPTIMISATION SIGNAL: Charger d'abord depuis le stockage local
     // UNIQUEMENT pour le chargement initial (pas pour la pagination)
     if (cursor == null) {
@@ -911,9 +925,13 @@ class ConversationProvider extends ChangeNotifier {
           final effectiveLimit = limit > 20 ? 20 : limit; // Limite de sécurité max 20
           debugPrint('💾 Chargement des $effectiveLimit derniers messages depuis le stockage local...');
           
-          final localMessages = await LocalMessageStorage.instance.loadMessagesForConversation(
-            conversationId,
-            limit: effectiveLimit, // Utiliser la limite effective
+          // 📊 BENCHMARK: Mesurer le chargement depuis la DB locale
+          final localMessages = await PerformanceBenchmark.instance.measureAsync(
+            'fetchMessages_load_local_db',
+            () => LocalMessageStorage.instance.loadMessagesForConversation(
+              conversationId,
+              limit: effectiveLimit,
+            ),
           );
           
           if (localMessages.isNotEmpty) {
@@ -1000,8 +1018,11 @@ class ConversationProvider extends ChangeNotifier {
       }
     }
     
-    // Fallback: charger depuis le serveur (première fois ou pagination)
-    await _fetchMessagesWithHasMore(context, conversationId, limit: limit, cursor: cursor);
+    // 📊 BENCHMARK: Mesurer le chargement depuis le serveur
+    await PerformanceBenchmark.instance.measureAsync(
+      'fetchMessages_load_server',
+      () => _fetchMessagesWithHasMore(context, conversationId, limit: limit, cursor: cursor),
+    );
   }
   
   /// Synchronise les messages depuis le serveur en arrière-plan
@@ -1149,6 +1170,18 @@ class ConversationProvider extends ChangeNotifier {
   /// Charge les messages plus anciens (pagination vers le haut)
   /// Retourne true s'il y a encore des messages à charger, false sinon
   Future<bool> fetchOlderMessages(
+    BuildContext context,
+    String conversationId, {
+      int limit = 20,
+    }) async {
+    // 📊 BENCHMARK: Mesurer la pagination (scroll)
+    return await PerformanceBenchmark.instance.measureAsync(
+      'fetchOlderMessages_scroll',
+      () async => _fetchOlderMessagesImpl(context, conversationId, limit: limit),
+    );
+  }
+  
+  Future<bool> _fetchOlderMessagesImpl(
     BuildContext context,
     String conversationId, {
       int limit = 20,

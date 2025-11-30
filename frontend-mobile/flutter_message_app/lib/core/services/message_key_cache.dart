@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
 import '../crypto/key_manager_final.dart';
 import '../services/key_directory_service.dart';
+import '../crypto/crypto_isolate_service.dart';
+import '../crypto/crypto_isolate_data.dart';
 
 /// Cache de message keys dérivées pour optimisation du déchiffrement
 /// 
@@ -93,17 +95,33 @@ class MessageKeyCache {
         return null;
       }
 
-      // Calculer le shared secret (X25519)
-      final x = X25519();
-      final myKey = await KeyManagerFinal.instance.loadX25519KeyPair(groupId, myDeviceId);
-      final ephPub = SimplePublicKey(
-        base64.decode(ephPubB64.replaceAll(RegExp(r'[\s\n\r]'), '')),
-        type: KeyPairType.x25519,
+      // 🚀 OPTIMISATION: X25519 ECDH dans un Isolate (goulot d'étranglement principal)
+      // Extraire les bytes des clés (thread principal)
+      final myPrivateKeyBytes = await KeyManagerFinal.instance.getX25519PrivateKeyBytes(groupId, myDeviceId);
+      final remotePublicKeyBytes = base64.decode(ephPubB64.replaceAll(RegExp(r'[\s\n\r]'), ''));
+      
+      // Créer la tâche pour l'Isolate
+      final task = X25519EcdhTask(
+        taskId: '${groupId}_${myDeviceId}_${DateTime.now().millisecondsSinceEpoch}',
+        myPrivateKeyBytes: myPrivateKeyBytes,
+        remotePublicKeyBytes: remotePublicKeyBytes,
       );
-      final shared = await x.sharedSecretKey(
-        keyPair: myKey,
-        remotePublicKey: ephPub,
-      );
+      
+      // Exécuter X25519 ECDH dans l'Isolate
+      final ecdhResult = await CryptoIsolateService.instance.executeX25519Ecdh(task);
+      
+      if (ecdhResult.error != null) {
+        debugPrint('❌ Erreur X25519 ECDH dans MessageKeyCache: ${ecdhResult.error}');
+        return null;
+      }
+      
+      if (ecdhResult.sharedSecretBytes == null) {
+        debugPrint('❌ X25519 ECDH returned null shared secret');
+        return null;
+      }
+      
+      // Créer un SecretKey depuis les bytes pour HKDF
+      final shared = SecretKey(ecdhResult.sharedSecretBytes!);
 
       // Récupérer la salt depuis le payload
       if (!messageV2.containsKey('salt')) {

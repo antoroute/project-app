@@ -223,33 +223,33 @@ class LocalMessageStorage {
       // 🚀 OPTIMISATION: Parser JSON en batch dans un Isolate pour éviter de bloquer l'UI
       // Si on a peu de messages, on parse directement (overhead d'Isolate trop important)
       if (rows.length <= 5) {
-        final messages = <Message>[];
-        for (final row in rows) {
-          try {
-            final v2DataJson = row['v2_data'] as String;
-            if (v2DataJson.isEmpty) {
-              debugPrint('⚠️ Message ${row['message_id']} a un v2_data vide, ignoré');
-              continue;
-            }
-            
-            final v2Data = jsonDecode(v2DataJson) as Map<String, dynamic>;
-            final signatureValid = (row['signature_valid'] as int? ?? 0) == 1;
-            
-            messages.add(Message(
-              id: row['message_id'] as String,
-              conversationId: row['conversation_id'] as String,
-              senderId: row['sender_id'] as String,
-              encrypted: null,
-              iv: null,
-              encryptedKeys: const {},
-              signatureValid: signatureValid,
-              senderPublicKey: null,
-              timestamp: row['timestamp'] as int,
-              v2Data: v2Data,
+      final messages = <Message>[];
+      for (final row in rows) {
+        try {
+          final v2DataJson = row['v2_data'] as String;
+          if (v2DataJson.isEmpty) {
+            debugPrint('⚠️ Message ${row['message_id']} a un v2_data vide, ignoré');
+            continue;
+          }
+          
+          final v2Data = jsonDecode(v2DataJson) as Map<String, dynamic>;
+          final signatureValid = (row['signature_valid'] as int? ?? 0) == 1;
+          
+          messages.add(Message(
+            id: row['message_id'] as String,
+            conversationId: row['conversation_id'] as String,
+            senderId: row['sender_id'] as String,
+            encrypted: null,
+            iv: null,
+            encryptedKeys: const {},
+            signatureValid: signatureValid,
+            senderPublicKey: null,
+            timestamp: row['timestamp'] as int,
+            v2Data: v2Data,
               decryptedText: null,
-            ));
-          } catch (e) {
-            debugPrint('⚠️ Erreur parsing message local ${row['message_id']}: $e');
+          ));
+        } catch (e) {
+          debugPrint('⚠️ Erreur parsing message local ${row['message_id']}: $e');
           }
         }
         final reversedMessages = messages.reversed.toList();

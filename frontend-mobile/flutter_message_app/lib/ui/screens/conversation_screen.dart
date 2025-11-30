@@ -9,6 +9,7 @@ import '../../core/providers/conversation_provider.dart';
 import '../../core/models/message.dart';
 import '../../core/crypto/message_cipher_v2.dart';
 import '../../core/services/session_device_service.dart';
+import '../../core/services/performance_benchmark.dart';
 import '../helpers/extensions.dart';
 import '../widgets/message_bubble.dart';
 
@@ -38,9 +39,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
   
   // ValueNotifier pour les mises à jour ultra-granulaires
   final ValueNotifier<String?> _messageUpdateNotifier = ValueNotifier<String?>(null);
-  
-  // 🚀 OPTIMISATION: Gérer les Futures de déchiffrement pour annulation lors de la navigation
-  final Set<Future<void>> _activeDecryptionFutures = <Future<void>>{};
 
   @override
   void initState() {
@@ -81,6 +79,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     
+    // 📊 BENCHMARK: Mesurer le chargement initial complet de l'écran
+    final loadTimer = PerformanceBenchmark.instance.startTimer('conversation_screen_load_initial');
+    
     try {
       // 🚀 OPTIMISATION: Charger les messages EN PREMIER pour affichage immédiat
       // L'écran est déjà affiché, on charge les messages en arrière-plan
@@ -98,9 +99,23 @@ class _ConversationScreenState extends State<ConversationScreen> {
       if (!mounted) return;
       setState(() => _isLoading = false);
       
+      // 📊 BENCHMARK: Mesurer le déchiffrement progressif
+      final decryptTimer = PerformanceBenchmark.instance.startTimer('conversation_screen_decrypt_initial');
+      
       // 3) Déchiffrement progressif en arrière-plan (non-bloquant)
       _startProgressiveDecryption();
       _initialDecryptDone = true;
+      
+      // Attendre que les 5 premiers messages visibles soient déchiffrés
+      await Future.delayed(const Duration(milliseconds: 500));
+      PerformanceBenchmark.instance.stopTimer(decryptTimer);
+      
+      PerformanceBenchmark.instance.stopTimer(loadTimer);
+      
+      // 📊 Afficher le rapport après chargement initial
+      Future.delayed(const Duration(seconds: 2), () {
+        PerformanceBenchmark.instance.printReport();
+      });
       
       // 4) Opérations non-critiques en parallèle (ne bloquent pas l'UI)
       // Ces opérations peuvent se faire en arrière-plan sans bloquer l'affichage
@@ -144,117 +159,103 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
-  /// 🚀 OPTIMISATION SIGNAL: Déchiffrement parallèle et prioritaire
-  /// - Messages visibles déchiffrés immédiatement en parallèle
-  /// - Messages non visibles déchiffrés en arrière-plan par lots
+  /// 🚀 OPTIMISATION: Déchiffrement UNIQUEMENT des messages visibles à l'écran
+  /// - Messages visibles déchiffrés SÉQUENTIELLEMENT dans l'ordre (du plus récent au plus ancien)
+  /// - Aucun déchiffrement en arrière-plan pour économiser les ressources
+  /// - Focus sur les 10-15 derniers messages (ceux visibles à l'arrivée sur la conversation)
   void _startProgressiveDecryption() {
     final messages = _conversationProvider.messagesFor(widget.conversationId);
     if (messages.isEmpty) return;
     
-    // 🚀 PRIORITÉ 1: Déchiffrer les 5 derniers messages (visibles) IMMÉDIATEMENT en parallèle
-    // 🚀 OPTIMISATION: Réduit de 10 à 5 pour éviter les freezes sur mobile
-    final visibleMessages = messages.length > 5 
-        ? messages.sublist(messages.length - 5)
+    // 🚀 PRIORITÉ: Déchiffrer uniquement les 10-15 derniers messages (visibles à l'écran)
+    // Ces messages sont ceux qui apparaissent quand on arrive sur la conversation
+    // On ne déchiffre PAS les messages plus anciens pour économiser les ressources
+    const visibleCount = 12; // Nombre de messages visibles à déchiffrer (couvre ~1 écran)
+    final visibleMessages = messages.length > visibleCount 
+        ? messages.sublist(messages.length - visibleCount)
         : messages;
     
-    // 🚀 OPTIMISATION: Déchiffrer seulement les messages non déchiffrés ou sans signature vérifiée
-    final visibleFutures = <Future<void>>[];
-    for (final msg in visibleMessages) {
+    // 🚀 OPTIMISATION: Déchiffrer séquentiellement dans l'ordre (du plus récent au plus ancien)
+    // Inverser pour commencer par le plus récent
+    final orderedVisibleMessages = visibleMessages.reversed.toList();
+    
+    // Déchiffrer uniquement les messages visibles - pas de déchiffrement en arrière-plan
+    _decryptVisibleMessagesSequentially(orderedVisibleMessages);
+  }
+  
+  /// Déchiffre les messages visibles séquentiellement dans l'ordre pour une meilleure UX
+  /// Les messages apparaissent dans l'ordre d'affichage (du plus récent au plus ancien)
+  Future<void> _decryptVisibleMessagesSequentially(List<Message> messages) async {
+    debugPrint('🔐 [Visible] Début déchiffrement séquentiel de ${messages.length} messages visibles');
+    
+    for (int i = 0; i < messages.length; i++) {
+      final msg = messages[i];
+      if (!mounted) break;
+      
       // Déchiffrer si pas encore déchiffré OU si signature pas vérifiée
       if ((msg.decryptedText == null || msg.signatureValid != true) && msg.v2Data != null) {
-        final future = _decryptMessageUltraFluid(msg);
-        visibleFutures.add(future);
-        // 🚀 OPTIMISATION: Suivre les Futures actifs pour annulation si nécessaire
-        _activeDecryptionFutures.add(future);
-        future.whenComplete(() {
-          _activeDecryptionFutures.remove(future);
-        });
+        try {
+          debugPrint('🔐 [Visible] Déchiffrement séquentiel message ${i + 1}/${messages.length}: ${msg.id}');
+          
+          // Déchiffrer séquentiellement avec haute priorité - chaque message attend le précédent
+          await _decryptMessageUltraFluid(msg, isVisible: true);
+          
+          debugPrint('✅ [Visible] Message ${i + 1}/${messages.length} déchiffré: ${msg.id}');
+          
+          // Petit délai pour laisser l'UI se mettre à jour
+          await Future.delayed(const Duration(milliseconds: 10));
+        } catch (e) {
+          debugPrint('⚠️ Erreur déchiffrement visible ${msg.id}: $e');
+          // Continuer avec le message suivant même en cas d'erreur
+        }
+      } else {
+        debugPrint('⏭️ [Visible] Message ${i + 1}/${messages.length} déjà déchiffré: ${msg.id}');
       }
     }
     
-    // Lancer tous les déchiffrements visibles en parallèle
-    Future.wait(visibleFutures).then((_) {
-      if (mounted) {
-        _messageUpdateNotifier.value = 'batch_visible_done';
-      }
-    }).catchError((e) {
-      // Ignorer les erreurs si le widget est détruit
-      if (mounted) {
-        debugPrint('⚠️ Erreur déchiffrement batch visible: $e');
-      }
-    });
+    debugPrint('✅ [Visible] Tous les messages visibles déchiffrés');
     
-    // 🚀 PRIORITÉ 2: Déchiffrer les autres messages en arrière-plan par petits lots
-    // CORRECTION: Commencer par les messages les plus récents (juste avant les 5 visibles)
-    // puis remonter vers les plus anciens
-    if (messages.length > 5) {
-      final backgroundMessages = messages.sublist(0, messages.length - 5);
-      // CORRECTION: Inverser l'ordre pour déchiffrer d'abord les plus récents
-      final reversedBackgroundMessages = backgroundMessages.reversed.toList();
-      _decryptBackgroundMessages(reversedBackgroundMessages);
+    if (mounted) {
+      _messageUpdateNotifier.value = 'batch_visible_done';
     }
   }
   
-  /// Déchiffre les messages en arrière-plan par lots pour éviter de bloquer l'UI
-  /// CORRECTION: Les messages sont passés dans l'ordre inverse (plus récents en premier)
-  void _decryptBackgroundMessages(List<Message> messages) {
-    // 🚀 OPTIMISATION MOBILE: Réduire le parallélisme et augmenter le délai pour éviter les freezes
-    const batchSize = 3; // Déchiffrer seulement 3 messages à la fois (au lieu de 10)
-    const delayBetweenBatches = 150; // 150ms entre chaque lot (au lieu de 30ms) pour laisser respirer l'UI
+  /// 🚀 OPTIMISATION: Déchiffrement "on-demand" lors du scroll vers le haut
+  /// Déchiffre uniquement les messages qui deviennent visibles lors du scroll
+  /// (limité à 5 messages à la fois pour ne pas surcharger)
+  void _decryptOnScroll(List<Message> messages, int startIndex) {
+    if (!mounted) return;
     
-    int batchIndex = 0;
+    // Déchiffrer seulement les 5 messages les plus proches qui ne sont pas encore déchiffrés
+    const onScrollDecryptCount = 5;
+    final endIndex = (startIndex + onScrollDecryptCount).clamp(0, messages.length);
+    final messagesToDecrypt = messages.sublist(startIndex, endIndex);
     
-    void processBatch() {
-      if (batchIndex * batchSize >= messages.length) return;
-      if (!mounted) return;
-      
-      final start = batchIndex * batchSize;
-      final end = (start + batchSize).clamp(0, messages.length);
-      final batch = messages.sublist(start, end);
-      
-        // 🚀 OPTIMISATION: Déchiffrer seulement les messages non déchiffrés ou sans signature vérifiée
-        final futures = <Future<void>>[];
-        for (final msg in batch) {
-          // Déchiffrer si pas encore déchiffré OU si signature pas vérifiée
-          if ((msg.decryptedText == null || msg.signatureValid != true) && msg.v2Data != null) {
-            final future = _decryptMessageUltraFluid(msg).catchError((e) {
-              debugPrint('⚠️ Erreur déchiffrement arrière-plan ${msg.id}: $e');
-            });
-            futures.add(future);
-            // 🚀 OPTIMISATION: Suivre les Futures actifs pour annulation si nécessaire
-            _activeDecryptionFutures.add(future);
-            future.whenComplete(() {
-              _activeDecryptionFutures.remove(future);
-            });
-          }
-        }
-      
-      Future.wait(futures).then((_) {
-        if (mounted) {
-          _messageUpdateNotifier.value = 'batch_${batchIndex}';
-        }
-        
-        // Traiter le lot suivant après un court délai
-        batchIndex++;
-        if (batchIndex * batchSize < messages.length && mounted) {
-          Future.delayed(Duration(milliseconds: delayBetweenBatches), processBatch);
-        }
-      }).catchError((e) {
-        // Ignorer les erreurs si le widget est détruit
-        if (mounted) {
-          debugPrint('⚠️ Erreur déchiffrement batch arrière-plan: $e');
-        }
-      });
+    debugPrint('🔐 [OnScroll] Déchiffrement on-demand de ${messagesToDecrypt.length} messages (index $startIndex-$endIndex)');
+    
+    // Déchiffrer en parallèle (mais limité à 5) pour ne pas bloquer
+    final futures = <Future<void>>[];
+    for (final msg in messagesToDecrypt) {
+      if ((msg.decryptedText == null || msg.signatureValid != true) && msg.v2Data != null) {
+        final future = _decryptMessageUltraFluid(msg, isVisible: false).catchError((e) {
+          debugPrint('⚠️ Erreur déchiffrement on-scroll ${msg.id}: $e');
+        });
+        futures.add(future);
+      }
     }
     
-    // Démarrer le traitement des lots
-    Future.delayed(Duration(milliseconds: 100), processBatch);
+    Future.wait(futures).then((_) {
+      if (mounted) {
+        _messageUpdateNotifier.value = 'on_scroll_decrypt';
+      }
+    });
   }
   
   /// 🚀 OPTIMISATION: Déchiffrement rapide puis vérification de signature en arrière-plan
   /// - Déchiffre rapidement d'abord (decryptFast) pour affichage immédiat
   /// - Vérifie la signature ensuite (decrypt) en arrière-plan
-  Future<void> _decryptMessageUltraFluid(Message message) async {
+  /// [isVisible] : true pour les messages visibles (haute priorité dans l'Isolate)
+  Future<void> _decryptMessageUltraFluid(Message message, {bool isVisible = false}) async {
     // Si déjà déchiffré ET signature vérifiée, ne rien faire
     if (message.decryptedText != null && message.signatureValid == true) {
       return;
@@ -269,12 +270,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
       
       // 🚀 ÉTAPE 1: Déchiffrement rapide (sans vérification) pour affichage immédiat
       if (message.decryptedText == null) {
+        // 🚀 OPTIMISATION: Utiliser haute priorité pour les messages visibles
         final fastResult = await MessageCipherV2.decryptFast(
           groupId: groupId,
           myUserId: currentUserId,
           myDeviceId: myDeviceId,
           messageV2: message.v2Data!,
           keyDirectory: _conversationProvider.keyDirectory,
+          priority: isVisible ? 1 : 0, // Haute priorité pour les messages visibles
         );
         
         final decryptedText = utf8.decode(fastResult['decryptedText'] as Uint8List);
@@ -287,28 +290,37 @@ class _ConversationScreenState extends State<ConversationScreen> {
         }
       }
       
-      // 🚀 ÉTAPE 2: Vérification de signature en arrière-plan (non-bloquant)
-      // OPTIMISATION: Utiliser decryptMessageIfNeeded qui utilise le cache de clés
+      // 🚀 ÉTAPE 2: Vérification de signature
+      // CORRECTION: Pour les messages visibles, attendre la vérification pour garantir l'ordre
+      // Pour les messages en arrière-plan, vérifier en non-bloquant
+      // ⚠️ IMPORTANT: Ne pas appeler decryptMessageIfNeeded pour les messages visibles
+      // car cela déclenche des appels parallèles via MessageKeyCache qui perturbent l'ordre
+      // La vérification de signature sera faite en arrière-plan après le déchiffrement initial
       if (message.signatureValid != true) {
-        // Vérifier la signature en arrière-plan sans bloquer l'UI
-        // Utiliser decryptMessageIfNeeded qui optimise avec le cache de clés
-        _conversationProvider.decryptMessageIfNeeded(message).then((_) {
-          // decryptMessageIfNeeded met déjà à jour message.signatureValid
-          // et sauvegarde dans la DB et notifie les listeners
-          
-          // CORRECTION: Forcer la mise à jour de l'UI avec un délai pour s'assurer
-          // que le message dans le provider est bien mis à jour
-          // decryptMessageIfNeeded appelle déjà notifyListeners(), donc pas besoin de le rappeler
-          Future.delayed(Duration(milliseconds: 50), () {
-            if (mounted) {
-              // Déclencher le rebuild du ValueListenableBuilder
-              _messageUpdateNotifier.value = message.id;
-            }
+        if (isVisible) {
+          // Pour les messages visibles : vérifier en arrière-plan (non-bloquant)
+          // pour ne pas perturber l'ordre séquentiel du déchiffrement initial
+          _conversationProvider.decryptMessageIfNeeded(message).then((_) {
+            Future.delayed(Duration(milliseconds: 50), () {
+              if (mounted) {
+                _messageUpdateNotifier.value = message.id;
+              }
+            });
+          }).catchError((e) {
+            debugPrint('⚠️ Erreur vérification signature message ${message.id}: $e');
           });
-        }).catchError((e) {
-          debugPrint('⚠️ Erreur vérification signature message ${message.id}: $e');
-          // En cas d'erreur, garder signatureValid = false
-        });
+        } else {
+          // Pour les messages en arrière-plan : vérifier en non-bloquant
+          _conversationProvider.decryptMessageIfNeeded(message).then((_) {
+            Future.delayed(Duration(milliseconds: 50), () {
+              if (mounted) {
+                _messageUpdateNotifier.value = message.id;
+              }
+            });
+          }).catchError((e) {
+            debugPrint('⚠️ Erreur vérification signature message ${message.id}: $e');
+          });
+        }
       }
       
      } catch (e) {
@@ -342,6 +354,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final currentMessages = _conversationProvider.messagesFor(widget.conversationId);
     debugPrint('🔄 Début chargement - Messages actuels: ${currentMessages.length}, ScrollExtent: $before');
     
+    // 📊 BENCHMARK: Mesurer la pagination complète (scroll)
+    final scrollTimer = PerformanceBenchmark.instance.startTimer('conversation_screen_scroll_pagination');
+    
     setState(() => _isLoading = true);
     try {
       final hasMore = await _conversationProvider.fetchOlderMessages(
@@ -349,6 +364,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
         widget.conversationId,
         limit: _messagesPerPage,
       );
+      
+      PerformanceBenchmark.instance.stopTimer(scrollTimer);
       
       final newMessages = _conversationProvider.messagesFor(widget.conversationId);
       debugPrint('📄 Chargement terminé - Nouveaux messages: ${newMessages.length - currentMessages.length}, hasMore: $hasMore');
@@ -366,6 +383,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
         final offsetDiff = after - before;
         debugPrint('📍 Ajustement scroll - Avant: $before, Après: $after, Différence: $offsetDiff');
         _scrollController.jumpTo(_scrollController.offset + offsetDiff);
+        
+        // 🚀 OPTIMISATION: Déchiffrer "on-demand" les messages qui viennent d'être chargés
+        // (seulement les 5 premiers pour ne pas surcharger)
+        final newMessages = _conversationProvider.messagesFor(widget.conversationId);
+        if (newMessages.length > currentMessages.length) {
+          final newStartIndex = currentMessages.length;
+          _decryptOnScroll(newMessages, newStartIndex);
+        }
       });
     } catch (e) {
       debugPrint('❌ Erreur chargement messages anciens: $e');
