@@ -6,6 +6,8 @@ import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'package:flutter_message_app/ui/screens/qr_scan_screen.dart';
+import 'package:flutter_message_app/ui/screens/group_nav_screen.dart';
+import 'package:flutter_message_app/ui/screens/home_screen.dart';
 
 class GroupScreen extends StatefulWidget {
   const GroupScreen({Key? key}) : super(key: key);
@@ -39,7 +41,7 @@ class _GroupScreenState extends State<GroupScreen> {
       
       final groupProvider =
           Provider.of<GroupProvider>(context, listen: false);
-      await groupProvider.createGroupWithMembers(
+      final groupId = await groupProvider.createGroupWithMembers(
         groupName: groupName,
         memberEmails: [],
         groupSigningPubKeyB64: groupKeys['pk_sig']!, // Ed25519 pour signature groupe
@@ -48,12 +50,26 @@ class _GroupScreenState extends State<GroupScreen> {
 
       SnackbarService.showSuccess(
           context, 'Groupe créé avec succès !');
-      Navigator.pop(context, true);
+      
+      // CORRECTION: Naviguer vers la page du groupe (informations) après création
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => GroupNavScreen(
+              groupId: groupId,
+              groupName: groupName,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       SnackbarService.showError(
           context, 'Erreur création groupe : $e');
     } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -79,12 +95,22 @@ class _GroupScreenState extends State<GroupScreen> {
 
       SnackbarService.showSuccess(
           context, 'Demande d\'adhésion envoyée');
-      Navigator.pop(context, true);
+      
+      // CORRECTION: Retourner à la page qui liste les groupes en attendant d'être accepté
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          (route) => false, // Supprimer toutes les routes précédentes
+        );
+      }
     } catch (e) {
       SnackbarService.showError(
           context, 'Erreur demande de jointure : $e');
     } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 

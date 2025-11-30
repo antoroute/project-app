@@ -1897,8 +1897,12 @@ class ConversationProvider extends ChangeNotifier {
       // Fallback: rafraîchir toutes les conversations
       fetchConversations().then((_) {
         final badgeService = NotificationBadgeService();
+        final myUserId = _authProvider.userId;
         for (final conv in _conversations) {
-          badgeService.markNewConversation(conv.conversationId, conv.groupId);
+          // Ne pas marquer comme nouvelle si c'est l'utilisateur actuel qui l'a créée
+          if (conv.creatorId != myUserId) {
+            badgeService.markNewConversation(conv.conversationId, conv.groupId);
+          }
         }
       });
       return;
@@ -1906,41 +1910,26 @@ class ConversationProvider extends ChangeNotifier {
     
     debugPrint('💬 [ConversationProvider] Nouvelle conversation créée: $convId dans $groupId par $creatorId');
     
+    // CORRECTION: Ne pas marquer comme nouvelle si c'est l'utilisateur actuel qui a créé la conversation
+    final myUserId = _authProvider.userId;
+    if (creatorId != null && creatorId == myUserId) {
+      debugPrint('🔔 [ConversationProvider] Conversation créée par l\'utilisateur actuel, pas de notification');
+      // Rafraîchir quand même la liste des conversations pour l'afficher
+      fetchConversations().then((_) {
+        notifyListeners();
+      });
+      return;
+    }
+    
     // Marquer seulement la nouvelle conversation comme nouvelle dans le badge service
     final badgeService = NotificationBadgeService();
     badgeService.markNewConversation(convId, groupId);
     
     // CORRECTION: Rafraîchir immédiatement la liste des conversations
+    // Ne plus ajouter de notification texte - les badges suffisent
     fetchConversations().then((_) {
-      // Après avoir récupéré les conversations, ajouter la notification
-      final tracker = NavigationTrackerService();
-      if (!tracker.isInConversation(convId)) {
-        // Trouver le nom du groupe depuis les conversations mises à jour
-        String? groupName;
-        try {
-          final conversation = _conversations.firstWhere(
-            (c) => c.conversationId == convId,
-            orElse: () => throw Exception('Conversation not found'),
-          );
-          groupName = conversation.groupId; // On pourrait améliorer pour avoir le vrai nom
-        } catch (e) {
-          // Ignorer si la conversation n'est pas encore chargée
-          debugPrint('⚠️ [ConversationProvider] Conversation $convId pas encore dans la liste après fetch');
-        }
-        
-        _pendingInAppNotifications.add({
-          'type': 'new_conversation',
-          'conversationId': convId,
-          'groupId': groupId,
-          'groupName': groupName,
-        });
-        
-        debugPrint('🔔 [ConversationProvider] Notification in-app ajoutée pour nouvelle conversation: $convId');
-        debugPrint('🔔 [ConversationProvider] Total notifications en attente: ${_pendingInAppNotifications.length}');
-        
-        // Notifier les listeners IMMÉDIATEMENT pour que l'UI puisse afficher la notification
-        notifyListeners();
-      }
+      debugPrint('🔔 [ConversationProvider] Nouvelle conversation $convId dans groupe $groupId (badge uniquement)');
+      notifyListeners();
     }).catchError((e) {
       debugPrint('❌ [ConversationProvider] Erreur lors du fetch des conversations: $e');
     });

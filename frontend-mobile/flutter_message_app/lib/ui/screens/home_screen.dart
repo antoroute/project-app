@@ -3,12 +3,12 @@ import 'package:provider/provider.dart';
 import '../../core/models/group_info.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/group_provider.dart';
+import '../../core/providers/conversation_provider.dart';
 import 'dart:async';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/websocket_heartbeat_service.dart';
 import '../../core/services/network_monitor_service.dart';
 import '../../core/services/navigation_tracker_service.dart';
-import '../../core/services/in_app_notification_service.dart';
 import '../../core/services/notification_badge_service.dart';
 import 'group_nav_screen.dart';
 import 'group_screen.dart';
@@ -83,34 +83,9 @@ class _HomeScreenState extends State<HomeScreen> {
         final groupId = notification['groupId'] as String;
         final groupName = notification['groupName'] as String?;
         
-        debugPrint('🔔 [HomeScreen] Notification nouveau groupe: $groupId - $groupName');
-        
-        InAppNotificationService.showNewGroupNotification(
-          context: context,
-          groupId: groupId,
-          groupName: groupName,
-          onTap: () {
-            // Trouver le groupe dans la liste et naviguer
-            final groups = context.read<GroupProvider>().groups;
-            try {
-              final group = groups.firstWhere(
-                (g) => g.groupId == groupId,
-              );
-              
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => GroupNavScreen(
-                    groupId: group.groupId,
-                    groupName: group.name,
-                  ),
-                ),
-              );
-            } catch (e) {
-              debugPrint('⚠️ [HomeScreen] Groupe $groupId non trouvé dans la liste');
-            }
-          },
-        );
+        // CORRECTION: Ne plus afficher de notification texte pour les nouveaux groupes
+        // Les badges suffisent pour indiquer qu'il y a un nouveau groupe
+        debugPrint('🔔 [HomeScreen] Nouveau groupe détecté: $groupId - $groupName (badge uniquement, pas de notification texte)');
       }
     }
   }
@@ -118,8 +93,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadData() async {
     setState(() => _loading = true);
     try {
-      await Provider.of<GroupProvider>(context, listen: false)
-          .fetchUserGroups();
+      final groupProvider = Provider.of<GroupProvider>(context, listen: false);
+      final conversationProvider = Provider.of<ConversationProvider>(context, listen: false);
+      
+      // Charger les groupes
+      await groupProvider.fetchUserGroups();
+      
+      // CORRECTION: Charger aussi les conversations au démarrage pour s'abonner automatiquement
+      // Cela permet de recevoir les notifications même sans avoir ouvert de groupe
+      await conversationProvider.fetchConversations();
+      debugPrint('✅ [HomeScreen] Conversations chargées et abonnements WebSocket activés');
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erreur chargement : $e')),
@@ -218,8 +201,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             title: Text(g.name),
                             onTap: () {
-                              // Marquer le groupe comme lu quand on l'ouvre
-                              badgeService.markGroupAsRead(g.groupId);
+                              // CORRECTION: Ne pas nettoyer les badges quand on ouvre le groupe
+                              // Les badges seront nettoyés seulement quand on ouvre une conversation spécifique
                               
                               Navigator.push(
                                 context,

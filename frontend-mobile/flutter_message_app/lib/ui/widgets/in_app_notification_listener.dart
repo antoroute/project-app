@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/providers/group_provider.dart';
-import '../../core/services/in_app_notification_service.dart';
-import '../screens/conversation_screen.dart';
-import '../screens/group_nav_screen.dart';
 
 /// Widget qui écoute les changements des providers et affiche les notifications in-app
 /// À placer dans les écrans principaux (HomeScreen, GroupConversationListScreen, etc.)
@@ -73,43 +70,13 @@ class _InAppNotificationListenerState extends State<InAppNotificationListener> {
 
       final type = notification['type'] as String;
       if (type == 'new_message') {
-        final conversationId = notification['conversationId'] as String;
-        final senderName = notification['senderName'] as String;
-        final messageText = notification['messageText'] as String;
-
-        InAppNotificationService.showNewMessageNotification(
-          context: context,
-          senderName: senderName,
-          messageText: messageText,
-          conversationId: conversationId,
-          onTap: () {
-            // Naviguer vers la conversation
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ConversationScreen(conversationId: conversationId),
-              ),
-            );
-          },
-        );
+        // CORRECTION: Ne plus afficher de notification texte pour les nouveaux messages
+        // Les badges suffisent pour indiquer qu'il y a de nouveaux messages
+        debugPrint('🔔 [InAppNotificationListener] Nouveau message détecté (badge uniquement, pas de notification texte)');
       } else if (type == 'new_conversation') {
-        final conversationId = notification['conversationId'] as String;
-        final groupName = notification['groupName'] as String?;
-
-        InAppNotificationService.showNewConversationNotification(
-          context: context,
-          conversationId: conversationId,
-          groupName: groupName ?? widget.currentGroupName,
-          onTap: () {
-            // Naviguer vers la conversation
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ConversationScreen(conversationId: conversationId),
-              ),
-            );
-          },
-        );
+        // CORRECTION: Ne plus afficher de notification texte pour les nouvelles conversations
+        // Les badges suffisent pour indiquer qu'il y a une nouvelle conversation
+        debugPrint('🔔 [InAppNotificationListener] Nouvelle conversation détectée (badge uniquement, pas de notification texte)');
       }
     }
 
@@ -122,35 +89,9 @@ class _InAppNotificationListenerState extends State<InAppNotificationListener> {
 
       final type = notification['type'] as String;
       if (type == 'new_group') {
-        final groupId = notification['groupId'] as String;
-        final groupName = notification['groupName'] as String?;
-
-        InAppNotificationService.showNewGroupNotification(
-          context: context,
-          groupId: groupId,
-          groupName: groupName,
-          onTap: () {
-            // Trouver le groupe dans la liste et naviguer
-            final groups = context.read<GroupProvider>().groups;
-            try {
-              final group = groups.firstWhere(
-                (g) => g.groupId == groupId,
-              );
-
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => GroupNavScreen(
-                    groupId: group.groupId,
-                    groupName: group.name,
-                  ),
-                ),
-              );
-            } catch (e) {
-              debugPrint('⚠️ Groupe $groupId non trouvé dans la liste');
-            }
-          },
-        );
+        // CORRECTION: Ne plus afficher de notification texte pour les nouveaux groupes
+        // Les badges suffisent pour indiquer qu'il y a un nouveau groupe
+        debugPrint('🔔 [InAppNotificationListener] Nouveau groupe détecté (badge uniquement, pas de notification texte)');
       }
     }
   }

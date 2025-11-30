@@ -107,17 +107,38 @@ class NotificationBadgeService extends ChangeNotifier {
   /// Marque une conversation comme lue (plus de nouveaux messages)
   /// Le compteur est automatiquement mis à jour car il est basé sur le nombre de conversations
   void markConversationAsRead(String conversationId) {
+    bool changed = false;
+    
+    // Retirer des conversations avec nouveaux messages
     if (_conversationsWithNewMessages.remove(conversationId)) {
-      final groupId = _conversationToGroup.remove(conversationId);
-      if (groupId != null) {
-        // Vérifier si le groupe a encore des conversations avec de nouveaux messages
-        final hasOtherNewMessages = _conversationsWithNewMessages.any((convId) {
-          return _conversationToGroup[convId] == groupId;
-        });
-        if (!hasOtherNewMessages) {
-          _groupsWithNewMessages.remove(groupId);
+      changed = true;
+    }
+    
+    final groupId = _conversationToGroup.remove(conversationId);
+    
+    // CORRECTION: Retirer aussi des nouvelles conversations si c'était une nouvelle conversation
+    if (groupId != null) {
+      final newConvsInGroup = _newConversationsByGroup[groupId];
+      if (newConvsInGroup != null && newConvsInGroup.remove(conversationId)) {
+        changed = true;
+        // Si plus de nouvelles conversations dans ce groupe, supprimer l'entrée
+        if (newConvsInGroup.isEmpty) {
+          _newConversationsByGroup.remove(groupId);
         }
       }
+      
+      // Vérifier si le groupe a encore des conversations avec de nouveaux messages ou nouvelles conversations
+      final hasOtherNewMessages = _conversationsWithNewMessages.any((convId) {
+        return _conversationToGroup[convId] == groupId;
+      });
+      final hasOtherNewConversations = (_newConversationsByGroup[groupId]?.isNotEmpty ?? false);
+      
+      if (!hasOtherNewMessages && !hasOtherNewConversations) {
+        _groupsWithNewMessages.remove(groupId);
+      }
+    }
+    
+    if (changed) {
       debugPrint('🔔 [BadgeService] Conversation $conversationId marquée comme lue, compteur: ${_conversationsWithNewMessages.length}');
       notifyListeners();
     }

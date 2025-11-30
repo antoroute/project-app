@@ -22,33 +22,48 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
+    
+    // CORRECTION: Écouter les changements d'authentification pour naviguer automatiquement
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = Provider.of<AuthProvider>(context, listen: false);
-      final bool hasRefresh = await auth.hasRefreshToken();
-      final bool canBio = await auth.canUseBiometrics();
       
-      if (hasRefresh && canBio) {
-        try {
-          final bool ok = await auth.loginWithBiometrics();
-          if (ok && mounted) {
-            _goHome();
-          } else if (mounted) {
-            // Afficher un message d'erreur si la biométrie échoue
-            SnackbarService.showError(
-              context, 
-              'Échec de la reconnexion biométrique. Veuillez vous reconnecter manuellement.'
-            );
-          }
-        } catch (e) {
-          if (mounted) {
-            SnackbarService.showError(
-              context, 
-              'Erreur lors de la reconnexion : $e'
-            );
-          }
+      // Si déjà authentifié (par exemple après tryAutoLogin), aller directement à HomeScreen
+      if (auth.isAuthenticated && mounted) {
+        _goHome();
+        return;
+      }
+      
+      // Sinon, essayer la reconnexion biométrique
+      _tryBiometricLogin();
+    });
+  }
+  
+  Future<void> _tryBiometricLogin() async {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final bool hasRefresh = await auth.hasRefreshToken();
+    final bool canBio = await auth.canUseBiometrics();
+    
+    if (hasRefresh && canBio) {
+      try {
+        final bool ok = await auth.loginWithBiometrics();
+        if (ok && mounted) {
+          _goHome();
+        } else if (mounted) {
+          // Afficher un message d'erreur si la biométrie échoue
+          SnackbarService.showError(
+            context, 
+            'Échec de la reconnexion biométrique. Veuillez vous reconnecter manuellement.'
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          SnackbarService.showError(
+            context, 
+            'Erreur lors de la reconnexion : $e'
+          );
         }
       }
-    });
+    }
   }
 
   void _goHome() {

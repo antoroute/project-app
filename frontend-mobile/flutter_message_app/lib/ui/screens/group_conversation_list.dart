@@ -9,7 +9,6 @@ import '../../core/providers/conversation_provider.dart';
 import '../../core/services/snackbar_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/navigation_tracker_service.dart';
-import '../../core/services/in_app_notification_service.dart';
 import '../../core/services/notification_badge_service.dart';
 import 'conversation_screen.dart';
 
@@ -108,47 +107,13 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
       debugPrint('🔔 [GroupConversationList] Affichage notification: $type');
       
       if (type == 'new_message') {
-        final conversationId = notification['conversationId'] as String;
-        final senderName = notification['senderName'] as String;
-        final messageText = notification['messageText'] as String;
-        
-        debugPrint('🔔 [GroupConversationList] Notification nouveau message: $senderName - $messageText');
-        
-        InAppNotificationService.showNewMessageNotification(
-          context: context,
-          senderName: senderName,
-          messageText: messageText,
-          conversationId: conversationId,
-          onTap: () {
-            // Naviguer vers la conversation
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ConversationScreen(conversationId: conversationId),
-              ),
-            );
-          },
-        );
+        // CORRECTION: Ne plus afficher de notification texte pour les nouveaux messages
+        // Les badges suffisent pour indiquer qu'il y a de nouveaux messages
+        debugPrint('🔔 [GroupConversationList] Nouveau message détecté (badge uniquement, pas de notification texte)');
       } else if (type == 'new_conversation') {
-        final conversationId = notification['conversationId'] as String;
-        final groupName = notification['groupName'] as String?;
-        
-        debugPrint('🔔 [GroupConversationList] Notification nouvelle conversation: $conversationId');
-        
-        InAppNotificationService.showNewConversationNotification(
-          context: context,
-          conversationId: conversationId,
-          groupName: groupName ?? widget.groupName,
-          onTap: () {
-            // Naviguer vers la conversation
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ConversationScreen(conversationId: conversationId),
-              ),
-            );
-          },
-        );
+        // CORRECTION: Ne plus afficher de notification texte pour les nouvelles conversations
+        // Les badges suffisent pour indiquer qu'il y a une nouvelle conversation
+        debugPrint('🔔 [GroupConversationList] Nouvelle conversation détectée (badge uniquement, pas de notification texte)');
       }
     }
   }

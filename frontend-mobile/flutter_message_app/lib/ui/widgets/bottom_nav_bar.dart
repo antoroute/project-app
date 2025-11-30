@@ -70,6 +70,7 @@ class _BottomNavBarState extends State<BottomNavBar> {
         child: SizedBox(
           height: 60,
           child: Stack(
+            clipBehavior: Clip.none, // Permettre au badge de dépasser sans être tronqué
             children: [
               // Les 4 premiers onglets alignés répartis uniformément
               // (tous sauf celui à centerTabIndex)
@@ -166,20 +167,20 @@ class _BottomNavBarState extends State<BottomNavBar> {
             Stack(
               clipBehavior: Clip.none,
               children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
+                SizedBox(
                   width: 24,
                   height: 24,
-                  transform: Matrix4.identity()
-                    ..scale(isSelected ? 1.15 : 1.0),
-                  alignment: Alignment.center,
-                  child: FittedBox(
-                    fit: BoxFit.contain,
-                    child: Icon(
-                      tab.icon,
-                      color: color,
-                      size: 24,
+                  child: Center(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeInOut,
+                      transform: Matrix4.identity()
+                        ..scale(isSelected ? 1.15 : 1.0),
+                      child: Icon(
+                        tab.icon,
+                        color: color,
+                        size: 24,
+                      ),
                     ),
                   ),
                 ),
@@ -305,21 +306,22 @@ class _BottomNavBarState extends State<BottomNavBar> {
             ),
           ),
           // Badge pour nouveaux groupes ou nouveaux messages sur le tab central
+          // CORRECTION: Positionner le badge plus haut et à droite pour éviter la troncature
           if (showBadge)
             Positioned(
-              right: -4,
-              top: -4,
+              right: -1,
+              top: -8,
               child: showNewMessagesBadge
                   ? Container(
-                      padding: const EdgeInsets.all(4),
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
                       decoration: BoxDecoration(
                         color: Colors.red,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 1.5),
                       ),
                       constraints: const BoxConstraints(
-                        minWidth: 16,
-                        minHeight: 16,
+                        minWidth: 18,
+                        minHeight: 18,
                       ),
                       child: Text(
                         (badgeService?.newMessagesCount ?? 0) > 99 
@@ -327,7 +329,7 @@ class _BottomNavBarState extends State<BottomNavBar> {
                             : '${badgeService?.newMessagesCount ?? 0}',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: FontWeight.bold,
                         ),
                         textAlign: TextAlign.center,
@@ -335,15 +337,15 @@ class _BottomNavBarState extends State<BottomNavBar> {
                     )
                   : showNewGroupsBadge
                       ? Container(
-                          padding: const EdgeInsets.all(4),
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
                           decoration: BoxDecoration(
                             color: Colors.red,
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 1.5),
                           ),
                           constraints: const BoxConstraints(
-                            minWidth: 16,
-                            minHeight: 16,
+                            minWidth: 18,
+                            minHeight: 18,
                           ),
                           child: Text(
                             otherGroupsUpdatesCount > 99 
@@ -351,7 +353,7 @@ class _BottomNavBarState extends State<BottomNavBar> {
                                 : '$otherGroupsUpdatesCount',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 10,
+                              fontSize: 9,
                               fontWeight: FontWeight.bold,
                             ),
                             textAlign: TextAlign.center,

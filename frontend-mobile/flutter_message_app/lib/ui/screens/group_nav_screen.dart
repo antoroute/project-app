@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../widgets/bottom_nav_bar.dart';
-import '../../core/services/notification_badge_service.dart';
 import 'group_conversation_list.dart';
 import 'group_calendar_screen.dart';
 import 'group_map_screen.dart';
@@ -27,10 +26,9 @@ class _GroupNavScreenState extends State<GroupNavScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Marquer le groupe comme lu quand on l'ouvre
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      NotificationBadgeService().markGroupAsRead(widget.groupId);
-    });
+    // CORRECTION: Ne pas nettoyer les badges quand on arrive sur la liste des conversations
+    // Les badges seront nettoyés seulement quand on ouvre une conversation spécifique
+    // Cela permet à l'utilisateur de voir quelles conversations ont des updates
     
     // Liste des écrans correspondant aux onglets
     final List<Widget> screens = [

@@ -11,7 +11,6 @@ import '../../core/crypto/message_cipher_v2.dart';
 import '../../core/services/session_device_service.dart';
 import '../../core/services/performance_benchmark.dart';
 import '../../core/services/navigation_tracker_service.dart';
-import '../../core/services/in_app_notification_service.dart';
 import '../../core/services/notification_badge_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/websocket_heartbeat_service.dart';
@@ -81,26 +80,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
       final type = notification['type'] as String;
       if (type == 'new_message') {
         final conversationId = notification['conversationId'] as String;
-        final senderName = notification['senderName'] as String;
-        final messageText = notification['messageText'] as String;
         
-        // Ne pas afficher si c'est pour cette conversation (on est déjà dedans)
+        // CORRECTION: Ne plus afficher de notification texte pour les nouveaux messages
+        // Les badges suffisent pour indiquer qu'il y a de nouveaux messages
         if (conversationId != widget.conversationId) {
-          InAppNotificationService.showNewMessageNotification(
-            context: context,
-            senderName: senderName,
-            messageText: messageText,
-            conversationId: conversationId,
-            onTap: () {
-              // Naviguer vers la conversation
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ConversationScreen(conversationId: conversationId),
-                ),
-              );
-            },
-          );
+          debugPrint('🔔 [ConversationScreen] Nouveau message dans autre conversation (badge uniquement, pas de notification texte)');
         }
       }
     }
