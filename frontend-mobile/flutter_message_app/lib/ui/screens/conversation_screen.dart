@@ -469,7 +469,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
   /// Permet d'envoyer un message même pendant le déchiffrement
   Future<void> _onSendPressed() async {
     final plainText = _textController.text.trim();
-    if (plainText.isEmpty) return;
+    debugPrint('📤 [ConversationScreen] Bouton d\'envoi pressé, texte: ${plainText.length > 50 ? plainText.substring(0, 50) + "..." : plainText}');
+    
+    if (plainText.isEmpty) {
+      debugPrint('⚠️ [ConversationScreen] Texte vide, envoi annulé');
+      return;
+    }
     
     // Arrêter l'indicateur de frappe avant d'envoyer
     _conversationProvider.stopTyping(widget.conversationId);
@@ -478,13 +483,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
     // 🚀 OPTIMISATION: Vider le champ immédiatement pour feedback UI instantané
     _textController.clear();
     
+    debugPrint('📤 [ConversationScreen] Appel de sendMessage pour conversation ${widget.conversationId}');
+    
     // 🚀 OPTIMISATION: Envoyer en arrière-plan sans bloquer l'UI
     // Le déchiffrement peut continuer en parallèle
     _conversationProvider.sendMessage(context, widget.conversationId, plainText).catchError((e) {
       // En cas d'erreur, restaurer le texte pour que l'utilisateur puisse réessayer
       if (mounted) {
         _textController.text = plainText;
-        debugPrint('❌ Erreur envoi message: $e');
+        debugPrint('❌ [ConversationScreen] Erreur envoi message: $e');
+        debugPrint('❌ [ConversationScreen] Stack trace: ${StackTrace.current}');
       }
     });
   }

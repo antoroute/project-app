@@ -155,20 +155,20 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
     // Initialiser la queue de messages
     await MessageQueueService().initialize();
     
-    // Initialiser le service de présence global
-    GlobalPresenceService().initialize();
+        // Initialiser le service de présence global
+        GlobalPresenceService().initialize();
     
     // Vérifier la connectivité avant de connecter le WebSocket
     final hasNetwork = await NetworkMonitorService().hasInternetConnection();
     if (hasNetwork) {
-      // Initialiser la connexion WebSocket une seule fois au niveau de l'app
+        // Initialiser la connexion WebSocket une seule fois au niveau de l'app
       WebSocketService.instance.connect(context).then((_) {
         // Démarrer le heartbeat une fois connecté
         WebSocketHeartbeatService().start();
       });
     } else {
       debugPrint('⚠️ [App] Pas de connexion réseau, WebSocket non connecté');
-    }
+      }
   }
 
   @override

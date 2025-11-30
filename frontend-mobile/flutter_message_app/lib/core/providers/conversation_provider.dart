@@ -1277,9 +1277,15 @@ class ConversationProvider extends ChangeNotifier {
     String plaintext,
   ) async {
     try {
+      debugPrint('📤 [ConversationProvider] Début envoi message pour conversation $conversationId');
+      debugPrint('📤 [ConversationProvider] Texte: ${plaintext.length > 50 ? plaintext.substring(0, 50) + "..." : plaintext}');
+      
       final myUserId = _authProvider.userId!;
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      debugPrint('📤 [ConversationProvider] myUserId: $myUserId, myDeviceId: $myDeviceId');
+      
       final groupId = _conversations.firstWhere((c) => c.conversationId == conversationId).groupId;
+      debugPrint('📤 [ConversationProvider] groupId: $groupId');
       
       // S'assurer que nos clés device sont générées
       await KeyManagerFinal.instance.ensureKeysFor(groupId, myDeviceId);
@@ -1319,6 +1325,7 @@ class ConversationProvider extends ChangeNotifier {
         throw Exception('Aucun device actif trouvé pour les membres de la conversation');
       }
       
+      debugPrint('📤 [ConversationProvider] Chiffrement du message pour ${conversationDevices.length} devices');
       final payload = await MessageCipherV2.encrypt(
         groupId: groupId,
         convId: conversationId,
@@ -1327,11 +1334,58 @@ class ConversationProvider extends ChangeNotifier {
         recipientsDevices: conversationDevices,
         plaintext: Uint8List.fromList(plaintext.codeUnits),
       );
-      await _apiService.sendMessageV2(payloadV2: payload);
+      debugPrint('📤 [ConversationProvider] Message chiffré, envoi au serveur...');
+      final result = await _apiService.sendMessageV2(payloadV2: payload);
+      debugPrint('📤 [ConversationProvider] Message envoyé avec succès: $result');
+      
+      // CORRECTION CRITIQUE: Ajouter le message localement immédiatement après l'envoi réussi
+      // L'expéditeur ne recevra pas le message via WebSocket (exclu par .except())
+      // donc il faut l'ajouter manuellement pour un affichage immédiat
+      try {
+        final messageId = payload['messageId'] as String?;
+        final sentAt = payload['sentAt'] as int?;
+        
+        if (messageId == null || sentAt == null) {
+          debugPrint('⚠️ [ConversationProvider] messageId ou sentAt manquant dans le payload: messageId=$messageId, sentAt=$sentAt');
+          return;
+        }
+        
+        debugPrint('📤 [ConversationProvider] Création du message local: messageId=$messageId, sentAt=$sentAt');
+        
+        final sentMessage = Message(
+          id: messageId,
+          conversationId: conversationId,
+          senderId: myUserId,
+          encrypted: null,
+          iv: null,
+          encryptedKeys: const {},
+          signatureValid: true, // On fait confiance à nos propres messages
+          senderPublicKey: null,
+          timestamp: sentAt,
+          v2Data: payload,
+          decryptedText: plaintext, // Texte en clair car c'est notre message
+        );
+        
+        debugPrint('📤 [ConversationProvider] Message créé, sauvegarde locale...');
+        
+        // Sauvegarder localement
+        await LocalMessageStorage.instance.saveMessage(sentMessage);
+        debugPrint('📤 [ConversationProvider] Message sauvegardé localement');
+        
+        // Ajouter à la liste locale et notifier immédiatement
+        addLocalMessage(sentMessage);
+        debugPrint('✅ [ConversationProvider] Message ajouté localement: $messageId');
+      } catch (e, stackTrace) {
+        debugPrint('❌ [ConversationProvider] Erreur lors de l\'ajout local du message: $e');
+        debugPrint('❌ [ConversationProvider] Stack trace: $stackTrace');
+      }
     } on RateLimitException {
       SnackbarService.showRateLimitError(context);
       rethrow;
     } catch (e) {
+      debugPrint('❌ [ConversationProvider] Erreur lors de l\'envoi du message: $e');
+      debugPrint('❌ [ConversationProvider] Type d\'erreur: ${e.runtimeType}');
+      
       // Si c'est une erreur de clés manquantes, essayer UNE SEULE FOIS
       if ((e.toString().contains('length=0') || e.toString().contains('Failed assertion')) && !plaintext.contains('🔧 RETRY:')) {
         try {
@@ -1469,8 +1523,10 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   /// S’abonne ou se désabonne au WS
-  void subscribe(String conversationId) =>
-      _webSocketService.subscribeConversation(conversationId);
+  void subscribe(String conversationId) {
+    debugPrint('📡 [ConversationProvider] Abonnement demandé pour conversation: $conversationId');
+    _webSocketService.subscribeConversation(conversationId);
+  }
 
   void unsubscribe(String conversationId) =>
       _webSocketService.unsubscribeConversation(conversationId, userId: _authProvider.userId);
@@ -1514,20 +1570,31 @@ class ConversationProvider extends ChangeNotifier {
 
   void _onWebSocketNewMessageV2(Map<String, dynamic> payload) async {
     try {
+      debugPrint('📨 [ConversationProvider] _onWebSocketNewMessageV2 appelé');
+      debugPrint('📨 [ConversationProvider] Payload reçu: ${payload.keys.join(", ")}');
+      
       final myUserId = _authProvider.userId;
       if (myUserId == null) {
         debugPrint('⚠️ [ConversationProvider] myUserId est null, impossible de traiter le message');
         return;
       }
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
-      final groupId = payload['groupId'] as String;
-      final messageId = payload['messageId'] as String;
-      final convId = payload['convId'] as String;
+      final groupId = payload['groupId'] as String?;
+      final messageId = payload['messageId'] as String?;
+      final convId = payload['convId'] as String?;
+      
+      if (groupId == null || messageId == null || convId == null) {
+        debugPrint('⚠️ [ConversationProvider] Données manquantes dans le payload: groupId=$groupId, messageId=$messageId, convId=$convId');
+        return;
+      }
+      
+      debugPrint('📨 [ConversationProvider] Message reçu: convId=$convId, messageId=$messageId, groupId=$groupId');
       
       // Extraire le senderId avec vérification
       final senderData = payload['sender'];
       if (senderData == null || senderData is! Map) {
         debugPrint('⚠️ [ConversationProvider] Payload sender invalide: $senderData');
+        debugPrint('⚠️ [ConversationProvider] Payload complet: $payload');
         return;
       }
       final senderId = senderData['userId'] as String?;
@@ -1784,19 +1851,32 @@ class ConversationProvider extends ChangeNotifier {
   /// Affiche une notification si nécessaire (push + in-app)
   Future<void> _showNotificationIfNeeded(String conversationId, String senderId, String messageText) async {
     try {
+      debugPrint('🔔 [ConversationProvider] _showNotificationIfNeeded appelé');
+      debugPrint('🔔 [ConversationProvider] conversationId: $conversationId, senderId: $senderId');
+      debugPrint('🔔 [ConversationProvider] messageText: ${messageText.length > 30 ? messageText.substring(0, 30) + "..." : messageText}');
+      
       final tracker = NavigationTrackerService();
       
       // Vérifier si l'utilisateur est actuellement dans cette conversation
       final isInCurrentConversation = tracker.isInConversation(conversationId);
+      final currentScreen = tracker.currentScreen;
+      
+      debugPrint('🔔 [ConversationProvider] isInCurrentConversation: $isInCurrentConversation');
+      debugPrint('🔔 [ConversationProvider] currentScreen: $currentScreen');
       
       if (!isInCurrentConversation) {
+        debugPrint('🔔 [ConversationProvider] ✅ Utilisateur n\'est PAS dans la conversation, création de notification');
+        
         // Obtenir le nom de l'expéditeur
         final senderName = await _getSenderName(senderId);
+        debugPrint('🔔 [ConversationProvider] senderName: $senderName');
         
         // Tronquer le message pour la notification
         final truncatedMessage = messageText.length > 50 
             ? '${messageText.substring(0, 50)}...'
             : messageText;
+        
+        debugPrint('🔔 [ConversationProvider] truncatedMessage: $truncatedMessage');
         
         // Afficher une notification push (si l'app est en arrière-plan)
         await NotificationService.showMessageNotification(
@@ -1805,6 +1885,7 @@ class ConversationProvider extends ChangeNotifier {
           conversationId: conversationId,
           senderName: senderName,
         );
+        debugPrint('🔔 [ConversationProvider] Notification push affichée');
         
         // Afficher une notification in-app si l'utilisateur est dans l'app mais pas sur la bonne conversation
         // Note: On ne peut pas utiliser BuildContext ici, donc on stocke les infos pour que l'UI les affiche
@@ -1816,15 +1897,19 @@ class ConversationProvider extends ChangeNotifier {
           'messageText': truncatedMessage,
         });
         
-        debugPrint('🔔 [ConversationProvider] Notification in-app ajoutée: $senderName - $truncatedMessage (conversation: $conversationId)');
+        debugPrint('🔔 [ConversationProvider] ✅ Notification in-app ajoutée: $senderName - $truncatedMessage (conversation: $conversationId)');
         debugPrint('🔔 [ConversationProvider] Total notifications en attente: ${_pendingInAppNotifications.length}');
         
         // Notifier les listeners IMMÉDIATEMENT pour que l'UI puisse afficher la notification
         // Utiliser notifyListeners() au lieu de _notifyListenersBatched() pour les notifications
         notifyListeners();
+        debugPrint('🔔 [ConversationProvider] ✅ Listeners notifiés');
+      } else {
+        debugPrint('🔔 [ConversationProvider] ⏭️ Utilisateur est dans la conversation, pas de notification');
       }
-    } catch (e) {
-      debugPrint('❌ Erreur affichage notification: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ [ConversationProvider] Erreur affichage notification: $e');
+      debugPrint('❌ [ConversationProvider] Stack trace: $stackTrace');
     }
   }
   

@@ -134,24 +134,43 @@ class WebSocketService {
         _updateActivityMetrics();
         _messagesReceived++;
         
-        debugPrint('📨 [WebSocket] Message reçu via WebSocket (total: $_messagesReceived)');
+        debugPrint('📨 [WebSocket] ========== MESSAGE REÇU VIA WEBSOCKET ==========');
+        debugPrint('📨 [WebSocket] Total messages reçus: $_messagesReceived');
+        debugPrint('📨 [WebSocket] Type de données: ${data.runtimeType}');
         
         if (data is Map) {
           final map = Map<String, dynamic>.from(data);
           final convId = map['convId'] as String?;
           final messageId = map['messageId'] as String?;
-          debugPrint('📨 [WebSocket] Message détails: convId=$convId, messageId=$messageId');
-          debugPrint('📨 [WebSocket] Callback onNewMessageV2: ${onNewMessageV2 != null ? "branché" : "NON BRANCHÉ"}');
+          final sender = map['sender'] as Map?;
+          final senderId = sender?['userId'] as String?;
+          
+          debugPrint('📨 [WebSocket] Message détails:');
+          debugPrint('📨 [WebSocket]   convId: $convId');
+          debugPrint('📨 [WebSocket]   messageId: $messageId');
+          debugPrint('📨 [WebSocket]   senderId: $senderId');
+          debugPrint('📨 [WebSocket]   Clés du payload: ${map.keys.join(", ")}');
+          debugPrint('📨 [WebSocket] Callback onNewMessageV2: ${onNewMessageV2 != null ? "✅ BRANCHÉ" : "❌ NON BRANCHÉ"}');
           
           if (onNewMessageV2 != null) {
-            onNewMessageV2!(map);
-            debugPrint('📨 [WebSocket] Callback onNewMessageV2 appelé');
+            debugPrint('📨 [WebSocket] Appel du callback onNewMessageV2...');
+            try {
+              onNewMessageV2!(map);
+              debugPrint('📨 [WebSocket] ✅ Callback onNewMessageV2 appelé avec succès');
+            } catch (e, stackTrace) {
+              debugPrint('❌ [WebSocket] Erreur dans le callback onNewMessageV2: $e');
+              debugPrint('❌ [WebSocket] Stack trace: $stackTrace');
+            }
           } else {
-            debugPrint('⚠️ [WebSocket] Callback onNewMessageV2 non branché !');
+            debugPrint('⚠️ [WebSocket] ⚠️ Callback onNewMessageV2 non branché !');
+            debugPrint('⚠️ [WebSocket] Le message ne sera pas traité');
           }
         } else {
           debugPrint('⚠️ [WebSocket] Message reçu mais format invalide: ${data.runtimeType}');
+          debugPrint('⚠️ [WebSocket] Données reçues: $data');
         }
+        
+        debugPrint('📨 [WebSocket] ============================================');
       })
       ..on('presence:update', (data) {
         _updateActivityMetrics();
@@ -267,19 +286,42 @@ class WebSocketService {
   }
 
   void subscribeConversation(String conversationId) {
+    debugPrint('📡 [WebSocket] Tentative d\'abonnement à la conversation: $conversationId');
+    debugPrint('📡 [WebSocket] Statut actuel: $_status');
+    debugPrint('📡 [WebSocket] Socket null? ${_socket == null}');
+    
     // Ajouter à la liste des abonnements persistants
     _subscribedConversations.add(conversationId);
+    debugPrint('📡 [WebSocket] Conversations abonnées: ${_subscribedConversations.length}');
     
     if (_status != SocketStatus.connected || _socket == null) {
       // Si pas connecté, ajouter aux abonnements en attente
       _pendingSubscriptions.add(conversationId);
+      debugPrint('⚠️ [WebSocket] WebSocket non connecté, abonnement mis en attente: $conversationId');
       return;
     }
+    
+    debugPrint('📡 [WebSocket] Envoi de conv:subscribe pour $conversationId');
     _socket!.emitWithAck(
       'conv:subscribe',
       {'convId': conversationId},
       ack: (resp) {
-        // Log silencieux pour les abonnements
+        debugPrint('📡 [WebSocket] Réponse conv:subscribe pour $conversationId: $resp');
+        if (resp != null) {
+          if (resp is Map) {
+            final success = resp['success'] as bool?;
+            if (success == true) {
+              debugPrint('✅ [WebSocket] Abonnement réussi à la conversation $conversationId');
+            } else {
+              final error = resp['error'] as String?;
+              debugPrint('❌ [WebSocket] Échec de l\'abonnement à la conversation $conversationId: $error');
+            }
+          } else {
+            debugPrint('📡 [WebSocket] Réponse conv:subscribe (format inattendu): $resp (type: ${resp.runtimeType})');
+          }
+        } else {
+          debugPrint('⚠️ [WebSocket] Réponse conv:subscribe est null (timeout ou pas de réponse)');
+        }
       },
     );
   }
@@ -316,7 +358,9 @@ class WebSocketService {
   
   /// Réabonne automatiquement aux conversations lors de la reconnexion
   void _resubscribeToConversations() {
+    debugPrint('📡 [WebSocket] Réabonnement aux conversations: ${_subscribedConversations.length} conversations');
     for (final convId in _subscribedConversations) {
+      debugPrint('📡 [WebSocket] Réabonnement à la conversation: $convId');
       _socket!.emitWithAck(
         'conv:subscribe',
         {'convId': convId},
