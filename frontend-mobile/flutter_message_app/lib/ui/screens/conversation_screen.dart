@@ -13,7 +13,6 @@ import '../../core/services/performance_benchmark.dart';
 import '../../core/services/navigation_tracker_service.dart';
 import '../../core/services/in_app_notification_service.dart';
 import '../../core/services/notification_badge_service.dart';
-import 'dart:async';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/websocket_heartbeat_service.dart';
 import '../../core/services/network_monitor_service.dart';
@@ -152,7 +151,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
       
       // 3) Déchiffrement progressif en arrière-plan (non-bloquant)
       _startProgressiveDecryption();
-      _initialDecryptDone = true;
       
       // Attendre que les 5 premiers messages visibles soient déchiffrés
       await Future.delayed(const Duration(milliseconds: 500));
