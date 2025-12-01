@@ -8,7 +8,8 @@ class ChatStyles {
   static const bubbleRadius = Radius.circular(15);
   static const bubblePadding = EdgeInsets.symmetric(vertical: 3, horizontal: 12);
   static const double avatarDiameter = 36;
-  static const double avatarSpacing = 46;  
+  static const double avatarSpacing = 46;
+  static const double messageSpacing = 4;
 }
 
 class MessageBubble extends StatefulWidget {
@@ -336,6 +337,13 @@ class _MessageBubbleState extends State<MessageBubble> {
                             bottomRight:
                                 widget.isMe ? Radius.zero : ChatStyles.bubbleRadius,
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.08),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
                         child: Column(
                           crossAxisAlignment: widget.isMe
@@ -346,17 +354,28 @@ class _MessageBubbleState extends State<MessageBubble> {
                             // Texte avec gestion d'overflow
                             Text(
                               _currentText, // CORRECTION: Utiliser le texte déchiffré
-                              style: messageStyle,
+                              style: messageStyle.copyWith(
+                                height: 1.4,
+                                letterSpacing: 0.1,
+                              ),
                               overflow: TextOverflow.visible,
                               softWrap: true,
                             ),
                             if (widget.time != null)
                               Padding(
                                 padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  widget.time!, 
-                                  style: timeStyle,
-                                  overflow: TextOverflow.visible,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      widget.time!,
+                                      style: timeStyle.copyWith(
+                                        fontSize: 11,
+                                        letterSpacing: 0.2,
+                                      ),
+                                      overflow: TextOverflow.visible,
+                                    ),
+                                  ],
                                 ),
                               ),
                           ],
@@ -386,7 +405,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             ),
           ),
 
-        const SizedBox(height: 2),
+        SizedBox(height: ChatStyles.messageSpacing),
       ],
     );
   }

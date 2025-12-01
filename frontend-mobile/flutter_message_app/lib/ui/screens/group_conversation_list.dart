@@ -180,14 +180,20 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
         conversationType,
       );
       SnackbarService.showSuccess(context, 'Conversation créée !');
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ConversationScreen(
-            conversationId: newConversationId,
+      
+      // CORRECTION: Utiliser push au lieu de pushReplacement pour garder GroupConversationListScreen dans la pile
+      // Cela permet au bouton retour de revenir à la liste des conversations du groupe
+      // La conversation s'ouvre automatiquement grâce à Navigator.push
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ConversationScreen(
+              conversationId: newConversationId,
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (error) {
       SnackbarService.showError(context, 'Erreur création : $error');
     } finally {

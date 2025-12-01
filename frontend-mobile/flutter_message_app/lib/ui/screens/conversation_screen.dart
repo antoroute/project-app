@@ -99,9 +99,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
   /// Gestionnaire de notification de scroll pour reverse:true
   bool _onScrollNotification(ScrollNotification n) {
     // CORRECTION: Avec reverse:true, on détecte quand on approche du haut (maxScrollExtent)
-    if (n.metrics.pixels >= n.metrics.maxScrollExtent - 100 && _hasMoreOlderMessages && !_isLoading) {
-      debugPrint('🔄 Scroll détecté - Chargement messages anciens...');
-      _loadOlderPreservingOffset();
+    // Ne déclencher que sur ScrollUpdate pour éviter les déclenchements multiples
+    if (n is ScrollUpdateNotification) {
+      final pixels = n.metrics.pixels;
+      final maxExtent = n.metrics.maxScrollExtent;
+      
+      // CORRECTION: Seuil plus élevé (150px) pour éviter les déclenchements trop fréquents
+      // et vérifier que maxExtent est valide (pas 0)
+      if (maxExtent > 0 && pixels >= maxExtent - 150 && _hasMoreOlderMessages && !_isLoading) {
+        debugPrint('🔄 Scroll détecté - Chargement messages anciens... (pixels: $pixels, maxExtent: $maxExtent)');
+        _loadOlderPreservingOffset();
+      }
     }
     return false;
   }
@@ -134,7 +142,27 @@ class _ConversationScreenState extends State<ConversationScreen> {
       final decryptTimer = PerformanceBenchmark.instance.startTimer('conversation_screen_decrypt_initial');
       
       // 3) Déchiffrement progressif en arrière-plan (non-bloquant)
-      _startProgressiveDecryption();
+      // CORRECTION: Attendre un court délai pour s'assurer que tous les messages sont chargés
+      // (notamment ceux qui arrivent depuis la synchronisation serveur)
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      // Relire les messages au cas où de nouveaux seraient arrivés
+      final finalMessages = _conversationProvider.messagesFor(widget.conversationId);
+      if (finalMessages.isNotEmpty) {
+        _startProgressiveDecryption();
+        
+        // CORRECTION: S'assurer que le dernier message est déchiffré
+        // (au cas où il serait arrivé après le début du déchiffrement)
+        final lastMessage = finalMessages.last;
+        if ((lastMessage.decryptedText == null || 
+             lastMessage.decryptedText == '[Chiffré]' || 
+             lastMessage.signatureValid != true) && 
+            lastMessage.v2Data != null) {
+          _decryptMessageUltraFluid(lastMessage, isVisible: true).catchError((e) {
+            debugPrint('⚠️ Erreur déchiffrement dernier message initial: $e');
+          });
+        }
+      }
       
       // Attendre que les 5 premiers messages visibles soient déchiffrés
       await Future.delayed(const Duration(milliseconds: 500));
@@ -223,7 +251,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
       if (!mounted) break;
       
       // Déchiffrer si pas encore déchiffré OU si signature pas vérifiée
-      if ((msg.decryptedText == null || msg.signatureValid != true) && msg.v2Data != null) {
+      // CORRECTION: Vérifier aussi si le texte est "[Chiffré]" (message non déchiffré)
+      if ((msg.decryptedText == null || 
+           msg.decryptedText == '[Chiffré]' || 
+           msg.signatureValid != true) && 
+          msg.v2Data != null) {
         try {
           debugPrint('🔐 [Visible] Déchiffrement séquentiel message ${i + 1}/${messages.length}: ${msg.id}');
           
@@ -277,6 +309,36 @@ class _ConversationScreenState extends State<ConversationScreen> {
     Future.wait(futures).then((_) {
       if (mounted) {
         _messageUpdateNotifier.value = 'on_scroll_decrypt';
+      }
+    });
+  }
+  
+  /// 🚀 OPTIMISATION: Déchiffrement en arrière-plan de tous les nouveaux messages
+  /// Déchiffre tous les nouveaux messages chargés lors de la pagination
+  /// Cela améliore la réactivité car les messages sont prêts quand l'utilisateur scroll vers eux
+  void _decryptNewMessagesInBackground(List<Message> messages, int startIndex, int count) {
+    if (!mounted) return;
+    
+    final endIndex = (startIndex + count).clamp(0, messages.length);
+    final messagesToDecrypt = messages.sublist(startIndex, endIndex);
+    
+    debugPrint('🔐 [Background] Déchiffrement en arrière-plan de ${messagesToDecrypt.length} messages (index $startIndex-$endIndex)');
+    
+    // Déchiffrer en parallèle tous les nouveaux messages (en arrière-plan, priorité basse)
+    final futures = <Future<void>>[];
+    for (final msg in messagesToDecrypt) {
+      if ((msg.decryptedText == null || msg.signatureValid != true) && msg.v2Data != null) {
+        final future = _decryptMessageUltraFluid(msg, isVisible: false).catchError((e) {
+          debugPrint('⚠️ Erreur déchiffrement background ${msg.id}: $e');
+        });
+        futures.add(future);
+      }
+    }
+    
+    Future.wait(futures).then((_) {
+      if (mounted) {
+        _messageUpdateNotifier.value = 'background_decrypt_done';
+        debugPrint('✅ [Background] Déchiffrement en arrière-plan terminé pour ${messagesToDecrypt.length} messages');
       }
     });
   }
@@ -368,6 +430,87 @@ class _ConversationScreenState extends State<ConversationScreen> {
      }
   }
 
+  /// Ajuste la position de scroll après ajout de messages (reverse:true)
+  /// CORRECTION: Attend que l'utilisateur arrête de scroller avant d'ajuster pour éviter les conflits
+  void _adjustScrollPosition(double beforeMaxExtent, List<Message> currentMessages) {
+    if (!_scrollController.hasClients || !mounted) return;
+    
+    // CORRECTION: Capturer l'offset ACTUEL juste avant l'ajustement
+    // Pas celui capturé au début du chargement, car l'utilisateur a pu continuer à scroller
+    final currentOffset = _scrollController.offset;
+    final afterMaxExtent = _scrollController.position.maxScrollExtent;
+    final extentDiff = afterMaxExtent - beforeMaxExtent;
+    
+    debugPrint('📍 Ajustement scroll - Offset actuel: $currentOffset, MaxExtent avant: $beforeMaxExtent, MaxExtent après: $afterMaxExtent, Différence: $extentDiff');
+    
+    // CORRECTION: Vérifier si l'utilisateur est en train de scroller activement
+    // Si oui, attendre qu'il arrête avant d'ajuster pour éviter les conflits
+    final isScrolling = _scrollController.position.isScrollingNotifier.value;
+    
+    if (isScrolling) {
+      debugPrint('⏸️ Utilisateur en train de scroller, attente de la fin du scroll...');
+      // Attendre que l'utilisateur arrête de scroller
+      if (!_isListeningToScroll) {
+        _scrollController.position.isScrollingNotifier.addListener(_onScrollingStateChanged);
+        _isListeningToScroll = true;
+      }
+      // Stocker les valeurs pour l'ajustement différé
+      _pendingScrollAdjustment = () {
+        _adjustScrollPosition(beforeMaxExtent, currentMessages);
+      };
+      return;
+    }
+    
+    // CORRECTION: Avec reverse:true, pour préserver la position visuelle,
+    // on doit augmenter l'offset de la différence de hauteur
+    // Utiliser jumpTo pour un ajustement immédiat sans animation qui pourrait perturber
+    if (extentDiff > 0) {
+      final newOffset = currentOffset + extentDiff;
+      _scrollController.jumpTo(newOffset.clamp(0.0, afterMaxExtent));
+      debugPrint('✅ Position scroll ajustée: $newOffset');
+    }
+    
+    // 🚀 OPTIMISATION: Déchiffrer "on-demand" les messages qui viennent d'être chargés
+    // (seulement les 5 premiers pour ne pas surcharger)
+    final finalMessages = _conversationProvider.messagesFor(widget.conversationId);
+    if (finalMessages.length > currentMessages.length) {
+      final newStartIndex = currentMessages.length;
+      _decryptOnScroll(finalMessages, newStartIndex);
+    }
+  }
+  
+  // Callback pour l'ajustement différé quand l'utilisateur arrête de scroller
+  VoidCallback? _pendingScrollAdjustment;
+  bool _isListeningToScroll = false;
+  
+  void _onScrollingStateChanged() {
+    if (!_scrollController.hasClients || !mounted) {
+      _removeScrollListener();
+      return;
+    }
+    
+    // Si l'utilisateur a arrêté de scroller et qu'on a un ajustement en attente
+    if (!_scrollController.position.isScrollingNotifier.value && _pendingScrollAdjustment != null) {
+      _removeScrollListener();
+      final adjustment = _pendingScrollAdjustment;
+      _pendingScrollAdjustment = null;
+      
+      // Attendre un court délai pour être sûr que le scroll est vraiment terminé
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && adjustment != null) {
+          adjustment();
+        }
+      });
+    }
+  }
+  
+  void _removeScrollListener() {
+    if (_isListeningToScroll && _scrollController.hasClients) {
+      _scrollController.position.isScrollingNotifier.removeListener(_onScrollingStateChanged);
+      _isListeningToScroll = false;
+    }
+  }
+
   /// Charge les messages plus anciens en préservant la position de scroll (reverse:true)
   Future<void> _loadOlderPreservingOffset() async {
     if (_isLoading || !_hasMoreOlderMessages) {
@@ -380,25 +523,42 @@ class _ConversationScreenState extends State<ConversationScreen> {
       return;
     }
     
-    final before = _scrollController.position.maxScrollExtent;
+    // CORRECTION: Capturer seulement maxScrollExtent au début
+    // L'offset actuel sera capturé juste avant l'ajustement pour tenir compte du scroll continu de l'utilisateur
+    final beforeMaxExtent = _scrollController.position.maxScrollExtent;
     final currentMessages = _conversationProvider.messagesFor(widget.conversationId);
-    debugPrint('🔄 Début chargement - Messages actuels: ${currentMessages.length}, ScrollExtent: $before');
+    debugPrint('🔄 Début chargement - Messages actuels: ${currentMessages.length}, MaxExtent: $beforeMaxExtent');
     
     // 📊 BENCHMARK: Mesurer la pagination complète (scroll)
     final scrollTimer = PerformanceBenchmark.instance.startTimer('conversation_screen_scroll_pagination');
     
+    // CORRECTION: Démarrer l'indicateur de chargement immédiatement
     setState(() => _isLoading = true);
+    
+    // CORRECTION: Délai minimum pour que l'indicateur soit visible (800ms)
+    // Cela permet à l'utilisateur de comprendre ce qui se passe
+    final minimumDisplayTime = Future.delayed(const Duration(milliseconds: 800));
+    
     try {
+      // Charger les messages depuis le serveur
       final hasMore = await _conversationProvider.fetchOlderMessages(
         context,
         widget.conversationId,
         limit: _messagesPerPage,
       );
       
-      PerformanceBenchmark.instance.stopTimer(scrollTimer);
-      
       final newMessages = _conversationProvider.messagesFor(widget.conversationId);
       debugPrint('📄 Chargement terminé - Nouveaux messages: ${newMessages.length - currentMessages.length}, hasMore: $hasMore');
+      
+      // 🚀 OPTIMISATION: Démarrer le déchiffrement en parallèle même si les messages ne sont pas encore visibles
+      // Cela améliore la réactivité globale - déchiffrer tous les nouveaux messages
+      if (newMessages.length > currentMessages.length) {
+        final newStartIndex = currentMessages.length;
+        final newMessagesCount = newMessages.length - currentMessages.length;
+        // Déchiffrer tous les nouveaux messages en arrière-plan sans attendre
+        // Utiliser une version étendue qui déchiffre tous les messages, pas seulement 5
+        _decryptNewMessagesInBackground(newMessages, newStartIndex, newMessagesCount);
+      }
       
       // Arrêter le chargement s'il n'y a plus de messages
       if (!hasMore) {
@@ -406,32 +566,58 @@ class _ConversationScreenState extends State<ConversationScreen> {
         debugPrint('📄 Plus de messages anciens à charger');
       }
       
-      // Préserver la position de scroll après ajout des nouveaux messages
+      // Attendre le délai minimum ET la fin du chargement
+      await minimumDisplayTime;
+      
+      PerformanceBenchmark.instance.stopTimer(scrollTimer);
+      
+      // CORRECTION: Préserver la position de scroll avec reverse:true
+      // Avec reverse:true, quand on ajoute des messages en haut, maxScrollExtent augmente
+      // Il faut ajuster l'offset pour compenser cette augmentation
+      // Utiliser plusieurs callbacks pour s'assurer que le layout est terminé
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_scrollController.hasClients) return;
-        final after = _scrollController.position.maxScrollExtent;
-        final offsetDiff = after - before;
-        debugPrint('📍 Ajustement scroll - Avant: $before, Après: $after, Différence: $offsetDiff');
-        _scrollController.jumpTo(_scrollController.offset + offsetDiff);
-        
-        // 🚀 OPTIMISATION: Déchiffrer "on-demand" les messages qui viennent d'être chargés
-        // (seulement les 5 premiers pour ne pas surcharger)
-        final newMessages = _conversationProvider.messagesFor(widget.conversationId);
-        if (newMessages.length > currentMessages.length) {
-          final newStartIndex = currentMessages.length;
-          _decryptOnScroll(newMessages, newStartIndex);
-        }
+        // Attendre un frame supplémentaire pour que le layout soit stable
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          // Attendre encore un frame pour être sûr que le layout est complètement terminé
+          // Cela évite les sauts brusques lors de l'ajustement
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!_scrollController.hasClients || !mounted) return;
+            _adjustScrollPosition(beforeMaxExtent, currentMessages);
+          });
+        });
       });
     } catch (e) {
       debugPrint('❌ Erreur chargement messages anciens: $e');
+      // Attendre quand même le délai minimum même en cas d'erreur
+      await minimumDisplayTime;
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   void _onMessagesUpdated() {
     // 🚀 CORRECTION: Toujours permettre les mises à jour pour les nouveaux messages WebSocket
     // Même si le déchiffrement initial n'est pas terminé, les nouveaux messages doivent s'afficher
+    
+    // 🔐 CORRECTION: Déchiffrer le dernier message s'il n'est pas encore déchiffré
+    // Cela garantit que le dernier message envoyé est toujours déchiffré, même s'il arrive après
+    // le début du déchiffrement initial
+    final messages = _conversationProvider.messagesFor(widget.conversationId);
+    if (messages.isNotEmpty) {
+      final lastMessage = messages.last;
+      // Vérifier si le dernier message n'est pas déchiffré
+      if ((lastMessage.decryptedText == null || 
+           lastMessage.decryptedText == '[Chiffré]' || 
+           lastMessage.signatureValid != true) && 
+          lastMessage.v2Data != null) {
+        // Déchiffrer le dernier message en arrière-plan (non-bloquant)
+        _decryptMessageUltraFluid(lastMessage, isVisible: true).catchError((e) {
+          debugPrint('⚠️ Erreur déchiffrement dernier message: $e');
+        });
+      }
+    }
     
     // Auto-scroll seulement si l'utilisateur est proche du bas (reverse:true)
     if (_isNearBottom()) {
@@ -540,10 +726,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
     // Le backend vérifie les permissions avant d'envoyer les messages
     
     _conversationProvider.removeListener(_onMessagesUpdated);
+    // Nettoyer le listener de scroll si présent
+    _removeScrollListener();
     _textController.dispose();
     _scrollController.dispose();
     _messageUpdateNotifier.dispose(); // Nettoyer le ValueNotifier
     _typingTimer?.cancel(); // Annuler le timer de frappe
+    _pendingScrollAdjustment = null; // Nettoyer l'ajustement en attente
     super.dispose();
   }
 
@@ -580,137 +769,206 @@ class _ConversationScreenState extends State<ConversationScreen> {
             child: NotificationListener<ScrollNotification>(
               onNotification: _onScrollNotification,
               child: messages.isEmpty && _isLoading
-                  ? const Center(
+                  ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          CircularProgressIndicator(),
-                          SizedBox(height: 16),
+                          CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
                           Text(
-                            'Chargement des messages...',
+                            'Chargement...',
                             style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                               fontSize: 14,
-                              color: Colors.grey,
                             ),
                           ),
                         ],
                       ),
                     )
                   : messages.isEmpty && !_isLoading
-                      ? const Center(
+                      ? Center(
                           child: Padding(
-                            padding: EdgeInsets.all(32.0),
-                            child: Text(
-                              'Aucun message pour le moment.\nCommencez la conversation !',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey,
-                              ),
+                            padding: const EdgeInsets.all(48.0),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.chat_bubble_outline,
+                                  size: 64,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
+                                ),
+                                const SizedBox(height: 24),
+                                Text(
+                                  'Aucun message pour le moment',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Commencez la conversation !',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         )
-                      : ListView.builder(
-                      reverse: true, // Clé anti-jump
-                      controller: _scrollController,
-                      itemCount: messages.length + (_isLoading ? 1 : 0), // +1 pour l'indicateur de chargement
-                      itemBuilder: (_, i) {
-                        // CORRECTION: Gérer l'indicateur de chargement
-                        if (_isLoading && i == messages.length) {
-                          return const Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                          );
-                        }
-                        
-                        final msg = messages[messages.length - 1 - i]; // dernier d'abord
-                        final currentUserId = context.read<AuthProvider>().userId ?? '';
-                        
-                        // Calculer sameAsPrevious et sameAsNext pour l'affichage des vignettes
-                        final sameAsPrevious = i < messages.length - 1 && 
-                            messages[messages.length - 2 - i].senderId == msg.senderId;
-                        final sameAsNext = i > 0 && 
-                            messages[messages.length - i].senderId == msg.senderId;
-                        
-                        // Vérifier si on doit afficher un indicateur de date
-                        final msgDate = DateTime.fromMillisecondsSinceEpoch(msg.timestamp * 1000).toLocal();
-                        final dateOnly = DateTime(msgDate.year, msgDate.month, msgDate.day);
-                        
-                        // Vérifier la date du message précédent pour savoir si on doit afficher l'en-tête de date
-                        DateTime? previousDate;
-                        if (i < messages.length - 1) {
-                          final prevMsg = messages[messages.length - 2 - i];
-                          final prevMsgDate = DateTime.fromMillisecondsSinceEpoch(prevMsg.timestamp * 1000).toLocal();
-                          previousDate = DateTime(prevMsgDate.year, prevMsgDate.month, prevMsgDate.day);
-                        }
-                        
-                        final showDateHeader = previousDate == null || previousDate != dateOnly;
-                        
-                        return Column(
-                    children: [
-                      // Indicateur de date
-                      if (showDateHeader)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Center(
-                            child: Text(
-                              dateOnly.toChatDateHeader(),
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.onSecondary,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
+                      : Stack(
+                      children: [
+                        ListView.builder(
+                          reverse: true, // Clé anti-jump
+                          controller: _scrollController,
+                          itemCount: messages.length,
+                          itemBuilder: (_, i) {
+                            final msg = messages[messages.length - 1 - i]; // dernier d'abord
+                            final currentUserId = context.read<AuthProvider>().userId ?? '';
+                            
+                            // Calculer sameAsPrevious et sameAsNext pour l'affichage des vignettes
+                            final sameAsPrevious = i < messages.length - 1 && 
+                                messages[messages.length - 2 - i].senderId == msg.senderId;
+                            final sameAsNext = i > 0 && 
+                                messages[messages.length - i].senderId == msg.senderId;
+                            
+                            // Vérifier si on doit afficher un indicateur de date
+                            final msgDate = DateTime.fromMillisecondsSinceEpoch(msg.timestamp * 1000).toLocal();
+                            final dateOnly = DateTime(msgDate.year, msgDate.month, msgDate.day);
+                            
+                            // Vérifier la date du message précédent pour savoir si on doit afficher l'en-tête de date
+                            DateTime? previousDate;
+                            if (i < messages.length - 1) {
+                              final prevMsg = messages[messages.length - 2 - i];
+                              final prevMsgDate = DateTime.fromMillisecondsSinceEpoch(prevMsg.timestamp * 1000).toLocal();
+                              previousDate = DateTime(prevMsgDate.year, prevMsgDate.month, prevMsgDate.day);
+                            }
+                            
+                            final showDateHeader = previousDate == null || previousDate != dateOnly;
+                            
+                            return Column(
+                              children: [
+                                // Indicateur de date avec design professionnel
+                                if (showDateHeader)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    child: Center(
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          dateOnly.toChatDateHeader(),
+                                          style: TextStyle(
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            letterSpacing: 0.3,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                
+                                // Message avec ValueListenableBuilder pour mise à jour ultra-granulaire
+                                ValueListenableBuilder<String?>(
+                                  valueListenable: _messageUpdateNotifier,
+                                  builder: (context, updatedMessageId, child) {
+                                    // CORRECTION: Re-lire le message depuis le provider pour avoir la version à jour
+                                    // Cela garantit que signatureValid est toujours à jour
+                                    final updatedMsg = _conversationProvider.messagesFor(widget.conversationId)
+                                        .firstWhere((m) => m.id == msg.id, orElse: () => msg);
+                                    
+                                    return MessageBubble(
+                                      key: ValueKey(updatedMsg.id), // Clé stable
+                                      isMe: updatedMsg.senderId == currentUserId,
+                                      text: updatedMsg.decryptedText ?? '[Chiffré]',
+                                      time: msgDate.toHm(),
+                                      signatureValid: updatedMsg.signatureValid, // CORRECTION: Lire depuis le message mis à jour
+                                      senderInitial: updatedMsg.senderId == currentUserId ? '' : updatedMsg.senderId[0].toUpperCase(),
+                                      senderUsername: context.read<ConversationProvider>().getUsernameForUser(updatedMsg.senderId),
+                                      senderUserId: updatedMsg.senderId,
+                                      conversationId: widget.conversationId,
+                                      sameAsPrevious: sameAsPrevious,
+                                      sameAsNext: sameAsNext,
+                                      maxWidth: context.maxBubbleWidth,
+                                      messageId: updatedMsg.id,
+                                    );
+                                  },
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        // Indicateur de chargement fixe en haut de l'écran avec design professionnel
+                        if (_isLoading)
+                          Positioned(
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 20.0),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Theme.of(context).colorScheme.surface,
+                                    Theme.of(context).colorScheme.surface.withOpacity(0.0),
+                                  ],
+                                ),
+                              ),
+                              alignment: Alignment.center,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      
-                      // Message avec ValueListenableBuilder pour mise à jour ultra-granulaire
-                      ValueListenableBuilder<String?>(
-                        valueListenable: _messageUpdateNotifier,
-                        builder: (context, updatedMessageId, child) {
-                          // CORRECTION: Re-lire le message depuis le provider pour avoir la version à jour
-                          // Cela garantit que signatureValid est toujours à jour
-                          final updatedMsg = _conversationProvider.messagesFor(widget.conversationId)
-                              .firstWhere((m) => m.id == msg.id, orElse: () => msg);
-                          
-                          return MessageBubble(
-                            key: ValueKey(updatedMsg.id), // Clé stable
-                            isMe: updatedMsg.senderId == currentUserId,
-                            text: updatedMsg.decryptedText ?? '[Chiffré]',
-                            time: msgDate.toHm(),
-                            signatureValid: updatedMsg.signatureValid, // CORRECTION: Lire depuis le message mis à jour
-                            senderInitial: updatedMsg.senderId == currentUserId ? '' : updatedMsg.senderId[0].toUpperCase(),
-                            senderUsername: context.read<ConversationProvider>().getUsernameForUser(updatedMsg.senderId),
-                            senderUserId: updatedMsg.senderId,
-                            conversationId: widget.conversationId,
-                            sameAsPrevious: sameAsPrevious,
-                            sameAsNext: sameAsNext,
-                            maxWidth: context.maxBubbleWidth,
-                            messageId: updatedMsg.id,
-                          );
-                        },
-                      ),
-                    ],
-                  );
-                },
-              ),
+                      ],
+                    ),
             ),
           ),
 
-          // Zone de saisie avec SafeArea pour Android
+          // Zone de saisie avec SafeArea pour Android - Design professionnel
           SafeArea(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
-                border: Border(
-                  top: BorderSide(
-                    color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-                    width: 1,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, -2),
                   ),
-                ),
+                ],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -718,35 +976,69 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   // Indicateur de frappe
                   _buildTypingIndicator(),
                   
-                  // Zone de saisie
+                  // Zone de saisie avec design amélioré
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: TextField(
-                          controller: _textController,
-                          onChanged: _onTextChanged,
-                          decoration: InputDecoration(
-                            hintText: 'Tapez votre message...',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(20),
-                              borderSide: BorderSide.none,
-                            ),
-                            filled: true,
-                            fillColor: Theme.of(context).colorScheme.surfaceVariant,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(24),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.03),
+                                blurRadius: 4,
+                                offset: const Offset(0, 1),
+                              ),
+                            ],
                           ),
-                          maxLines: 4,
-                          minLines: 1,
+                          child: TextField(
+                            controller: _textController,
+                            onChanged: _onTextChanged,
+                            decoration: InputDecoration(
+                              hintText: 'Tapez votre message...',
+                              hintStyle: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6),
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
+                              filled: false,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 12,
+                              ),
+                            ),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                            maxLines: 4,
+                            minLines: 1,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      FloatingActionButton(
-                        onPressed: _onSendPressed,
-                        mini: true,
-                        child: const Icon(Icons.send),
+                      const SizedBox(width: 12),
+                      Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: FloatingActionButton(
+                          onPressed: _onSendPressed,
+                          mini: true,
+                          elevation: 0,
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                          child: const Icon(Icons.send, size: 20),
+                        ),
                       ),
                     ],
                   ),

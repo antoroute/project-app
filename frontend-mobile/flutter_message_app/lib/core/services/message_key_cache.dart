@@ -67,7 +67,7 @@ class MessageKeyCache {
         );
         
         // Nettoyer si nécessaire
-        _cleanupIfNeeded();
+        cleanupExpired();
         
       }
 
@@ -215,12 +215,12 @@ class MessageKeyCache {
       ttl: _defaultTtl,
     );
     
-    _cleanupSkippedKeys();
+    cleanupSkippedKeys();
     debugPrint('📦 Skipped key ajoutée: $messageId');
   }
 
-  /// Nettoie les clés expirées
-  void _cleanupIfNeeded() {
+  /// Nettoie les clés expirées (basé sur taille uniquement)
+  void cleanupExpired() {
     if (_cache.length <= _maxCacheSize) return;
     
     final expired = <String>[];
@@ -247,12 +247,43 @@ class MessageKeyCache {
     }
     
     if (expired.isNotEmpty || _cache.length > _maxCacheSize) {
-      debugPrint('🧹 Nettoyage cache: ${expired.length} clés expirées, ${_cache.length} clés restantes');
+      debugPrint('🧹 [MessageKeyCache] Nettoyage cache: ${expired.length} clés expirées, ${_cache.length} clés restantes');
+    }
+  }
+
+  /// Nettoie les clés expirées (basé sur TTL uniquement)
+  void cleanupExpiredByTTL() {
+    final expired = <String>[];
+    
+    for (final entry in _cache.entries) {
+      if (entry.value.isExpired) {
+        expired.add(entry.key);
+      }
+    }
+    
+    for (final key in expired) {
+      _cache.remove(key);
+    }
+    
+    // Même chose pour skipped keys
+    final expiredSkipped = <String>[];
+    for (final entry in _skippedKeys.entries) {
+      if (entry.value.isExpired) {
+        expiredSkipped.add(entry.key);
+      }
+    }
+    
+    for (final key in expiredSkipped) {
+      _skippedKeys.remove(key);
+    }
+    
+    if (expired.isNotEmpty || expiredSkipped.isNotEmpty) {
+      debugPrint('🧹 [MessageKeyCache] Nettoyage TTL: ${expired.length} clés expirées, ${expiredSkipped.length} skipped expirées');
     }
   }
 
   /// Nettoie les skipped keys expirées
-  void _cleanupSkippedKeys() {
+  void cleanupSkippedKeys() {
     final expired = <String>[];
     
     for (final entry in _skippedKeys.entries) {

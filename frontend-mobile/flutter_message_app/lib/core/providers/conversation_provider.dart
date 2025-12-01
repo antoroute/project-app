@@ -38,7 +38,7 @@ class ConversationProvider extends ChangeNotifier {
   final Map<String, List<Message>> _messages = {};
   /// Cache mémoire des messages déchiffrés (session courante uniquement)
   /// ⚠️ IMPORTANT: Ce cache n'est PAS persisté pour des raisons de sécurité
-  final Map<String, String> _decryptedCache = {};
+  final Map<String, _CachedDecryptedText> _decryptedCache = {};
   /// Presence: userId -> online
   final Map<String, bool> _userOnline = <String, bool>{};
   /// Presence spécifique aux conversations: conversationId -> userId -> online
@@ -51,7 +51,8 @@ class ConversationProvider extends ChangeNotifier {
   final Map<String, Set<String>> _typingUsers = <String, Set<String>>{};
   
   /// Cache des pseudos des utilisateurs par userId
-  final Map<String, String> _userUsernames = <String, String>{};
+  /// TTL: 7 jours (les pseudos changent rarement)
+  final Map<String, _CachedUsername> _userUsernames = <String, _CachedUsername>{};
   
   /// 🚀 OPTIMISATION: Batching des notifications pour éviter les freezes
   /// Accumule les notifications et les envoie par batch toutes les 100ms
@@ -83,13 +84,17 @@ class ConversationProvider extends ChangeNotifier {
   
   /// Obtient le username d'un utilisateur depuis le cache
   String getUsernameForUser(String userId) {
-    return _userUsernames[userId] ?? '';
+    final cached = _userUsernames[userId];
+    if (cached != null && !cached.isExpired) {
+      return cached.username;
+    }
+    return '';
   }
   
   /// Met en cache le username d'un utilisateur
   void cacheUsername(String userId, String username) {
     if (username.isNotEmpty) {
-      _userUsernames[userId] = username;
+      _userUsernames[userId] = _CachedUsername(username);
     }
   }
 
@@ -304,16 +309,17 @@ class ConversationProvider extends ChangeNotifier {
     // CORRECTION: Si le message est déjà déchiffré ET signature vérifiée, retourner immédiatement
     if (message.decryptedText != null && message.signatureValid == true) {
       if (!_decryptedCache.containsKey(msgId)) {
-        _decryptedCache[msgId] = message.decryptedText!;
+        _decryptedCache[msgId] = _CachedDecryptedText(message.decryptedText!);
       }
       return message.decryptedText;
     }
     
     // Vérifier si déjà dans le cache mémoire
-    if (_decryptedCache.containsKey(msgId)) {
+    final cached = _decryptedCache[msgId];
+    if (cached != null && !cached.isExpired) {
       // Si le texte est en cache mais signature pas vérifiée, continuer pour vérifier
       if (message.signatureValid == true) {
-        return _decryptedCache[msgId];
+        return cached.text;
       }
       // Sinon, continuer pour vérifier la signature
     }
@@ -327,7 +333,7 @@ class ConversationProvider extends ChangeNotifier {
       // Vérifier que le message a des données V2 pour le déchiffrement
       if (message.v2Data == null) {
         const errorText = '[Pas de données V2]';
-        _decryptedCache[msgId] = errorText;
+        _decryptedCache[msgId] = _CachedDecryptedText(errorText);
         message.decryptedText = errorText;
         return errorText;
       }
@@ -375,7 +381,7 @@ class ConversationProvider extends ChangeNotifier {
       });
       
       // Enregistrer en cache mémoire uniquement (session courante)
-      _decryptedCache[msgId] = decryptedText;
+      _decryptedCache[msgId] = _CachedDecryptedText(decryptedText);
       message.decryptedText = decryptedText;
       
       // CORRECTION: Notifier les listeners pour mettre à jour l'UI
@@ -399,7 +405,7 @@ class ConversationProvider extends ChangeNotifier {
             ? '[📅 Message ancien - Non déchiffrable]' 
             : '[❌ Erreur MAC - Déchiffrement impossible]';
         
-        _decryptedCache[msgId] = errorText;
+        _decryptedCache[msgId] = _CachedDecryptedText(errorText);
         message.decryptedText = errorText;
         return errorText;
       }
@@ -407,7 +413,7 @@ class ConversationProvider extends ChangeNotifier {
       // CORRECTION: Gérer les erreurs de format (messages corrompus)
       if (e.toString().contains('FormatException') || e.toString().contains('Unexpected extension byte')) {
         final errorText = '[📄 Message corrompu - Données invalides]';
-        _decryptedCache[msgId] = errorText;
+        _decryptedCache[msgId] = _CachedDecryptedText(errorText);
         message.decryptedText = errorText;
         return errorText;
       }
@@ -417,7 +423,7 @@ class ConversationProvider extends ChangeNotifier {
           e.toString().contains('is null in messageV2') ||
           e.toString().contains('Structure sender invalide')) {
         final errorText = '[🔧 Message incomplet - Données manquantes]';
-        _decryptedCache[msgId] = errorText;
+        _decryptedCache[msgId] = _CachedDecryptedText(errorText);
         message.decryptedText = errorText;
         return errorText;
       }
@@ -458,7 +464,7 @@ class ConversationProvider extends ChangeNotifier {
               final signatureValid = result['signatureValid'] as bool;
               
               message.signatureValid = signatureValid;
-              _decryptedCache[msgId] = decryptedText;
+              _decryptedCache[msgId] = _CachedDecryptedText(decryptedText);
               message.decryptedText = decryptedText;
               return decryptedText;
             } catch (retryError) {
@@ -469,13 +475,13 @@ class ConversationProvider extends ChangeNotifier {
           debugPrint('❌ Erreur synchronisation clés: $syncError');
         }
         
-        _decryptedCache[msgId] = fallbackErrorText;
+        _decryptedCache[msgId] = _CachedDecryptedText(fallbackErrorText);
         message.decryptedText = fallbackErrorText;
         return fallbackErrorText;
       }
       
       final errorText = '[Erreur déchiffrement: ${e.toString().substring(0, e.toString().length > 50 ? 50 : e.toString().length)}]';
-      _decryptedCache[msgId] = errorText;
+      _decryptedCache[msgId] = _CachedDecryptedText(errorText);
       message.decryptedText = errorText;
       return errorText;
     }
@@ -664,7 +670,10 @@ class ConversationProvider extends ChangeNotifier {
     
     for (final userId in typingUserIds) {
       // Utiliser le cache des pseudos si disponible, sinon utiliser l'ID tronqué
-      final username = _userUsernames[userId] ?? (userId.length > 8 ? '${userId.substring(0, 8)}...' : userId);
+      final cached = _userUsernames[userId];
+      final username = cached != null && !cached.isExpired 
+          ? cached.username 
+          : (userId.length > 8 ? '${userId.substring(0, 8)}...' : userId);
       usernames.add(username);
     }
     
@@ -740,7 +749,7 @@ class ConversationProvider extends ChangeNotifier {
           final memberMap = member as Map<String, dynamic>;
           final userId = memberMap['userId'] as String;
           final username = memberMap['username'] as String;
-          _userUsernames[userId] = username;
+          _userUsernames[userId] = _CachedUsername(username);
           debugPrint('👤 [Usernames] Cached username for $userId: $username');
         }
       }
@@ -843,10 +852,13 @@ class ConversationProvider extends ChangeNotifier {
         for (final msg in display) {
           if (decryptedTexts.containsKey(msg.id)) {
             msg.decryptedText = decryptedTexts[msg.id];
-            _decryptedCache[msg.id] = decryptedTexts[msg.id]!;
-          } else if (_decryptedCache.containsKey(msg.id)) {
-            // Restaurer depuis le cache mémoire (session courante)
-            msg.decryptedText = _decryptedCache[msg.id];
+            _decryptedCache[msg.id] = _CachedDecryptedText(decryptedTexts[msg.id]!);
+          } else {
+            final cached = _decryptedCache[msg.id];
+            if (cached != null && !cached.isExpired) {
+              // Restaurer depuis le cache mémoire (session courante)
+              msg.decryptedText = cached.text;
+            }
           }
         }
         
@@ -994,8 +1006,9 @@ class ConversationProvider extends ChangeNotifier {
                 mergedIds.add(existing.id);
               } else {
                 // Nouveau message depuis la DB
-                if (_decryptedCache.containsKey(localMsg.id)) {
-                  localMsg.decryptedText = _decryptedCache[localMsg.id];
+                final cached = _decryptedCache[localMsg.id];
+                if (cached != null && !cached.isExpired) {
+                  localMsg.decryptedText = cached.text;
                 }
                 mergedMessages.add(localMsg);
                 mergedIds.add(localMsg.id);
@@ -1762,7 +1775,7 @@ class ConversationProvider extends ChangeNotifier {
       });
       
       // Mettre en cache mémoire uniquement (session courante)
-      _decryptedCache[messageId] = decryptedText;
+      _decryptedCache[messageId] = _CachedDecryptedText(decryptedText);
       
       // Ajouter le message et notifier immédiatement pour affichage instantané
       addLocalMessage(msg);
@@ -1858,7 +1871,7 @@ class ConversationProvider extends ChangeNotifier {
       );
       
       // Mettre en cache même en cas d'erreur
-      _decryptedCache[msg.id] = errorText;
+      _decryptedCache[msg.id] = _CachedDecryptedText(errorText);
       
       // Sauvegarder localement si possible (non-bloquant)
       LocalMessageStorage.instance.saveMessage(msg).catchError((saveError) {
@@ -2041,10 +2054,10 @@ class ConversationProvider extends ChangeNotifier {
   Future<String> _getSenderName(String userId) async {
     try {
       // Utiliser le cache des usernames si disponible
-      if (_userUsernames.containsKey(userId)) {
-        final username = _userUsernames[userId]!;
-        debugPrint('👤 [ConversationProvider] Username trouvé dans cache: $username');
-        return username;
+      final cached = _userUsernames[userId];
+      if (cached != null && !cached.isExpired) {
+        debugPrint('👤 [ConversationProvider] Username trouvé dans cache: ${cached.username}');
+        return cached.username;
       }
       
       // Chercher dans les conversations pour trouver le nom
@@ -2058,7 +2071,7 @@ class ConversationProvider extends ChangeNotifier {
               final memberMap = member as Map<String, dynamic>;
               final memberUserId = memberMap['userId'] as String;
               final username = memberMap['username'] as String;
-              _userUsernames[memberUserId] = username;
+              _userUsernames[memberUserId] = _CachedUsername(username);
               
               if (memberUserId == userId) {
                 debugPrint('👤 [ConversationProvider] Username trouvé: $username');
@@ -2079,4 +2092,55 @@ class ConversationProvider extends ChangeNotifier {
     debugPrint('👤 [ConversationProvider] Username non trouvé, utilisation fallback: $fallback');
     return fallback;
   }
+  
+  /// Nettoie tous les caches du provider (appelé par CacheCleanupService)
+  void cleanupCaches() {
+    // Nettoyer _decryptedCache
+    final expiredDecrypted = <String>[];
+    for (final entry in _decryptedCache.entries) {
+      if (entry.value.isExpired) {
+        expiredDecrypted.add(entry.key);
+      }
+    }
+    for (final key in expiredDecrypted) {
+      _decryptedCache.remove(key);
+    }
+    
+    // Nettoyer _userUsernames
+    final expiredUsernames = <String>[];
+    for (final entry in _userUsernames.entries) {
+      if (entry.value.isExpired) {
+        expiredUsernames.add(entry.key);
+      }
+    }
+    for (final key in expiredUsernames) {
+      _userUsernames.remove(key);
+    }
+    
+    if (expiredDecrypted.isNotEmpty || expiredUsernames.isNotEmpty) {
+      debugPrint('🧹 [ConversationProvider] Nettoyage: ${expiredDecrypted.length} messages, ${expiredUsernames.length} usernames');
+    }
+  }
+}
+
+/// Classe pour gérer TTL des messages déchiffrés
+class _CachedDecryptedText {
+  final String text;
+  final DateTime timestamp;
+  static const Duration _ttl = Duration(hours: 24);
+  
+  _CachedDecryptedText(this.text) : timestamp = DateTime.now();
+  
+  bool get isExpired => DateTime.now().difference(timestamp) > _ttl;
+}
+
+/// Classe pour gérer TTL des usernames
+class _CachedUsername {
+  final String username;
+  final DateTime timestamp;
+  static const Duration _ttl = Duration(days: 7);
+  
+  _CachedUsername(this.username) : timestamp = DateTime.now();
+  
+  bool get isExpired => DateTime.now().difference(timestamp) > _ttl;
 }

@@ -259,38 +259,38 @@ class MessageCipherV2 {
     return await PerformanceBenchmark.instance.measureAsync(
       'decryptFast_total',
       () async {
-        // Validation des données V2 avant déchiffrement
-        if (!_validateMessageV2Data(messageV2)) {
-          throw Exception('Données V2 invalides ou incomplètes');
-        }
-        
-        final messageId = messageV2['messageId'] as String;
-        
-        // 🚀 OPTIMISATION: Essayer d'abord de récupérer la message key depuis le cache
+    // Validation des données V2 avant déchiffrement
+    if (!_validateMessageV2Data(messageV2)) {
+      throw Exception('Données V2 invalides ou incomplètes');
+    }
+    
+    final messageId = messageV2['messageId'] as String;
+    
+    // 🚀 OPTIMISATION: Essayer d'abord de récupérer la message key depuis le cache
         final cachedKey = await PerformanceBenchmark.instance.measureAsync(
           'decryptFast_cache_lookup',
           () async => MessageKeyCache.instance.getMessageKey(messageId),
         );
-        
-        if (cachedKey != null) {
+    
+    if (cachedKey != null) {
           // 📊 BENCHMARK: Mesurer le déchiffrement avec cache
           return await PerformanceBenchmark.instance.measureAsync(
             'decryptFast_with_cache',
             () async => await _decryptWithCachedKey(messageId, cachedKey, messageV2),
           );
-        } else {
+    } else {
           // 📊 BENCHMARK: Mesurer la dérivation complète (sans cache)
           return await PerformanceBenchmark.instance.measureAsync(
             'decryptFast_without_cache',
             () async {
-              // Clé pas en cache : dériver normalement
-              // Récupérer l'eph_pub depuis le sender
-              final sender = messageV2['sender'] as Map<String, dynamic>;
-              final ephPubB64 = sender['eph_pub'] as String;
-              
-              if (ephPubB64.isEmpty) {
-                throw Exception('sender.eph_pub is empty in messageV2');
-              }
+      // Clé pas en cache : dériver normalement
+      // Récupérer l'eph_pub depuis le sender
+      final sender = messageV2['sender'] as Map<String, dynamic>;
+      final ephPubB64 = sender['eph_pub'] as String;
+      
+      if (ephPubB64.isEmpty) {
+        throw Exception('sender.eph_pub is empty in messageV2');
+      }
 
               // 🚀 OPTIMISATION: X25519 ECDH dans un Isolate (goulot d'étranglement principal)
               // Extraire les bytes des clés (thread principal)
@@ -321,54 +321,54 @@ class MessageCipherV2 {
               
               // Créer un SecretKey depuis les bytes pour HKDF
               final shared = SecretKey(ecdhResult.sharedSecretBytes!);
-              
-              // Récupérer la salt depuis le payload
-              if (!messageV2.containsKey('salt')) {
-                throw Exception('salt is required in messageV2');
-              }
-              final salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
+      
+      // Récupérer la salt depuis le payload
+      if (!messageV2.containsKey('salt')) {
+        throw Exception('salt is required in messageV2');
+      }
+      final salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
 
               // 📊 BENCHMARK: Mesurer HKDF (reste sur thread principal pour l'instant)
               final kekBytes = await PerformanceBenchmark.instance.measureAsync(
                 'decryptFast_hkdf',
                 () async {
-                  final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
-                  final kek = await _hkdf.deriveKey(
+      final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
+      final kek = await _hkdf.deriveKey(
                     secretKey: shared,
-                    nonce: salt,
-                    info: utf8.encode(infoData),
-                  );
+        nonce: salt,
+        info: utf8.encode(infoData),
+      );
                   return Uint8List.fromList(await kek.extractBytes());
                 },
               );
 
-              // Récupérer les recipients
-              final recipients = messageV2['recipients'] as List<dynamic>;
-              if (recipients.isEmpty) {
-                throw Exception('No recipients found in messageV2');
-              }
-              
-              final mine = recipients.firstWhere(
-                (w) => w['userId'] == myUserId && w['deviceId'] == myDeviceId,
-                orElse: () => throw Exception('No wrap for this device'),
-              );
+      // Récupérer les recipients
+      final recipients = messageV2['recipients'] as List<dynamic>;
+      if (recipients.isEmpty) {
+        throw Exception('No recipients found in messageV2');
+      }
+      
+      final mine = recipients.firstWhere(
+        (w) => w['userId'] == myUserId && w['deviceId'] == myDeviceId,
+        orElse: () => throw Exception('No wrap for this device'),
+      );
 
               // 📊 BENCHMARK: Mesurer AES-GCM unwrap
               final mkBytes = await PerformanceBenchmark.instance.measureAsync(
                 'decryptFast_aes_unwrap',
                 () async {
-                  final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
-                  final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
+      final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
+      final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
                   final macLen = 16;
-                  final cipherLen = wrapBytes.length - macLen;
-                  final wrapBox = SecretBox(
-                    wrapBytes.sublist(0, cipherLen),
-                    nonce: wrapNonce,
-                    mac: Mac(wrapBytes.sublist(cipherLen)),
-                  );
+      final cipherLen = wrapBytes.length - macLen;
+      final wrapBox = SecretBox(
+        wrapBytes.sublist(0, cipherLen),
+        nonce: wrapNonce,
+        mac: Mac(wrapBytes.sublist(cipherLen)),
+      );
                   final result = await _aead.decrypt(
-                    wrapBox,
-                    secretKey: SecretKey(kekBytes),
+        wrapBox,
+        secretKey: SecretKey(kekBytes),
                   );
                   return Uint8List.fromList(result);
                 },
@@ -400,42 +400,42 @@ class MessageCipherV2 {
     return await PerformanceBenchmark.instance.measureAsync(
       'decryptFast_aes_decrypt',
       () async {
-        // decrypt content avec validation Base64 (SANS vérification de signature)
-        String ivB64 = messageV2['iv'] as String;
-        String ctB64 = messageV2['ciphertext'] as String;
-        
-        // Validation et nettoyage Base64
-        ivB64 = _cleanBase64(ivB64);
-        ctB64 = _cleanBase64(ctB64);
-        
-        final iv = base64.decode(ivB64);
-        final ct = base64.decode(ctB64);
-        final macLen2 = 16;
-        
-        // CORRECTION: Validation pour éviter RangeError
-        if (ct.length < macLen2) {
-          throw Exception('Ciphertext trop court: ${ct.length} < $macLen2');
-        }
-        
-        final ctLen = ct.length - macLen2;
-        if (ctLen < 0) {
-          throw Exception('Longueur ciphertext invalide: $ctLen');
-        }
-        
-        final contentBox = SecretBox(
-          ct.sublist(0, ctLen),
-          nonce: iv,
-          mac: Mac(ct.sublist(ctLen)),
-        );
-        final clear = await _aead.decrypt(
-          contentBox,
-          secretKey: SecretKey(mkBytes),
-        );
-        
-        return {
-          'decryptedText': Uint8List.fromList(clear),
-          'signatureValid': false, // Marqué comme non vérifié pour le mode rapide
-        };
+    // decrypt content avec validation Base64 (SANS vérification de signature)
+    String ivB64 = messageV2['iv'] as String;
+    String ctB64 = messageV2['ciphertext'] as String;
+    
+    // Validation et nettoyage Base64
+    ivB64 = _cleanBase64(ivB64);
+    ctB64 = _cleanBase64(ctB64);
+    
+    final iv = base64.decode(ivB64);
+    final ct = base64.decode(ctB64);
+    final macLen2 = 16;
+    
+    // CORRECTION: Validation pour éviter RangeError
+    if (ct.length < macLen2) {
+      throw Exception('Ciphertext trop court: ${ct.length} < $macLen2');
+    }
+    
+    final ctLen = ct.length - macLen2;
+    if (ctLen < 0) {
+      throw Exception('Longueur ciphertext invalide: $ctLen');
+    }
+    
+    final contentBox = SecretBox(
+      ct.sublist(0, ctLen),
+      nonce: iv,
+      mac: Mac(ct.sublist(ctLen)),
+    );
+    final clear = await _aead.decrypt(
+      contentBox,
+      secretKey: SecretKey(mkBytes),
+    );
+    
+    return {
+      'decryptedText': Uint8List.fromList(clear),
+      'signatureValid': false, // Marqué comme non vérifié pour le mode rapide
+    };
       },
     );
   }
