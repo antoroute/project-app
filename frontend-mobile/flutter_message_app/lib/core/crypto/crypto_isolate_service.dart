@@ -13,10 +13,7 @@ class CryptoIsolateService {
   Isolate? _isolate;
   SendPort? _sendPort;
   ReceivePort? _resultPort;
-  // Map pour stocker les completers de tous les types de tâches
-  final Map<String, Completer<dynamic>> _pendingTasks = {};
-  // Map pour stocker le type de chaque tâche (pour désérialiser correctement)
-  final Map<String, String> _taskTypes = {};
+  final Map<String, Completer<X25519EcdhResult>> _pendingTasks = {};
   bool _isDisposed = false;
   
   StreamSubscription<dynamic>? _resultSubscription;
@@ -58,33 +55,23 @@ class CryptoIsolateService {
         final taskId = message['taskId'] as String?;
         if (taskId != null) {
           debugPrint('📥 [CryptoIsolate] Réception résultat pour tâche: $taskId');
-          final completer = _pendingTasks[taskId];
-          
-          // Si le completer n'existe pas encore, c'est une race condition
-          // On va le traiter de manière asynchrone après un court délai
-          if (completer == null) {
-            debugPrint('⚠️ [CryptoIsolate] Completer pas encore enregistré pour $taskId, traitement différé...');
-            // Traiter de manière asynchrone après un court délai
-            Future.delayed(const Duration(milliseconds: 50), () {
-              final retryCompleter = _pendingTasks[taskId];
-              final retryTaskType = _taskTypes[taskId];
-              if (retryCompleter != null && !retryCompleter.isCompleted) {
-                debugPrint('✅ [CryptoIsolate] Completer trouvé après délai pour $taskId');
-                _pendingTasks.remove(taskId);
-                _taskTypes.remove(taskId);
-                _processResult(message, taskId, retryCompleter, retryTaskType);
-              } else {
-                debugPrint('❌ [CryptoIsolate] Completer toujours introuvable après délai pour $taskId');
+          final completer = _pendingTasks.remove(taskId);
+          if (completer != null && !completer.isCompleted) {
+            if (message['error'] != null) {
+              debugPrint('❌ [CryptoIsolate] Erreur pour tâche $taskId: ${message['error']}');
+              completer.completeError(Exception(message['error']));
+            } else {
+              try {
+                completer.complete(X25519EcdhResult.fromJson(message));
+                debugPrint('✅ [CryptoIsolate] Tâche $taskId complétée avec succès');
+              } catch (e) {
+                debugPrint('❌ [CryptoIsolate] Erreur parsing résultat pour $taskId: $e');
+                completer.completeError(e);
               }
-            });
-            return;
+            }
+          } else {
+            debugPrint('⚠️ [CryptoIsolate] Aucun completer trouvé pour tâche: $taskId');
           }
-          
-          // Retirer de la map seulement après avoir trouvé le completer
-          _pendingTasks.remove(taskId);
-          final actualTaskType = _taskTypes.remove(taskId);
-          
-          _processResult(message, taskId, completer, actualTaskType);
         }
       }
     });
@@ -105,52 +92,6 @@ class CryptoIsolateService {
     _isolate!.addOnExitListener(_resultPort!.sendPort);
   }
   
-  /// Traite un résultat reçu de l'Isolate
-  void _processResult(Map<String, dynamic> message, String taskId, Completer completer, String? taskType) {
-    if (completer.isCompleted) {
-      debugPrint('⚠️ [CryptoIsolate] Completer déjà complété pour $taskId');
-      return;
-    }
-    
-    if (message['error'] != null) {
-      debugPrint('❌ [CryptoIsolate] Erreur pour tâche $taskId: ${message['error']}');
-      completer.completeError(Exception(message['error']));
-      return;
-    }
-    
-    try {
-      // Désérialiser selon le type de tâche
-      dynamic result;
-      if (taskType == 'x25519_ecdh') {
-        result = X25519EcdhResult.fromJson(message);
-        // Validation : si sharedSecretBytes est null, c'est une erreur
-        if (result is X25519EcdhResult && result.sharedSecretBytes == null) {
-          throw Exception('X25519 ECDH returned null shared secret (no error field)');
-        }
-      } else if (taskType == 'content_decrypt') {
-        result = ContentDecryptResult.fromJson(message);
-        // Validation : si decryptedTextBytesB64 est null, c'est une erreur
-        if (result is ContentDecryptResult && result.decryptedTextBytesB64 == null) {
-          throw Exception('ContentDecrypt returned null decrypted text (no error field)');
-        }
-      } else if (taskType == 'full_decrypt') {
-        result = FullDecryptResult.fromJson(message);
-        // Validation : si decryptedTextBytesB64 est null, c'est une erreur
-        if (result is FullDecryptResult && result.decryptedTextBytesB64 == null) {
-          throw Exception('FullDecrypt returned null decrypted text (no error field)');
-        }
-      } else {
-        throw Exception('Type de tâche inconnu ou null: $taskType');
-      }
-      
-      completer.complete(result);
-      debugPrint('✅ [CryptoIsolate] Tâche $taskId complétée avec succès');
-    } catch (e) {
-      debugPrint('❌ [CryptoIsolate] Erreur parsing résultat pour $taskId: $e');
-      completer.completeError(e);
-    }
-  }
-  
   /// Exécute une tâche X25519 ECDH dans l'Isolate
   Future<X25519EcdhResult> executeX25519Ecdh(X25519EcdhTask task) async {
     await _ensureStarted();
@@ -161,13 +102,11 @@ class CryptoIsolateService {
     
     final completer = Completer<X25519EcdhResult>();
     _pendingTasks[task.taskId] = completer;
-    _taskTypes[task.taskId] = 'x25519_ecdh';
     
     // Timeout de sécurité (60 secondes - X25519 peut être lent sur mobile)
     Timer(const Duration(seconds: 60), () {
       if (_pendingTasks.containsKey(task.taskId)) {
         _pendingTasks.remove(task.taskId);
-        _taskTypes.remove(task.taskId);
         if (!completer.isCompleted) {
           completer.completeError(TimeoutException('X25519 ECDH task timeout after 60s'));
         }
@@ -178,72 +117,6 @@ class CryptoIsolateService {
     
     _sendPort!.send({
       'type': 'x25519_ecdh',
-      'data': task.toJson(),
-    });
-    
-    return completer.future;
-  }
-  
-  /// Exécute un déchiffrement de contenu uniquement (avec cache) dans l'Isolate
-  Future<ContentDecryptResult> executeContentDecrypt(ContentDecryptTask task) async {
-    await _ensureStarted();
-    
-    if (_isDisposed) {
-      throw Exception('Service disposed');
-    }
-    
-    final completer = Completer<ContentDecryptResult>();
-    _pendingTasks[task.taskId] = completer;
-    _taskTypes[task.taskId] = 'content_decrypt';
-    
-    // Timeout de sécurité (30 secondes - plus rapide, seulement AES)
-    Timer(const Duration(seconds: 30), () {
-      if (_pendingTasks.containsKey(task.taskId)) {
-        _pendingTasks.remove(task.taskId);
-        _taskTypes.remove(task.taskId);
-        if (!completer.isCompleted) {
-          completer.completeError(TimeoutException('Content decrypt task timeout after 30s'));
-        }
-      }
-    });
-    
-    debugPrint('📤 [CryptoIsolate] Envoi tâche ContentDecrypt: ${task.taskId}');
-    
-    _sendPort!.send({
-      'type': 'content_decrypt',
-      'data': task.toJson(),
-    });
-    
-    return completer.future;
-  }
-  
-  /// Exécute un déchiffrement complet (sans cache) dans l'Isolate
-  Future<FullDecryptResult> executeFullDecrypt(FullDecryptTask task) async {
-    await _ensureStarted();
-    
-    if (_isDisposed) {
-      throw Exception('Service disposed');
-    }
-    
-    final completer = Completer<FullDecryptResult>();
-    _pendingTasks[task.taskId] = completer;
-    _taskTypes[task.taskId] = 'full_decrypt';
-    
-    // Timeout de sécurité (60 secondes - opération complète)
-    Timer(const Duration(seconds: 60), () {
-      if (_pendingTasks.containsKey(task.taskId)) {
-        _pendingTasks.remove(task.taskId);
-        _taskTypes.remove(task.taskId);
-        if (!completer.isCompleted) {
-          completer.completeError(TimeoutException('Full decrypt task timeout after 60s'));
-        }
-      }
-    });
-    
-    debugPrint('📤 [CryptoIsolate] Envoi tâche FullDecrypt: ${task.taskId}');
-    
-    _sendPort!.send({
-      'type': 'full_decrypt',
       'data': task.toJson(),
     });
     
@@ -261,7 +134,6 @@ class CryptoIsolateService {
       completer.completeError(Exception('Service disposed'));
     }
     _pendingTasks.clear();
-    _taskTypes.clear();
     
     if (_sendPort != null) {
       _sendPort!.send('dispose');
