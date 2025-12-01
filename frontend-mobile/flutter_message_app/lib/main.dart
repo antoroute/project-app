@@ -12,7 +12,6 @@ import 'core/services/message_queue_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/global_presence_service.dart';
 import 'core/services/notification_badge_service.dart';
-import 'core/services/cache_cleanup_service.dart';
 import 'core/crypto/key_manager_final.dart';
 import 'core/crypto/crypto_isolate_service.dart';
 import 'ui/screens/home_screen.dart';
@@ -33,9 +32,6 @@ Future<void> main() async {
   final authProvider = AuthProvider();
   await authProvider.tryAutoLogin();
 
-  // 🧹 OPTIMISATION: Démarrer le nettoyage automatique des caches
-  CacheCleanupService.instance.start();
-
   runApp(
     MultiProvider(
       providers: [
@@ -44,12 +40,7 @@ Future<void> main() async {
           create: (context) => GroupProvider(context.read<AuthProvider>()),
         ),
         ChangeNotifierProvider<ConversationProvider>(
-          create: (context) {
-            final provider = ConversationProvider(context.read<AuthProvider>());
-            // Enregistrer le provider dans le service de nettoyage
-            CacheCleanupService.instance.registerConversationProvider(provider);
-            return provider;
-          },
+          create: (context) => ConversationProvider(context.read<AuthProvider>()),
         ),
         ChangeNotifierProvider<NotificationBadgeService>.value(
           value: NotificationBadgeService(),
@@ -84,9 +75,6 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
     WebSocketHeartbeatService().stop();
     NetworkMonitorService().dispose();
     MessageQueueService().dispose();
-    
-    // 🧹 OPTIMISATION: Arrêter le nettoyage automatique des caches
-    CacheCleanupService.instance.stop();
     
     // 🚀 OPTIMISATION: Nettoyer l'Isolate crypto à la fermeture de l'app
     CryptoIsolateService.instance.dispose();

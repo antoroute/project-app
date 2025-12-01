@@ -142,27 +142,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
       final decryptTimer = PerformanceBenchmark.instance.startTimer('conversation_screen_decrypt_initial');
       
       // 3) Déchiffrement progressif en arrière-plan (non-bloquant)
-      // CORRECTION: Attendre un court délai pour s'assurer que tous les messages sont chargés
-      // (notamment ceux qui arrivent depuis la synchronisation serveur)
-      await Future.delayed(const Duration(milliseconds: 100));
-      
-      // Relire les messages au cas où de nouveaux seraient arrivés
-      final finalMessages = _conversationProvider.messagesFor(widget.conversationId);
-      if (finalMessages.isNotEmpty) {
-        _startProgressiveDecryption();
-        
-        // CORRECTION: S'assurer que le dernier message est déchiffré
-        // (au cas où il serait arrivé après le début du déchiffrement)
-        final lastMessage = finalMessages.last;
-        if ((lastMessage.decryptedText == null || 
-             lastMessage.decryptedText == '[Chiffré]' || 
-             lastMessage.signatureValid != true) && 
-            lastMessage.v2Data != null) {
-          _decryptMessageUltraFluid(lastMessage, isVisible: true).catchError((e) {
-            debugPrint('⚠️ Erreur déchiffrement dernier message initial: $e');
-          });
-        }
-      }
+      _startProgressiveDecryption();
       
       // Attendre que les 5 premiers messages visibles soient déchiffrés
       await Future.delayed(const Duration(milliseconds: 500));
@@ -251,11 +231,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
       if (!mounted) break;
       
       // Déchiffrer si pas encore déchiffré OU si signature pas vérifiée
-      // CORRECTION: Vérifier aussi si le texte est "[Chiffré]" (message non déchiffré)
-      if ((msg.decryptedText == null || 
-           msg.decryptedText == '[Chiffré]' || 
-           msg.signatureValid != true) && 
-          msg.v2Data != null) {
+      if ((msg.decryptedText == null || msg.signatureValid != true) && msg.v2Data != null) {
         try {
           debugPrint('🔐 [Visible] Déchiffrement séquentiel message ${i + 1}/${messages.length}: ${msg.id}');
           
@@ -600,24 +576,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void _onMessagesUpdated() {
     // 🚀 CORRECTION: Toujours permettre les mises à jour pour les nouveaux messages WebSocket
     // Même si le déchiffrement initial n'est pas terminé, les nouveaux messages doivent s'afficher
-    
-    // 🔐 CORRECTION: Déchiffrer le dernier message s'il n'est pas encore déchiffré
-    // Cela garantit que le dernier message envoyé est toujours déchiffré, même s'il arrive après
-    // le début du déchiffrement initial
-    final messages = _conversationProvider.messagesFor(widget.conversationId);
-    if (messages.isNotEmpty) {
-      final lastMessage = messages.last;
-      // Vérifier si le dernier message n'est pas déchiffré
-      if ((lastMessage.decryptedText == null || 
-           lastMessage.decryptedText == '[Chiffré]' || 
-           lastMessage.signatureValid != true) && 
-          lastMessage.v2Data != null) {
-        // Déchiffrer le dernier message en arrière-plan (non-bloquant)
-        _decryptMessageUltraFluid(lastMessage, isVisible: true).catchError((e) {
-          debugPrint('⚠️ Erreur déchiffrement dernier message: $e');
-        });
-      }
-    }
     
     // Auto-scroll seulement si l'utilisateur est proche du bas (reverse:true)
     if (_isNearBottom()) {

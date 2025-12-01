@@ -240,22 +240,6 @@ class KeyManagerFinal {
   void markKeysRepublished() {
     // KeyManagerFinal n'a pas besoin de cette fonctionnalité
   }
-  
-  /// Nettoie les caches de clés (pour libérer la mémoire)
-  /// Note: Les caches sont persistants pendant la session, mais peuvent être nettoyés
-  /// si nécessaire pour libérer de la mémoire
-  void cleanupCache() {
-    // Les caches de KeyManagerFinal sont petits et ne nécessitent pas de nettoyage automatique
-    // car ils contiennent uniquement les clés actives de la session courante
-    // Cependant, on peut nettoyer les caches si on veut libérer de la mémoire
-    // (mais cela nécessitera de reconstruire les clés au prochain accès)
-    // Pour l'instant, on ne nettoie pas automatiquement car les clés sont fréquemment utilisées
-    debugPrint('🧹 [KeyManagerFinal] Nettoyage cache: ${_ed25519Cache.length} clés Ed25519, ${_x25519Cache.length} clés X25519');
-    // Optionnel: vider les caches si nécessaire
-    // _ed25519Cache.clear();
-    // _x25519Cache.clear();
-    // _globalKeyCache.clear();
-  }
 
   /// Migration depuis les anciens KeyManagers
   /// 
