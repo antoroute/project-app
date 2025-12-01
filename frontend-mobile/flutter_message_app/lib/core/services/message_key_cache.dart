@@ -6,6 +6,7 @@ import '../crypto/key_manager_final.dart';
 import '../services/key_directory_service.dart';
 import '../crypto/crypto_isolate_service.dart';
 import '../crypto/crypto_isolate_data.dart';
+import 'persistent_message_key_cache.dart';
 
 /// Cache de message keys dérivées pour optimisation du déchiffrement
 /// 
@@ -44,13 +45,25 @@ class MessageKeyCache {
     required KeyDirectoryService keyDirectory,
   }) async {
     try {
-      // Vérifier si déjà en cache
+      // 1. Vérifier cache mémoire d'abord
       final cached = _cache[messageId];
       if (cached != null && !cached.isExpired) {
         return cached.key;
       }
-
-      // Dériver la message key
+      
+      // 2. Vérifier cache persistant
+      final persistentKey = await PersistentMessageKeyCache.instance.getMessageKey(messageId);
+      if (persistentKey != null) {
+        // Mettre en cache mémoire aussi
+        _cache[messageId] = _CachedMessageKey(
+          key: persistentKey,
+          timestamp: DateTime.now(),
+          ttl: _defaultTtl,
+        );
+        return persistentKey;
+      }
+      
+      // 3. Dériver la message key (code existant)
       final messageKey = await _deriveMessageKey(
         groupId: groupId,
         myUserId: myUserId,
@@ -59,16 +72,30 @@ class MessageKeyCache {
       );
 
       if (messageKey != null) {
-        // Mettre en cache
+        // 4. Mettre en cache mémoire
         _cache[messageId] = _CachedMessageKey(
           key: messageKey,
           timestamp: DateTime.now(),
           ttl: _defaultTtl,
         );
         
+        // 5. Sauvegarder dans cache persistant (non-bloquant)
+        final sender = messageV2['sender'] as Map<String, dynamic>?;
+        final derivedFromDevice = sender?['deviceId'] as String?;
+        
+        PersistentMessageKeyCache.instance.saveMessageKey(
+          messageId: messageId,
+          groupId: groupId,
+          userId: myUserId,
+          deviceId: myDeviceId,
+          messageKey: messageKey,
+          derivedFromDevice: derivedFromDevice,
+        ).catchError((e) {
+          debugPrint('⚠️ Erreur sauvegarde cache persistant: $e');
+        });
+        
         // Nettoyer si nécessaire
         _cleanupIfNeeded();
-        
       }
 
       return messageKey;

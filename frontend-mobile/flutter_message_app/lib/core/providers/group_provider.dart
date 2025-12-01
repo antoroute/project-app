@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/models/group_info.dart';
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
+import 'package:flutter_message_app/core/providers/conversation_provider.dart';
 import 'package:flutter_message_app/core/services/api_service.dart';
 import 'package:flutter_message_app/core/services/websocket_service.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/notification_badge_service.dart';
+import 'package:flutter_message_app/core/services/persistent_message_key_cache.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 
 /// Gère les opérations liées aux groupes et aux demandes de jointure.
@@ -262,11 +265,11 @@ class GroupProvider extends ChangeNotifier {
   }
 
   /// Révoquer un device pour le groupe
-  Future<void> revokeMyDevice(String groupId, String deviceId) async {
+  Future<void> revokeMyDevice(String groupId, String deviceId, {BuildContext? context}) async {
     try {
       await _apiService.revokeGroupDevice(groupId: groupId, deviceId: deviceId);
-      // CORRECTION: Rafraîchir depuis le serveur au lieu de supprimer localement
-      // Cela garantit que la liste est à jour et reflète le statut 'revoked' si nécessaire
+      
+      // Rafraîchir depuis le serveur
       final myUserId = _authProvider.userId;
       if (myUserId != null) {
         await fetchMyDevices(groupId, myUserId);
@@ -275,6 +278,21 @@ class GroupProvider extends ChangeNotifier {
         _myDevices.removeWhere((d) => d['deviceId'] == deviceId);
         notifyListeners();
       }
+      
+      // Invalider les caches
+      // 1. Cache group keys (via ConversationProvider si disponible)
+      if (context != null) {
+        try {
+          final conversationProvider = context.read<ConversationProvider>();
+          await conversationProvider.keyDirectory.invalidateDeviceKeys(groupId, deviceId);
+        } catch (e) {
+          debugPrint('⚠️ Erreur invalidation group keys: $e');
+        }
+      }
+      
+      // 2. Cache message keys
+      await PersistentMessageKeyCache.instance.invalidateKeysForDevice(groupId, deviceId);
+      
     } catch (e) {
       debugPrint('❌ GroupProvider.revokeMyDevice error: $e');
       rethrow;

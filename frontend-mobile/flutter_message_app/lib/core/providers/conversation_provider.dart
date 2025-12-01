@@ -14,6 +14,7 @@ import 'package:flutter_message_app/core/services/notification_badge_service.dar
 import 'package:flutter_message_app/core/services/global_presence_service.dart';
 import 'package:flutter_message_app/core/services/local_message_storage.dart';
 import 'package:flutter_message_app/core/services/message_key_cache.dart';
+import 'package:flutter_message_app/core/services/persistent_message_key_cache.dart';
 import 'package:flutter_message_app/core/services/performance_benchmark.dart';
 import 'package:flutter_message_app/core/services/navigation_tracker_service.dart';
 import 'dart:typed_data';
@@ -510,6 +511,15 @@ class ConversationProvider extends ChangeNotifier {
 
   /// Getter pour accéder au service de clés de groupe
   KeyDirectoryService get keyDirectory => _keyDirectory;
+  
+  /// Invalide les caches lors de révocation device
+  Future<void> invalidateCachesForDevice(String groupId, String deviceId) async {
+    // Invalider group keys
+    await _keyDirectory.invalidateDeviceKeys(groupId, deviceId);
+    
+    // Invalider message keys
+    await PersistentMessageKeyCache.instance.invalidateKeysForDevice(groupId, deviceId);
+  }
 
   /// Pré-charge les clés de groupe pour améliorer les performances de déchiffrement
   Future<void> preloadGroupKeys(String conversationId) async {

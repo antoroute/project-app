@@ -12,6 +12,7 @@ import 'core/services/message_queue_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/global_presence_service.dart';
 import 'core/services/notification_badge_service.dart';
+import 'core/services/persistent_message_key_cache.dart';
 import 'core/crypto/key_manager_final.dart';
 import 'core/crypto/crypto_isolate_service.dart';
 import 'ui/screens/home_screen.dart';
@@ -75,6 +76,9 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
     WebSocketHeartbeatService().stop();
     NetworkMonitorService().dispose();
     MessageQueueService().dispose();
+    
+    // Arrêter le nettoyage périodique
+    PersistentMessageKeyCache.instance.stopPeriodicCleanup();
     
     // 🚀 OPTIMISATION: Nettoyer l'Isolate crypto à la fermeture de l'app
     CryptoIsolateService.instance.dispose();
@@ -149,7 +153,33 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
         
         // Initialiser les services
         _initializeServices(context);
+        
+        // Nettoyer les caches expirés au démarrage
+        _cleanupExpiredCaches(context);
+        
+        // Démarrer le nettoyage périodique
+        PersistentMessageKeyCache.instance.startPeriodicCleanup();
       }
+  }
+  
+  /// Nettoie les caches expirés au démarrage
+  Future<void> _cleanupExpiredCaches(BuildContext context) async {
+    try {
+      // Nettoyer message keys
+      await PersistentMessageKeyCache.instance.cleanupExpiredKeys();
+      
+      // Nettoyer group keys (via ConversationProvider si disponible)
+      try {
+        final conversationProvider = context.read<ConversationProvider>();
+        await conversationProvider.keyDirectory.cleanupExpiredKeys();
+      } catch (e) {
+        debugPrint('⚠️ Erreur nettoyage group keys: $e');
+      }
+      
+      debugPrint('✅ Nettoyage caches expirés terminé');
+    } catch (e) {
+      debugPrint('⚠️ Erreur nettoyage caches: $e');
+    }
   }
   
   Future<void> _initializeServices(BuildContext context) async {

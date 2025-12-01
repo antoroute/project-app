@@ -21,13 +21,16 @@ class LocalMessageStorage {
   static final LocalMessageStorage instance = LocalMessageStorage._internal();
 
   static const String _dbName = 'messages_encrypted.db';
-  static const int _dbVersion = 2; // Version 2 : ajout de signature_valid
+  static const int _dbVersion = 3; // Version 3 : ajout des tables de cache persistant des clés
   
   Database? _database;
   bool _isAvailable = false;
   bool _initializationAttempted = false;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   static const String _dbKeyName = 'local_db_encryption_key';
+  
+  /// Expose la base de données pour les services de cache (accès interne uniquement)
+  Database? get database => _database;
 
   /// Vérifie si sqflite est disponible sur cette plateforme
   bool get isAvailable => _isAvailable;
@@ -114,6 +117,60 @@ class LocalMessageStorage {
       )
     ''');
     
+    // Table pour message keys cache
+    await db.execute('''
+      CREATE TABLE message_keys_cache (
+        message_id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        encrypted_key TEXT NOT NULL,
+        nonce TEXT NOT NULL,
+        mac TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        derived_from_device TEXT
+      )
+    ''');
+    
+    await db.execute('''
+      CREATE INDEX idx_message_keys_group_device 
+      ON message_keys_cache(group_id, device_id)
+    ''');
+    
+    await db.execute('''
+      CREATE INDEX idx_message_keys_expires 
+      ON message_keys_cache(expires_at)
+    ''');
+    
+    // Table pour group keys cache
+    await db.execute('''
+      CREATE TABLE group_keys_cache (
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        pk_kem TEXT NOT NULL,
+        pk_sig TEXT NOT NULL,
+        fingerprint_kem TEXT NOT NULL,
+        fingerprint_sig TEXT NOT NULL,
+        key_version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        cached_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, user_id, device_id)
+      )
+    ''');
+    
+    await db.execute('''
+      CREATE INDEX idx_group_keys_group 
+      ON group_keys_cache(group_id)
+    ''');
+    
+    await db.execute('''
+      CREATE INDEX idx_group_keys_expires 
+      ON group_keys_cache(expires_at)
+    ''');
+    
     debugPrint('📦 Tables créées dans LocalMessageStorage');
   }
 
@@ -132,6 +189,69 @@ class LocalMessageStorage {
       } catch (e) {
         // La colonne existe peut-être déjà
         debugPrint('⚠️ Erreur migration v2 (colonne peut-être déjà présente): $e');
+      }
+    }
+    
+    // Migration vers version 3 : ajout des tables de cache persistant des clés
+    if (oldVersion < 3) {
+      try {
+        // Table pour message keys cache
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS message_keys_cache (
+            message_id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            encrypted_key TEXT NOT NULL,
+            nonce TEXT NOT NULL,
+            mac TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            derived_from_device TEXT
+          )
+        ''');
+        
+        await db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_message_keys_group_device 
+          ON message_keys_cache(group_id, device_id)
+        ''');
+        
+        await db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_message_keys_expires 
+          ON message_keys_cache(expires_at)
+        ''');
+        
+        // Table pour group keys cache
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS group_keys_cache (
+            group_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            pk_kem TEXT NOT NULL,
+            pk_sig TEXT NOT NULL,
+            fingerprint_kem TEXT NOT NULL,
+            fingerprint_sig TEXT NOT NULL,
+            key_version INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            cached_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            PRIMARY KEY (group_id, user_id, device_id)
+          )
+        ''');
+        
+        await db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_group_keys_group 
+          ON group_keys_cache(group_id)
+        ''');
+        
+        await db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_group_keys_expires 
+          ON group_keys_cache(expires_at)
+        ''');
+        
+        debugPrint('✅ Migration v3 : tables de cache ajoutées');
+      } catch (e) {
+        debugPrint('⚠️ Erreur migration v3: $e');
       }
     }
   }

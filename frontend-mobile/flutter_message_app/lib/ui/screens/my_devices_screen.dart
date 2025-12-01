@@ -80,17 +80,8 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
                               if (ok == true) {
                                 // CORRECTION: Rafraîchir les données après révocation
                                 // revokeMyDevice appelle maintenant fetchMyDevices qui met à jour la liste
-                                await group.revokeMyDevice(widget.groupId, d['deviceId'] as String);
-                                
-                                // CORRECTION CRITIQUE: Invalider le cache des clés pour que les autres devices
-                                // ne puissent plus utiliser les clés du device révoqué
-                                try {
-                                  final conversationProvider = context.read<ConversationProvider>();
-                                  conversationProvider.keyDirectory.invalidateCache(widget.groupId);
-                                } catch (e) {
-                                  // Si ConversationProvider n'est pas disponible, ce n'est pas critique
-                                  // Le cache sera invalidé lors du prochain fetchGroupDevices
-                                }
+                                // et invalide automatiquement les caches
+                                await group.revokeMyDevice(widget.groupId, d['deviceId'] as String, context: context);
                                 
                                 // Le notifyListeners() dans fetchMyDevices mettra à jour l'UI automatiquement
                                 // grâce à context.watch<GroupProvider>()
