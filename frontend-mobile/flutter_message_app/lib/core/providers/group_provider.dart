@@ -17,6 +17,11 @@ class GroupProvider extends ChangeNotifier {
 
   /// Liste typée des groupes.
   List<GroupInfo> _groups = <GroupInfo>[];
+  
+  // ✅ OPTIMISATION: Cache pour éviter les appels multiples
+  bool _groupsLoaded = false;
+  DateTime? _lastGroupsLoad;
+  static const Duration _groupsCacheDuration = Duration(seconds: 10);
 
   /// Expose la liste des groupes.
   List<GroupInfo> get groups => _groups;
@@ -113,9 +118,24 @@ class GroupProvider extends ChangeNotifier {
   }
 
   /// Récupère la liste des groupes de l'utilisateur.
-  Future<void> fetchUserGroups() async {
+  Future<void> fetchUserGroups({bool forceRefresh = false}) async {
     try {
+      // ✅ OPTIMISATION: Vérifier si déjà chargé récemment
+      final now = DateTime.now();
+      if (!forceRefresh && 
+          _groupsLoaded && 
+          _lastGroupsLoad != null &&
+          now.difference(_lastGroupsLoad!) < _groupsCacheDuration) {
+        debugPrint('📡 [GroupProvider] Groupes déjà chargés récemment, skip');
+        return;
+      }
+      
       _groups = await _apiService.fetchUserGroups();
+      
+      // ✅ OPTIMISATION: Mettre à jour les flags
+      _groupsLoaded = true;
+      _lastGroupsLoad = now;
+      
       notifyListeners();
     } catch (e) {
       debugPrint('❌ GroupProvider.fetchUserGroups error: $e');

@@ -96,18 +96,25 @@ class _HomeScreenState extends State<HomeScreen> {
       final groupProvider = Provider.of<GroupProvider>(context, listen: false);
       final conversationProvider = Provider.of<ConversationProvider>(context, listen: false);
       
-      // Charger les groupes
+      // ✅ OPTIMISATION: Charger les groupes en premier et afficher immédiatement
       await groupProvider.fetchUserGroups();
       
-      // CORRECTION: Charger aussi les conversations au démarrage pour s'abonner automatiquement
+      // ✅ OPTIMISATION: Afficher les groupes immédiatement après leur chargement
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+      
+      // ✅ OPTIMISATION: Charger les conversations en arrière-plan (non-bloquant)
       // Cela permet de recevoir les notifications même sans avoir ouvert de groupe
-      await conversationProvider.fetchConversations();
-      debugPrint('✅ [HomeScreen] Conversations chargées et abonnements WebSocket activés');
+      conversationProvider.fetchConversations().then((_) {
+        debugPrint('✅ [HomeScreen] Conversations chargées et abonnements WebSocket activés');
+      }).catchError((e) {
+        debugPrint('⚠️ [HomeScreen] Erreur chargement conversations (non-bloquant): $e');
+      });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erreur chargement : $e')),
       );
-    } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
