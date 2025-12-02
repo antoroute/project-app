@@ -35,6 +35,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
   bool _isLoading = false;
   bool _hasMoreOlderMessages = true;
   
+  // 🚀 CORRECTION: Flag pour bloquer la détection de scroll pendant le chargement
+  // Évite les déclenchements multiples qui causent des chargements en cascade
+  bool _isScrollDetectionBlocked = false;
+  
+  // 🚀 CORRECTION: Dernière position de scroll détectée pour éviter les déclenchements trop fréquents
+  double? _lastScrollTriggerPosition;
+  
   // Timer pour les indicateurs de frappe
   Timer? _typingTimer;
 
@@ -98,16 +105,45 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   /// Gestionnaire de notification de scroll pour reverse:true
   bool _onScrollNotification(ScrollNotification n) {
+    // 🚀 CORRECTION: Bloquer complètement la détection pendant le chargement
+    // pour éviter les déclenchements multiples et les chargements en cascade
+    if (_isScrollDetectionBlocked || _isLoading) {
+      return false;
+    }
+    
     // CORRECTION: Avec reverse:true, on détecte quand on approche du haut (maxScrollExtent)
     // Ne déclencher que sur ScrollUpdate pour éviter les déclenchements multiples
     if (n is ScrollUpdateNotification) {
       final pixels = n.metrics.pixels;
       final maxExtent = n.metrics.maxScrollExtent;
       
-      // CORRECTION: Seuil plus élevé (150px) pour éviter les déclenchements trop fréquents
-      // et vérifier que maxExtent est valide (pas 0)
-      if (maxExtent > 0 && pixels >= maxExtent - 150 && _hasMoreOlderMessages && !_isLoading) {
-        debugPrint('🔄 Scroll détecté - Chargement messages anciens... (pixels: $pixels, maxExtent: $maxExtent)');
+      // 🚀 CORRECTION: Vérifier que maxExtent est valide (pas 0) et qu'on a encore des messages
+      if (maxExtent <= 0 || !_hasMoreOlderMessages) {
+        return false;
+      }
+      
+      // 🚀 CORRECTION: Seuil plus élevé (200px) et vérifier qu'on n'a pas déjà déclenché à cette position
+      // Évite les déclenchements multiples pour la même zone de scroll
+      const triggerThreshold = 200.0;
+      final distanceFromTop = maxExtent - pixels;
+      
+      if (distanceFromTop <= triggerThreshold) {
+        // 🚀 CORRECTION: Éviter les déclenchements trop fréquents en vérifiant la dernière position
+        // Si on a déjà déclenché récemment à une position proche, ignorer
+        if (_lastScrollTriggerPosition != null) {
+          final positionDiff = (pixels - _lastScrollTriggerPosition!).abs();
+          // Si on est à moins de 50px de la dernière position de déclenchement, ignorer
+          if (positionDiff < 50.0) {
+            return false;
+          }
+        }
+        
+        debugPrint('🔄 Scroll détecté - Chargement messages anciens... (pixels: $pixels, maxExtent: $maxExtent, distanceFromTop: $distanceFromTop)');
+        
+        // 🚀 CORRECTION: Bloquer immédiatement la détection pour éviter les déclenchements multiples
+        _isScrollDetectionBlocked = true;
+        _lastScrollTriggerPosition = pixels;
+        
         _loadOlderPreservingOffset();
       }
     }
@@ -435,7 +471,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
   /// Ajuste la position de scroll après ajout de messages (reverse:true)
   /// CORRECTION: Attend que l'utilisateur arrête de scroller avant d'ajuster pour éviter les conflits
   void _adjustScrollPosition(double beforeMaxExtent, List<Message> currentMessages) {
-    if (!_scrollController.hasClients || !mounted) return;
+    if (!_scrollController.hasClients || !mounted) {
+      // 🚀 CORRECTION: Débloquer la détection si le scroll controller n'est plus disponible
+      _isScrollDetectionBlocked = false;
+      return;
+    }
     
     // CORRECTION: Capturer l'offset ACTUEL juste avant l'ajustement
     // Pas celui capturé au début du chargement, car l'utilisateur a pu continuer à scroller
@@ -488,6 +528,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void _onScrollingStateChanged() {
     if (!_scrollController.hasClients || !mounted) {
       _removeScrollListener();
+      // 🚀 CORRECTION: Débloquer la détection si le scroll controller n'est plus disponible
+      _isScrollDetectionBlocked = false;
       return;
     }
     
@@ -501,6 +543,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted && adjustment != null) {
           adjustment();
+          // 🚀 CORRECTION: Débloquer la détection après l'ajustement différé
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) {
+              _isScrollDetectionBlocked = false;
+              _lastScrollTriggerPosition = null;
+            }
+          });
         }
       });
     }
@@ -517,11 +566,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
   Future<void> _loadOlderPreservingOffset() async {
     if (_isLoading || !_hasMoreOlderMessages) {
       debugPrint('⏸️ Chargement ignoré - isLoading: $_isLoading, hasMore: $_hasMoreOlderMessages');
+      // 🚀 CORRECTION: Débloquer la détection même si on ignore le chargement
+      _isScrollDetectionBlocked = false;
       return;
     }
     
     if (!_scrollController.hasClients) {
       debugPrint('⏸️ ScrollController non disponible');
+      _isScrollDetectionBlocked = false;
       return;
     }
     
@@ -583,8 +635,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
           // Attendre encore un frame pour être sûr que le layout est complètement terminé
           // Cela évite les sauts brusques lors de l'ajustement
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!_scrollController.hasClients || !mounted) return;
+            if (!_scrollController.hasClients || !mounted) {
+              // 🚀 CORRECTION: Débloquer la détection même si le scroll controller n'est plus disponible
+              _isScrollDetectionBlocked = false;
+              return;
+            }
             _adjustScrollPosition(beforeMaxExtent, currentMessages);
+            
+            // 🚀 CORRECTION: Débloquer la détection de scroll après l'ajustement
+            // Ajouter un petit délai pour éviter les déclenchements immédiats après l'ajustement
+            Future.delayed(const Duration(milliseconds: 300), () {
+              if (mounted) {
+                _isScrollDetectionBlocked = false;
+                _lastScrollTriggerPosition = null; // Réinitialiser pour permettre un nouveau déclenchement
+                debugPrint('✅ Détection de scroll débloquée après chargement');
+              }
+            });
           });
         });
       });
@@ -592,6 +658,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
       debugPrint('❌ Erreur chargement messages anciens: $e');
       // Attendre quand même le délai minimum même en cas d'erreur
       await minimumDisplayTime;
+      // 🚀 CORRECTION: Débloquer la détection en cas d'erreur
+      _isScrollDetectionBlocked = false;
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
