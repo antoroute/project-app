@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/models/message.dart';
+import 'package:flutter_message_app/core/services/network_monitor_service.dart';
 import 'package:provider/provider.dart';
 
 enum SocketStatus { disconnected, connecting, connected, error }
@@ -14,6 +15,15 @@ class WebSocketService {
   IO.Socket? _socket;
   SocketStatus _status = SocketStatus.disconnected;
   final StreamController<SocketStatus> _statusController = StreamController.broadcast();
+  
+  // ✅ NOUVEAU: Référence à AuthProvider pour reconnexion indépendante du context
+  AuthProvider? _authProvider;
+  
+  // ✅ NOUVEAU: Flag pour contrôler la reconnexion
+  bool _shouldReconnect = true;
+  
+  // ✅ NOUVEAU: Subscription au NetworkMonitorService
+  StreamSubscription<bool>? _networkSubscription;
   
   // Gestion des abonnements persistants
   final Set<String> _subscribedConversations = <String>{};
@@ -59,18 +69,34 @@ class WebSocketService {
 
   /// Établit la connexion WS
   Future<void> connect(BuildContext context) async {
+    // ✅ NOUVEAU: Sauvegarder la référence à AuthProvider
+    _authProvider = Provider.of<AuthProvider>(context, listen: false);
+    
+    // ✅ NOUVEAU: Configurer l'écoute du réseau si pas déjà fait
+    _setupNetworkListener();
+    
+    await _connectInternal();
+  }
+  
+  /// ✅ NOUVEAU: Connexion interne indépendante du context
+  Future<void> _connectInternal() async {
     if (_status == SocketStatus.connected || _status == SocketStatus.connecting) {
       return;
     }
+    
+    if (_authProvider == null) {
+      debugPrint('⚠️ [WebSocket] AuthProvider non disponible pour la connexion');
+      return;
+    }
+    
     _updateStatus(SocketStatus.connecting);
 
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final valid = await auth.ensureTokenValid();
+    final valid = await _authProvider!.ensureTokenValid();
     if (!valid) {
       _handleError('Token invalide ou rafraîchissement échoué.');
       return;
     }
-    final token = auth.token!;
+    final token = _authProvider!.token!;
     _disposeSocket();
 
     try {
@@ -91,32 +117,71 @@ class WebSocketService {
             // La compression peut être gérée côté serveur si nécessaire
             .build(),
       );
-      _registerListeners(context);
+      _registerListeners();
       _socket!.connect();
     } catch (e) {
       _handleError("Erreur d'initialisation du WebSocket: $e");
     }
   }
+  
+  /// ✅ NOUVEAU: Configure l'écoute du NetworkMonitorService
+  void _setupNetworkListener() {
+    if (_networkSubscription != null) {
+      return; // Déjà configuré
+    }
+    
+    _networkSubscription = NetworkMonitorService().networkStatusStream.listen((isConnected) {
+      if (isConnected && _status == SocketStatus.disconnected && _shouldReconnect) {
+        debugPrint('🌐 [WebSocket] Réseau disponible, tentative de reconnexion...');
+        _attemptReconnection();
+      } else if (!isConnected) {
+        debugPrint('🌐 [WebSocket] Réseau indisponible');
+      }
+    });
+    
+    debugPrint('🌐 [WebSocket] NetworkMonitorService listener configuré');
+  }
+  
+  /// ✅ NOUVEAU: Tente la reconnexion de manière indépendante
+  Future<void> _attemptReconnection() async {
+    if (!_shouldReconnect) {
+      debugPrint('⚠️ [WebSocket] Reconnexion désactivée');
+      return;
+    }
+    
+    if (_status == SocketStatus.connected || _status == SocketStatus.connecting) {
+      return;
+    }
+    
+    debugPrint('🔄 [WebSocket] Tentative de reconnexion...');
+    await _connectInternal();
+  }
 
-  void _registerListeners(BuildContext context) {
+  void _registerListeners() {
     if (_socket == null) return;
 
     _socket!
       ..onConnect((_) {
         _updateStatus(SocketStatus.connected);
+        debugPrint('✅ [WebSocket] Connected successfully');
         // Réabonner automatiquement aux conversations précédemment souscrites
         _resubscribeToConversations();
       })
       ..onDisconnect((_) {
         _updateStatus(SocketStatus.disconnected);
-        debugPrint('🔌 [WebSocket] Disconnected, will attempt reconnection in 3s');
-        // Reconnexion automatique seulement si l'app est toujours montée
-        Future.delayed(const Duration(seconds: 3), () {
-          if (context.mounted) {
-            debugPrint('🔄 [WebSocket] Attempting reconnection...');
-            connect(context);
-          }
-        });
+        debugPrint('🔌 [WebSocket] Disconnected');
+        
+        // ✅ CORRECTION: Reconnexion indépendante du context
+        if (_shouldReconnect) {
+          debugPrint('🔄 [WebSocket] Will attempt reconnection in 3s');
+          Future.delayed(const Duration(seconds: 3), () {
+            if (_shouldReconnect && _status == SocketStatus.disconnected) {
+              _attemptReconnection();
+            }
+          });
+        } else {
+          debugPrint('⚠️ [WebSocket] Reconnexion désactivée');
+        }
       })
       ..onReconnect((attempt) {
         debugPrint('🔄 [WebSocket] Reconnecting (attempt $attempt)...');
@@ -552,15 +617,27 @@ class WebSocketService {
     };
   }
 
-  void disconnect() {
+  /// Déconnecte le WebSocket
+  /// [shouldReconnect] : si false, désactive la reconnexion automatique
+  void disconnect({bool shouldReconnect = false}) {
+    _shouldReconnect = shouldReconnect;
     _disposeSocket();
     _updateStatus(SocketStatus.disconnected);
+    debugPrint('🔌 [WebSocket] Disconnected (shouldReconnect: $shouldReconnect)');
   }
 
   void _disposeSocket() {
     _socket?.clearListeners();
     _socket?.disconnect();
     _socket = null;
+  }
+  
+  /// ✅ NOUVEAU: Dispose toutes les ressources
+  void dispose() {
+    _networkSubscription?.cancel();
+    _networkSubscription = null;
+    _disposeSocket();
+    _statusController.close();
   }
 
   void _updateStatus(SocketStatus newStatus) {

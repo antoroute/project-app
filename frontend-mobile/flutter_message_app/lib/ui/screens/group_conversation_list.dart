@@ -136,12 +136,25 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
       if (!mounted) return;
       debugPrint('✅ Group members loaded');
       
-      await convProv.fetchConversations();
-      if (!mounted) return;
-      debugPrint('✅ Conversations loaded');
-      // Note: L'abonnement aux conversations est géré automatiquement par fetchConversations()
-      // qui s'abonne à toutes les conversations auxquelles l'utilisateur a accès
-      // Le backend vérifie les permissions avant d'envoyer les messages
+      // ✅ OPTIMISATION: Afficher l'écran immédiatement après chargement des membres
+      // Les conversations peuvent être déjà en cache ou se charger en arrière-plan
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+      
+      // ✅ OPTIMISATION: Charger les conversations en arrière-plan (non-bloquant)
+      // Si les conversations sont déjà en cache, cela sera très rapide
+      // Sinon, elles se chargeront sans bloquer l'affichage
+      convProv.fetchConversations().then((_) {
+        if (mounted) {
+          debugPrint('✅ Conversations loaded');
+          // Note: L'abonnement aux conversations est géré automatiquement par fetchConversations()
+          // qui s'abonne à toutes les conversations auxquelles l'utilisateur a accès
+          // Le backend vérifie les permissions avant d'envoyer les messages
+        }
+      }).catchError((error) {
+        debugPrint('⚠️ [GroupConversationList] Erreur chargement conversations (non-bloquant): $error');
+      });
 
       // v2: creator flag unused
     } catch (error) {
@@ -150,9 +163,8 @@ class _GroupConversationListScreenState extends State<GroupConversationListScree
           context,
           'Erreur chargement : $error',
         );
+        setState(() => _loading = false);
       }
-    } finally {
-      if (mounted) setState(() => _loading = false);
     }
   }
 
