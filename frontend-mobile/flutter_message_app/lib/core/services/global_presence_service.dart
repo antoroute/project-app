@@ -48,6 +48,31 @@ class GlobalPresenceService {
       }
     };
 
+    // ✅ CORRECTION: Ajouter le callback pour les événements batch de présence
+    webSocketService.onPresenceConversationBatch = (String conversationId, List<Map<String, dynamic>> presences) {
+      _conversationPresence.putIfAbsent(conversationId, () => <String, bool>{});
+      
+      bool hasChanges = false;
+      for (final presence in presences) {
+        final userId = presence['userId'] as String?;
+        final online = presence['online'] as bool? ?? false;
+        
+        if (userId != null) {
+          final wasOnlineInConv = _conversationPresence[conversationId]![userId] ?? false;
+          _conversationPresence[conversationId]![userId] = online;
+          _userOnline[userId] = online; // Mettre à jour aussi la présence globale
+          
+          if (wasOnlineInConv != online) {
+            hasChanges = true;
+          }
+        }
+      }
+      
+      if (hasChanges) {
+        _notifyListeners();
+      }
+    };
+
     debugPrint('🌍 [GlobalPresence] WebSocket callbacks configured successfully');
   }
 

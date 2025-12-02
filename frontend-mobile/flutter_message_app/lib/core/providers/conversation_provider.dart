@@ -38,7 +38,8 @@ class ConversationProvider extends ChangeNotifier {
   /// ✅ OPTIMISATION: Flag pour éviter les appels multiples à fetchConversations
   bool _conversationsLoaded = false;
   DateTime? _lastConversationsLoad;
-  static const Duration _conversationsCacheDuration = Duration(seconds: 30);
+  // ✅ CORRECTION: Réduire le cache à 10 secondes pour ne pas bloquer les groupes
+  static const Duration _conversationsCacheDuration = Duration(seconds: 10);
   /// Cache local des messages, par conversationId
   final Map<String, List<Message>> _messages = {};
   /// Cache mémoire des messages déchiffrés (session courante uniquement)

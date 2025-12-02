@@ -393,8 +393,7 @@ class WebSocketService {
       };
     }
     
-    // Ajouter aux abonnements persistants
-    _subscribedConversations.addAll(newConversations);
+    // ✅ CORRECTION: Ne PAS ajouter aux abonnements persistants avant confirmation serveur
     debugPrint('📡 [WebSocket] Batch subscription: ${newConversations.length} nouvelles conversations');
     
     if (_status != SocketStatus.connected || _socket == null) {
@@ -411,17 +410,28 @@ class WebSocketService {
     debugPrint('📡 [WebSocket] Envoi de conv:subscribe:batch pour ${newConversations.length} conversations');
     
     final completer = Completer<Map<String, dynamic>>();
+    bool timeoutOccurred = false;
     
     _socket!.emitWithAck(
       'conv:subscribe:batch',
       {'convIds': newConversations},
       ack: (resp) {
+        if (timeoutOccurred) {
+          debugPrint('⚠️ [WebSocket] Réponse batch reçue après timeout, ignorée');
+          return;
+        }
+        
         if (resp != null && resp is Map) {
           final success = resp['success'] as bool? ?? false;
           if (success) {
             final subscribed = resp['subscribed'] as int? ?? 0;
             final alreadySubscribed = resp['alreadySubscribed'] as int? ?? 0;
             final unauthorized = resp['unauthorized'] as int? ?? 0;
+            final subscribedConvIds = resp['convIds'] as List<dynamic>? ?? [];
+            
+            // ✅ CORRECTION: Ajouter aux abonnements persistants SEULEMENT après confirmation serveur
+            final actualSubscribed = subscribedConvIds.map((id) => id.toString()).toList();
+            _subscribedConversations.addAll(actualSubscribed);
             debugPrint('✅ [WebSocket] Batch subscription réussie: $subscribed nouveaux, $alreadySubscribed déjà abonnés, $unauthorized non autorisés');
           }
           completer.complete(Map<String, dynamic>.from(resp));
@@ -431,14 +441,24 @@ class WebSocketService {
       },
     );
     
-    // Timeout après 10 secondes
-    Future.delayed(const Duration(seconds: 10), () {
+    // ✅ CORRECTION: Timeout augmenté à 20 secondes et gestion améliorée
+    Future.delayed(const Duration(seconds: 20), () {
       if (!completer.isCompleted) {
+        timeoutOccurred = true;
+        debugPrint('⚠️ [WebSocket] Batch subscription timeout après 20s');
         completer.completeError('Batch subscription timeout');
       }
     });
     
-    return completer.future;
+    try {
+      final result = await completer.future;
+      return result;
+    } catch (e) {
+      // ✅ CORRECTION: En cas d'erreur, ne pas ajouter aux abonnements pour permettre le fallback
+      debugPrint('❌ [WebSocket] Erreur batch subscription: $e');
+      // Ne pas ajouter aux _subscribedConversations pour permettre le fallback individuel
+      rethrow;
+    }
   }
   
   /// Émet un événement de début de frappe
