@@ -8,6 +8,7 @@ services:
     environment:
       - PORT=3000
       - JWT_SECRET=${AUTH_JWT_SECRET}
+      - APP_SECRET=${APP_SECRET}
       - DATABASE_URL=${DATABASE_URL}
     networks:
       - backend_net
@@ -20,6 +21,7 @@ services:
     environment:
       - PORT=3001
       - JWT_SECRET=${AUTH_JWT_SECRET}
+      - APP_SECRET=${APP_SECRET}
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
       - REDIS_PASSWORD=${REDIS_PASSWORD}

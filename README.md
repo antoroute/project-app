@@ -63,6 +63,11 @@ Fonctionnalités principales :
 - **JWT** : utilisé pour sécuriser API et WebSocket
 - **Middleware** de vérification des tokens
 - **Protection API** : CORS, CSP, rate-limiting, etc.
+- **App Secret** : Variable d'environnement `APP_SECRET` pour limiter l'accès à l'API à l'application officielle uniquement
+  - Définie dans le `.env` Docker (au même niveau que `docker-compose-app.yml`)
+  - Définie dans le `.env` Flutter (`frontend-mobile/flutter_message_app/.env`)
+  - Les deux doivent avoir la même valeur
+  - Voir `SECURITY.md` et `frontend-mobile/flutter_message_app/ENV_SETUP.md` pour plus de détails
 
 ---
 

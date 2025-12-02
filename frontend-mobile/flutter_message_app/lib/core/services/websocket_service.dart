@@ -4,6 +4,7 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/models/message.dart';
 import 'package:flutter_message_app/core/services/network_monitor_service.dart';
+import 'package:flutter_message_app/config/constants.dart';
 import 'package:provider/provider.dart';
 
 enum SocketStatus { disconnected, connecting, connected, error }
@@ -106,6 +107,7 @@ class WebSocketService {
             .setPath('/socket')
             .setTransports(['websocket'])
             .setAuth({'token': token})
+            .setExtraHeaders({'X-App-Secret': appSecret})
             .setTimeout(10000)
             .setReconnectionDelay(3000)
             .setReconnectionAttempts(5)

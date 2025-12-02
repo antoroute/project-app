@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'core/providers/auth_provider.dart';
 import 'core/providers/group_provider.dart';
@@ -22,6 +23,9 @@ import 'ui/themes/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🔐 Charger les variables d'environnement depuis .env
+  await dotenv.load(fileName: ".env");
 
   // 🔒 Forcer l'orientation portrait uniquement
   await SystemChrome.setPreferredOrientations([

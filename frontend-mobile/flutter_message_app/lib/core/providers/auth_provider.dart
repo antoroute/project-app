@@ -59,6 +59,7 @@ class AuthProvider extends ChangeNotifier {
       headers: <String, String>{
         'Content-Type': 'application/json',
         'X-Client-Version': clientVersion,
+        'X-App-Secret': appSecret,
       },
       body: jsonEncode(<String, String>{
         'email': email,
@@ -92,6 +93,7 @@ class AuthProvider extends ChangeNotifier {
       headers: <String, String>{
         'Content-Type': 'application/json',
         'X-Client-Version': clientVersion,
+        'X-App-Secret': appSecret,
       },
       body: jsonEncode(<String, String>{
         'email': email,
@@ -148,6 +150,7 @@ class AuthProvider extends ChangeNotifier {
           'Content-Type': 'application/json',
           'X-Client-Version': clientVersion,
           'Authorization': 'Bearer $storedRefresh',
+          'X-App-Secret': appSecret,
         },
         body: '{}', // CORRECTION: Ajouter un body JSON vide
       );
@@ -246,6 +249,7 @@ class AuthProvider extends ChangeNotifier {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $_token',
       'X-Client-Version': clientVersion,
+      'X-App-Secret': appSecret,
     };
   }
 }

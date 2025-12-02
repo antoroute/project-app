@@ -12,6 +12,7 @@ import { Server as IOServer } from 'socket.io';
 
 import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
+import validateAppSecret from './middlewares/validateAppSecret.js';
 import socketAuth from './middlewares/socketAuth.js';
 
 // Routes 
@@ -59,6 +60,7 @@ async function build() {
   app.get('/health', async () => ({ ok: true }));
 
   await app.register(enforceVersion);
+  await app.register(validateAppSecret); // 🔐 Valide que les requêtes viennent de l'app officielle
 
   // Routes REST
   await app.register(keysDevicesRoutes);

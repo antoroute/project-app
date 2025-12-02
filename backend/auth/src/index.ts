@@ -8,6 +8,7 @@ import rateLimit from '@fastify/rate-limit';
 
 import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
+import validateAppSecret from './middlewares/validateAppSecret.js';
 import authRoutes from './routes/auth.js';
 
 async function build() {
@@ -36,6 +37,7 @@ async function build() {
   app.get('/health', async () => ({ ok: true }));
 
   await app.register(enforceVersion);
+  await app.register(validateAppSecret); // 🔐 Valide que les requêtes viennent de l'app officielle
   await app.register(authRoutes, { prefix: '/auth' });
 
   const port = Number(process.env.PORT || 3000);
