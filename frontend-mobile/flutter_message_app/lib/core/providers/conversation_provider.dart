@@ -1961,6 +1961,12 @@ class ConversationProvider extends ChangeNotifier {
       // Incrémenter le compteur de messages non lus si ce n'est pas notre message
       if (senderId != myUserId) {
         _unreadCounts[convId] = (_unreadCounts[convId] ?? 0) + 1;
+        
+        // ✅ CORRECTION: Marquer le badge AVANT d'afficher la notification
+        final badgeService = NotificationBadgeService();
+        badgeService.markConversationAsNew(convId, groupId: groupId);
+        debugPrint('🔔 [ConversationProvider] Badge marqué pour conversation $convId (groupe $groupId)');
+        
         // 🚀 OPTIMISATION: Batching pour les compteurs (non-critique)
         _notifyListenersBatched();
         
