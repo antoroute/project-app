@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/group_provider.dart';
-import '../../core/providers/conversation_provider.dart';
 
 class MyDevicesScreen extends StatefulWidget {
   final String groupId;

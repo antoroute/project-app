@@ -239,6 +239,7 @@ Future<DecryptPipelineResult> _processDecryptPipeline(DecryptPipelineTask task) 
       taskId: task.taskId,
       decryptedTextBytes: decryptedBytes,
     );
+  // ignore: unused_catch_stack
   } catch (e, stackTrace) {
     debugPrint('❌ [CryptoIsolate] Erreur dans pipeline ${task.taskId}: $e');
     return DecryptPipelineResult(
