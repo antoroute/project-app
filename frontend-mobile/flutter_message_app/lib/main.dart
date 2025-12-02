@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 
@@ -21,6 +22,12 @@ import 'ui/themes/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🔒 Forcer l'orientation portrait uniquement
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   // 🚀 Initialiser cryptography_flutter pour les performances natives
   KeyManagerFinal.initialize();
@@ -82,6 +89,10 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
     
     // 🚀 OPTIMISATION: Nettoyer l'Isolate crypto à la fermeture de l'app
     CryptoIsolateService.instance.dispose();
+    
+    // Restaurer les orientations par défaut à la fermeture
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    
     super.dispose();
   }
 
