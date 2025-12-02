@@ -1643,34 +1643,204 @@ class ConversationProvider extends ChangeNotifier {
 
   // ─── Handlers internes pour les événements WS ──────────────────────────────
 
+  /// Récupère les nouveaux messages depuis le serveur et les ajoute à la conversation
+  /// Utilisé quand un ping WebSocket est reçu et que l'utilisateur est dans la conversation
+  Future<void> _fetchNewMessageFromServer(String conversationId) async {
+    try {
+      // CORRECTION: Récupérer les messages les plus récents SANS cursor
+      // Le backend utilise "sent_at < cursor", donc pour récupérer les nouveaux messages,
+      // on doit récupérer les N derniers messages et filtrer ceux déjà présents
+      final items = await _apiService.fetchMessagesV2(
+        conversationId: conversationId,
+        limit: 20, // Récupérer les 20 derniers messages pour s'assurer de ne rien manquer
+        cursor: null, // Pas de cursor pour obtenir les plus récents
+      );
+      
+      if (items.isEmpty) {
+        debugPrint('🔔 [ConversationProvider] Aucun nouveau message trouvé pour $conversationId');
+        return;
+      }
+      
+      debugPrint('🔔 [ConversationProvider] ${items.length} nouveau(x) message(s) récupéré(s) pour $conversationId');
+      
+      // Traiter et ajouter les nouveaux messages
+      final myUserId = _authProvider.userId;
+      if (myUserId == null) {
+        debugPrint('⚠️ [ConversationProvider] myUserId est null, impossible de traiter les messages');
+        return;
+      }
+      final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      
+      // Récupérer le groupId depuis la conversation
+      final conversation = _conversations.firstWhere(
+        (c) => c.conversationId == conversationId,
+        orElse: () => throw Exception('Conversation $conversationId introuvable'),
+      );
+      final groupId = conversation.groupId;
+      
+      final existingMessages = _messages[conversationId] ?? [];
+      final existingMessageIds = existingMessages.map((m) => m.id).toSet();
+      final lastTimestamp = existingMessages.isNotEmpty
+          ? existingMessages.map((m) => m.timestamp).reduce((a, b) => a > b ? a : b)
+          : 0;
+      debugPrint('🔔 [ConversationProvider] Messages existants en mémoire: ${existingMessages.length}, dernier timestamp: $lastTimestamp');
+      
+      // Traiter chaque nouveau message
+      int addedCount = 0;
+      int skippedCount = 0;
+      int errorCount = 0;
+      for (final item in items) {
+        // Vérifier si le message existe déjà
+        if (existingMessageIds.contains(item.messageId)) {
+          skippedCount++;
+          debugPrint('⏭️ [ConversationProvider] Message ${item.messageId} déjà présent, ignoré');
+          continue; // Message déjà présent, passer au suivant
+        }
+        
+        // Vérifier si le message est plus récent que le dernier message en mémoire
+        if (item.sentAt <= lastTimestamp) {
+          skippedCount++;
+          debugPrint('⏭️ [ConversationProvider] Message ${item.messageId} plus ancien que le dernier (${item.sentAt} <= $lastTimestamp), ignoré');
+          continue;
+        }
+        
+        // Déchiffrer le message
+        try {
+          final fastResult = await MessageCipherV2.decryptFast(
+            groupId: groupId,
+            myUserId: myUserId,
+            myDeviceId: myDeviceId,
+            messageV2: item.toJson(),
+            keyDirectory: _keyDirectory,
+            priority: 1, // Haute priorité pour les nouveaux messages
+          );
+          
+          final decryptedText = utf8.decode(fastResult['decryptedText'] as Uint8List);
+          final senderUserId = (item.sender['userId'] as String?) ?? '';
+          
+          // Créer le message
+          final msg = Message(
+            id: item.messageId,
+            conversationId: conversationId,
+            senderId: senderUserId,
+            encrypted: null,
+            iv: null,
+            encryptedKeys: const {},
+            signatureValid: false, // Vérification en arrière-plan
+            senderPublicKey: null,
+            timestamp: item.sentAt,
+            v2Data: item.toJson(),
+            decryptedText: decryptedText,
+          );
+          
+          // Sauvegarder localement (non-bloquant)
+          LocalMessageStorage.instance.saveMessage(msg).catchError((saveError) {
+            debugPrint('⚠️ Erreur sauvegarde message local (non-bloquant): $saveError');
+          });
+          
+          // Mettre en cache mémoire
+          _decryptedCache[item.messageId] = decryptedText;
+          
+          // Ajouter le message et notifier immédiatement
+          addLocalMessage(msg);
+          addedCount++;
+          debugPrint('✅ [ConversationProvider] Message ${item.messageId} ajouté avec succès (timestamp: ${item.sentAt})');
+          
+          // 🚀 OPTIMISATION: Vérifier la signature en arrière-plan (non-bloquant)
+          // pour ne pas ralentir l'affichage du nouveau message
+          MessageCipherV2.decrypt(
+            groupId: groupId,
+            myUserId: myUserId,
+            myDeviceId: myDeviceId,
+            messageV2: item.toJson(),
+            keyDirectory: _keyDirectory,
+          ).then((result) {
+            final verifiedSignatureValid = result['signatureValid'] as bool;
+            // Mettre à jour le message avec la signature vérifiée
+            final messages = _messages[conversationId];
+            if (messages != null) {
+              final index = messages.indexWhere((m) => m.id == item.messageId);
+              if (index >= 0) {
+                final updatedMsg = Message(
+                  id: messages[index].id,
+                  conversationId: messages[index].conversationId,
+                  senderId: messages[index].senderId,
+                  encrypted: messages[index].encrypted,
+                  iv: messages[index].iv,
+                  encryptedKeys: messages[index].encryptedKeys,
+                  signatureValid: verifiedSignatureValid,
+                  senderPublicKey: messages[index].senderPublicKey,
+                  timestamp: messages[index].timestamp,
+                  v2Data: messages[index].v2Data,
+                  decryptedText: messages[index].decryptedText,
+                );
+                messages[index] = updatedMsg;
+                
+                // Sauvegarder avec la signature vérifiée
+                LocalMessageStorage.instance.saveMessage(updatedMsg).catchError((saveError) {
+                  debugPrint('⚠️ Erreur sauvegarde message avec signature vérifiée (non-bloquant): $saveError');
+                });
+                
+                // Notifier les listeners de la mise à jour
+                _notifyListenersBatched();
+                debugPrint('✅ [ConversationProvider] Signature vérifiée pour message ${item.messageId}: $verifiedSignatureValid');
+              }
+            }
+          }).catchError((e) {
+            debugPrint('⚠️ [ConversationProvider] Erreur lors de la vérification de signature pour ${item.messageId}: $e');
+          });
+        } catch (e, stackTrace) {
+          errorCount++;
+          debugPrint('❌ [ConversationProvider] Erreur lors du déchiffrement du message ${item.messageId}: $e');
+          debugPrint('❌ [ConversationProvider] Stack trace: $stackTrace');
+          // Continuer avec les autres messages même en cas d'erreur
+        }
+      }
+      
+      debugPrint('🔔 [ConversationProvider] Résumé: ${addedCount} message(s) ajouté(s), ${skippedCount} ignoré(s), ${errorCount} erreur(s) sur ${items.length} récupéré(s)');
+    } catch (e, stackTrace) {
+      debugPrint('❌ [ConversationProvider] Erreur lors de la récupération des nouveaux messages: $e');
+      debugPrint('❌ [ConversationProvider] Stack trace: $stackTrace');
+    }
+  }
+
   void _onWebSocketNewMessageV2(Map<String, dynamic> payload) async {
     try {
       debugPrint('📨 [ConversationProvider] _onWebSocketNewMessageV2 appelé');
       debugPrint('📨 [ConversationProvider] Payload reçu: ${payload.keys.join(", ")}');
       
-      // SÉCURITÉ: Vérifier si c'est un ping minimal (pas de données sensibles)
       final type = payload['type'] as String?;
-      if (type == 'message:new') {
-        // CORRECTION: Le ping contient maintenant convId et groupId pour identifier précisément la conversation
-        final convId = payload['convId'] as String?;
-        final groupId = payload['groupId'] as String?;
-        
-        // Vérifier si l'utilisateur est déjà dans cette conversation
-        final tracker = NavigationTrackerService();
-        final isInThisConversation = convId != null && tracker.isInConversation(convId);
-        
+      final groupId = payload['groupId'] as String?;
+      final messageId = payload['messageId'] as String?;
+      final convId = payload['convId'] as String?;
+      final senderData = payload['sender'];
+      
+      // CORRECTION: Vérifier si le payload contient les données complètes du message
+      // Si messageId et sender sont présents, c'est un payload complet, sinon c'est un ping minimal
+      final hasCompletePayload = messageId != null && senderData != null && senderData is Map;
+      
+      if (type == 'message:new' && !hasCompletePayload) {
+        // Ping minimal (seulement convId et groupId, pas de données sensibles)
         if (convId != null && groupId != null) {
-          // On connaît la conversation concernée, marquer seulement celle-ci si l'utilisateur n'est pas dedans
+          // Vérifier si l'utilisateur est déjà dans cette conversation
+          final tracker = NavigationTrackerService();
+          final isInThisConversation = tracker.isInConversation(convId);
+          
           if (!isInThisConversation) {
             final badgeService = NotificationBadgeService();
             badgeService.markConversationAsNew(convId, groupId: groupId);
             debugPrint('🔔 [ConversationProvider] Conversation $convId (groupe $groupId) marquée comme nouvelle (ping reçu)');
           } else {
-            debugPrint('🔔 [ConversationProvider] Ping ignoré (utilisateur déjà dans la conversation $convId)');
+            // Récupérer le nouveau message depuis le serveur quand l'utilisateur est dans la conversation
+            debugPrint('🔔 [ConversationProvider] Ping reçu pour conversation active $convId, récupération du nouveau message...');
+            _fetchNewMessageFromServer(convId).catchError((e) {
+              debugPrint('❌ [ConversationProvider] Erreur lors de la récupération du nouveau message: $e');
+            });
           }
         } else {
           // Fallback: si les identifiants ne sont pas présents, rafraîchir toutes les conversations
           debugPrint('⚠️ [ConversationProvider] Ping reçu sans convId/groupId, rafraîchissement de toutes les conversations');
+          final tracker = NavigationTrackerService();
           if (!tracker.isInAnyConversation()) {
             await fetchConversations();
             final badgeService = NotificationBadgeService();
@@ -1684,31 +1854,28 @@ class ConversationProvider extends ChangeNotifier {
         return;
       }
       
-      // Ancien format avec données complètes (pour compatibilité, mais ne devrait plus arriver)
+      // Payload complet avec toutes les données du message (format normal)
+      if (groupId == null || messageId == null || convId == null) {
+        debugPrint('⚠️ [ConversationProvider] Données manquantes dans le payload: groupId=$groupId, messageId=$messageId, convId=$convId');
+        return;
+      }
+      
+      if (senderData == null || senderData is! Map) {
+        debugPrint('⚠️ [ConversationProvider] Payload sender invalide: $senderData');
+        debugPrint('⚠️ [ConversationProvider] Payload complet: $payload');
+        return;
+      }
+      
       final myUserId = _authProvider.userId;
       if (myUserId == null) {
         debugPrint('⚠️ [ConversationProvider] myUserId est null, impossible de traiter le message');
         return;
       }
       final myDeviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
-      final groupId = payload['groupId'] as String?;
-      final messageId = payload['messageId'] as String?;
-      final convId = payload['convId'] as String?;
-      
-      if (groupId == null || messageId == null || convId == null) {
-        debugPrint('⚠️ [ConversationProvider] Données manquantes dans le payload: groupId=$groupId, messageId=$messageId, convId=$convId');
-        return;
-      }
       
       debugPrint('📨 [ConversationProvider] Message reçu: convId=$convId, messageId=$messageId, groupId=$groupId');
       
       // Extraire le senderId avec vérification
-      final senderData = payload['sender'];
-      if (senderData == null || senderData is! Map) {
-        debugPrint('⚠️ [ConversationProvider] Payload sender invalide: $senderData');
-        debugPrint('⚠️ [ConversationProvider] Payload complet: $payload');
-        return;
-      }
       final senderId = senderData['userId'] as String?;
       if (senderId == null) {
         debugPrint('⚠️ [ConversationProvider] senderId est null dans le payload');

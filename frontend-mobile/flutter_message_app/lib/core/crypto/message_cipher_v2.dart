@@ -293,16 +293,16 @@ class MessageCipherV2 {
       if (ephPubB64.isEmpty) {
         throw Exception('sender.eph_pub is empty in messageV2');
       }
-      
-      final myPrivateKeyBytes = await KeyManagerFinal.instance.getX25519PrivateKeyBytes(groupId, myDeviceId);
-      final remotePublicKeyBytes = base64.decode(_cleanBase64(ephPubB64));
+
+              final myPrivateKeyBytes = await KeyManagerFinal.instance.getX25519PrivateKeyBytes(groupId, myDeviceId);
+              final remotePublicKeyBytes = base64.decode(_cleanBase64(ephPubB64));
       
       // Récupérer la salt depuis le payload
       if (!messageV2.containsKey('salt')) {
         throw Exception('salt is required in messageV2');
       }
       final salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
-      
+
       // Récupérer les recipients
       final recipients = messageV2['recipients'] as List<dynamic>;
       if (recipients.isEmpty) {
@@ -313,7 +313,7 @@ class MessageCipherV2 {
         (w) => w['userId'] == myUserId && w['deviceId'] == myDeviceId,
         orElse: () => throw Exception('No wrap for this device'),
       );
-      
+
       final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
       final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
       
@@ -341,7 +341,7 @@ class MessageCipherV2 {
       final result = await PerformanceBenchmark.instance.measureAsync(
         'decryptFast_pipeline_isolate',
         () => CryptoIsolateService.instance.executeDecryptPipeline(task),
-      );
+                  );
       
       if (result.error != null) {
         debugPrint('❌ [decryptFast] Erreur pipeline pour $messageId: ${result.error}');

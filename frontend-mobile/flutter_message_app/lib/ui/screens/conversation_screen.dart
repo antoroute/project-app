@@ -600,7 +600,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   int _lastMessageCount = 0;
-  
+
   void _onMessagesUpdated() {
     // 🚀 CORRECTION: Toujours permettre les mises à jour pour les nouveaux messages WebSocket
     // Même si le déchiffrement initial n'est pas terminé, les nouveaux messages doivent s'afficher

@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'message_key_cache.dart';
+import 'persistent_message_key_cache.dart';
 import '../providers/conversation_provider.dart';
-import '../crypto/key_manager_final.dart';
 
 /// Service centralisé pour le nettoyage automatique des caches
 /// 
@@ -33,11 +33,15 @@ class CacheCleanupService {
     debugPrint('🧹 [CacheCleanup] Démarrage du nettoyage automatique (intervalle: ${_cleanupInterval.inHours}h)');
     
     // Nettoyer immédiatement au démarrage
-    _performCleanup();
+    _performCleanup().catchError((e) {
+      debugPrint('⚠️ [CacheCleanup] Erreur nettoyage initial: $e');
+    });
     
     // Programmer le nettoyage périodique
     _cleanupTimer = Timer.periodic(_cleanupInterval, (_) {
-      _performCleanup();
+      _performCleanup().catchError((e) {
+        debugPrint('⚠️ [CacheCleanup] Erreur nettoyage périodique: $e');
+      });
     });
   }
   
@@ -50,31 +54,29 @@ class CacheCleanupService {
   }
   
   /// Effectue le nettoyage de tous les caches
-  void _performCleanup() {
+  Future<void> _performCleanup() async {
     debugPrint('🧹 [CacheCleanup] Début du nettoyage périodique...');
     final startTime = DateTime.now();
     
     try {
-      // 1. Nettoyer MessageKeyCache
-      MessageKeyCache.instance.cleanupExpired();
-      MessageKeyCache.instance.cleanupSkippedKeys();
-      MessageKeyCache.instance.cleanupExpiredByTTL();
+      // 1. Nettoyer MessageKeyCache (mémoire) - le nettoyage se fait automatiquement
+      // via _cleanupIfNeeded() qui est appelé lors des opérations
+      // Pas besoin de nettoyage manuel pour le cache mémoire
       
-      // 2. Nettoyer ConversationProvider caches
-      if (_conversationProvider != null) {
-        try {
-          _conversationProvider!.cleanupCaches();
-        } catch (e) {
-          debugPrint('⚠️ [CacheCleanup] Erreur nettoyage ConversationProvider: $e');
-        }
+      // 2. Nettoyer PersistentMessageKeyCache (cache persistant des message keys)
+      try {
+        await PersistentMessageKeyCache.instance.cleanupExpiredKeys();
+      } catch (e) {
+        debugPrint('⚠️ [CacheCleanup] Erreur nettoyage PersistentMessageKeyCache: $e');
       }
       
-      // 3. Nettoyer KeyManagerFinal cache
-      // Note: Nécessite une méthode publique dans KeyManagerFinal
-      try {
-        KeyManagerFinal.instance.cleanupCache();
-      } catch (e) {
-        debugPrint('⚠️ [CacheCleanup] Erreur nettoyage KeyManagerFinal: $e');
+      // 3. Nettoyer KeyDirectoryService (cache persistant des group keys)
+      if (_conversationProvider != null) {
+        try {
+          await _conversationProvider!.keyDirectory.cleanupExpiredKeys();
+        } catch (e) {
+          debugPrint('⚠️ [CacheCleanup] Erreur nettoyage KeyDirectoryService: $e');
+        }
       }
       
       final duration = DateTime.now().difference(startTime);
@@ -85,8 +87,8 @@ class CacheCleanupService {
   }
   
   /// Force un nettoyage immédiat (pour tests ou situations spéciales)
-  void cleanupNow() {
-    _performCleanup();
+  Future<void> cleanupNow() async {
+    await _performCleanup();
   }
   
   /// Obtient les statistiques de tous les caches

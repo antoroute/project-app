@@ -94,16 +94,16 @@ class CryptoIsolateService {
           if (isEcdhResult) {
             final ecdhCompleter = _pendingTasks.remove(taskId);
             if (ecdhCompleter != null && !ecdhCompleter.isCompleted) {
-              if (message['error'] != null) {
-                debugPrint('❌ [CryptoIsolate] Erreur pour tâche $taskId: ${message['error']}');
+            if (message['error'] != null) {
+              debugPrint('❌ [CryptoIsolate] Erreur pour tâche $taskId: ${message['error']}');
                 ecdhCompleter.completeError(Exception(message['error']));
-              } else {
-                try {
+            } else {
+              try {
                   ecdhCompleter.complete(X25519EcdhResult.fromJson(message));
-                } catch (e) {
-                  debugPrint('❌ [CryptoIsolate] Erreur parsing résultat pour $taskId: $e');
+              } catch (e) {
+                debugPrint('❌ [CryptoIsolate] Erreur parsing résultat pour $taskId: $e');
                   ecdhCompleter.completeError(e);
-                }
+              }
               }
               return;
             }
