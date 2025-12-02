@@ -283,65 +283,26 @@ class MessageCipherV2 {
           return await PerformanceBenchmark.instance.measureAsync(
             'decryptFast_without_cache',
             () async {
-      // Clé pas en cache : dériver normalement
-      // Récupérer l'eph_pub depuis le sender
+      // Clé pas en cache : utiliser le pipeline complet dans l'Isolate
+      // 🚀 OPTIMISATION: Pipeline complet (X25519 ECDH + HKDF + AES-GCM Unwrap + AES-GCM Decrypt)
+      
+      // 1. Préparer toutes les données nécessaires
       final sender = messageV2['sender'] as Map<String, dynamic>;
       final ephPubB64 = sender['eph_pub'] as String;
       
       if (ephPubB64.isEmpty) {
         throw Exception('sender.eph_pub is empty in messageV2');
       }
-
-              // 🚀 OPTIMISATION: X25519 ECDH dans un Isolate (goulot d'étranglement principal)
-              // Extraire les bytes des clés (thread principal)
-              final myPrivateKeyBytes = await KeyManagerFinal.instance.getX25519PrivateKeyBytes(groupId, myDeviceId);
-              final remotePublicKeyBytes = base64.decode(_cleanBase64(ephPubB64));
-              
-              // Créer la tâche pour l'Isolate avec la priorité spécifiée
-              final task = X25519EcdhTask(
-                taskId: messageId,
-                myPrivateKeyBytes: myPrivateKeyBytes,
-                remotePublicKeyBytes: remotePublicKeyBytes,
-                priority: priority,
-              );
-              
-              // Exécuter X25519 ECDH dans l'Isolate
-              final ecdhResult = await PerformanceBenchmark.instance.measureAsync(
-                'decryptFast_x25519_ecdh_isolate',
-                () => CryptoIsolateService.instance.executeX25519Ecdh(task),
-              );
-              
-              if (ecdhResult.error != null) {
-                throw Exception('X25519 ECDH error: ${ecdhResult.error}');
-              }
-              
-              if (ecdhResult.sharedSecretBytes == null) {
-                throw Exception('X25519 ECDH returned null shared secret');
-              }
-              
-              // Créer un SecretKey depuis les bytes pour HKDF
-              final shared = SecretKey(ecdhResult.sharedSecretBytes!);
+      
+      final myPrivateKeyBytes = await KeyManagerFinal.instance.getX25519PrivateKeyBytes(groupId, myDeviceId);
+      final remotePublicKeyBytes = base64.decode(_cleanBase64(ephPubB64));
       
       // Récupérer la salt depuis le payload
       if (!messageV2.containsKey('salt')) {
         throw Exception('salt is required in messageV2');
       }
       final salt = base64.decode(_cleanBase64(messageV2['salt'] as String));
-
-              // 📊 BENCHMARK: Mesurer HKDF (reste sur thread principal pour l'instant)
-              final kekBytes = await PerformanceBenchmark.instance.measureAsync(
-                'decryptFast_hkdf',
-                () async {
-      final infoData = 'project-app/v2 $groupId ${messageV2['convId']} $myUserId $myDeviceId';
-      final kek = await _hkdf.deriveKey(
-                    secretKey: shared,
-        nonce: salt,
-        info: utf8.encode(infoData),
-      );
-                  return Uint8List.fromList(await kek.extractBytes());
-                },
-              );
-
+      
       // Récupérer les recipients
       final recipients = messageV2['recipients'] as List<dynamic>;
       if (recipients.isEmpty) {
@@ -352,30 +313,57 @@ class MessageCipherV2 {
         (w) => w['userId'] == myUserId && w['deviceId'] == myDeviceId,
         orElse: () => throw Exception('No wrap for this device'),
       );
-
-              // 📊 BENCHMARK: Mesurer AES-GCM unwrap
-              final mkBytes = await PerformanceBenchmark.instance.measureAsync(
-                'decryptFast_aes_unwrap',
-                () async {
+      
       final wrapBytes = base64.decode(_cleanBase64(mine['wrap'] as String));
       final wrapNonce = base64.decode(_cleanBase64(mine['nonce'] as String));
-                  final macLen = 16;
-      final cipherLen = wrapBytes.length - macLen;
-      final wrapBox = SecretBox(
-        wrapBytes.sublist(0, cipherLen),
-        nonce: wrapNonce,
-        mac: Mac(wrapBytes.sublist(cipherLen)),
+      
+      final iv = base64.decode(_cleanBase64(messageV2['iv'] as String));
+      final ciphertext = base64.decode(_cleanBase64(messageV2['ciphertext'] as String));
+      
+      // 2. Créer la tâche pipeline
+      final task = DecryptPipelineTask(
+        taskId: messageId,
+        priority: priority,
+        myPrivateKeyBytes: myPrivateKeyBytes,
+        remotePublicKeyBytes: remotePublicKeyBytes,
+        groupId: groupId,
+        convId: messageV2['convId'] as String,
+        myUserId: myUserId,
+        myDeviceId: myDeviceId,
+        salt: salt,
+        wrapBytes: wrapBytes,
+        wrapNonce: wrapNonce,
+        iv: iv,
+        ciphertext: ciphertext,
       );
-                  final result = await _aead.decrypt(
-        wrapBox,
-        secretKey: SecretKey(kekBytes),
-                  );
-                  return Uint8List.fromList(result);
-                },
-              );
-              
-              // 📊 BENCHMARK: Mesurer AES-GCM decrypt content
-              return await _decryptContent(messageV2, mkBytes);
+      
+      // 3. Exécuter le pipeline complet dans l'Isolate
+      final result = await PerformanceBenchmark.instance.measureAsync(
+        'decryptFast_pipeline_isolate',
+        () => CryptoIsolateService.instance.executeDecryptPipeline(task),
+      );
+      
+      if (result.error != null) {
+        debugPrint('❌ [decryptFast] Erreur pipeline pour $messageId: ${result.error}');
+        throw Exception('Pipeline error: ${result.error}');
+      }
+      
+      if (result.decryptedTextBytes == null) {
+        debugPrint('❌ [decryptFast] Pipeline retourné null pour $messageId');
+        throw Exception('Pipeline returned null decrypted text');
+      }
+      
+      // Validation : vérifier que le résultat n'est pas vide
+      if (result.decryptedTextBytes!.isEmpty) {
+        debugPrint('❌ [decryptFast] Pipeline retourné bytes vides pour $messageId');
+        throw Exception('Pipeline returned empty decrypted text');
+      }
+      
+      // 4. Retourner le résultat
+      return {
+        'decryptedText': result.decryptedTextBytes!,
+        'signatureValid': false, // Pas de vérification dans decryptFast
+      };
             },
           );
         }

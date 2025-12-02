@@ -127,6 +127,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
       
       // 1) Charger les messages en premier (peut être depuis le stockage local = instantané)
       // Cette opération notifie automatiquement les listeners quand les messages arrivent
+      // IMPORTANT: fetchMessages attend maintenant la synchronisation serveur pour inclure le dernier message
       await _conversationProvider.fetchMessages(
         context, 
         widget.conversationId,
@@ -138,10 +139,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
       if (!mounted) return;
       setState(() => _isLoading = false);
       
+      // Initialiser le compteur de messages pour détecter les nouveaux
+      final initialMessages = _conversationProvider.messagesFor(widget.conversationId);
+      _lastMessageCount = initialMessages.length;
+      
       // 📊 BENCHMARK: Mesurer le déchiffrement progressif
       final decryptTimer = PerformanceBenchmark.instance.startTimer('conversation_screen_decrypt_initial');
       
-      // 3) Déchiffrement progressif en arrière-plan (non-bloquant)
+      // 3) Déchiffrement progressif - maintenant que tous les messages sont chargés (y compris le dernier)
+      // CORRECTION: Attendre un petit délai pour s'assurer que tous les messages sont bien dans la liste
+      await Future.delayed(const Duration(milliseconds: 100));
       _startProgressiveDecryption();
       
       // Attendre que les 5 premiers messages visibles soient déchiffrés
@@ -219,6 +226,24 @@ class _ConversationScreenState extends State<ConversationScreen> {
     
     // Déchiffrer uniquement les messages visibles - pas de déchiffrement en arrière-plan
     _decryptVisibleMessagesSequentially(orderedVisibleMessages);
+  }
+  
+  /// Déchiffre les nouveaux messages qui arrivent après le chargement initial
+  /// Appelé quand de nouveaux messages sont ajoutés à la conversation
+  void _decryptNewMessages(List<Message> newMessages) {
+    if (newMessages.isEmpty || !mounted) return;
+    
+    // Déchiffrer uniquement les messages qui ne sont pas encore déchiffrés
+    final toDecrypt = newMessages.where((msg) => 
+      msg.decryptedText == null && msg.v2Data != null
+    ).toList();
+    
+    if (toDecrypt.isEmpty) return;
+    
+    debugPrint('🔐 [NewMessages] Déchiffrement de ${toDecrypt.length} nouveaux messages');
+    
+    // Déchiffrer séquentiellement avec haute priorité
+    _decryptVisibleMessagesSequentially(toDecrypt.reversed.toList());
   }
   
   /// Déchiffre les messages visibles séquentiellement dans l'ordre pour une meilleure UX
@@ -354,6 +379,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         
         // Mise à jour UI immédiate
         if (mounted) {
+          // Notifier le ValueListenableBuilder pour mise à jour granulaire
           _messageUpdateNotifier.value = message.id;
         }
       }
@@ -573,9 +599,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
+  int _lastMessageCount = 0;
+  
   void _onMessagesUpdated() {
     // 🚀 CORRECTION: Toujours permettre les mises à jour pour les nouveaux messages WebSocket
     // Même si le déchiffrement initial n'est pas terminé, les nouveaux messages doivent s'afficher
+    
+    final currentMessages = _conversationProvider.messagesFor(widget.conversationId);
+    final currentCount = currentMessages.length;
+    
+    // Détecter les nouveaux messages
+    if (currentCount > _lastMessageCount && _lastMessageCount > 0) {
+      final newMessages = currentMessages.sublist(_lastMessageCount);
+      debugPrint('🔐 [NewMessages] ${newMessages.length} nouveaux messages détectés');
+      _decryptNewMessages(newMessages);
+    }
+    _lastMessageCount = currentCount;
     
     // Auto-scroll seulement si l'utilisateur est proche du bas (reverse:true)
     if (_isNearBottom()) {

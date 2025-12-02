@@ -14,6 +14,7 @@ class CryptoIsolateService {
   SendPort? _sendPort;
   ReceivePort? _resultPort;
   final Map<String, Completer<X25519EcdhResult>> _pendingTasks = {};
+  final Map<String, Completer<DecryptPipelineResult>> _pendingPipelineTasks = {};
   bool _isDisposed = false;
   
   StreamSubscription<dynamic>? _resultSubscription;
@@ -54,23 +55,64 @@ class CryptoIsolateService {
       if (message is Map<String, dynamic>) {
         final taskId = message['taskId'] as String?;
         if (taskId != null) {
-          debugPrint('📥 [CryptoIsolate] Réception résultat pour tâche: $taskId');
-          final completer = _pendingTasks.remove(taskId);
-          if (completer != null && !completer.isCompleted) {
-            if (message['error'] != null) {
-              debugPrint('❌ [CryptoIsolate] Erreur pour tâche $taskId: ${message['error']}');
-              completer.completeError(Exception(message['error']));
-            } else {
-              try {
-                completer.complete(X25519EcdhResult.fromJson(message));
-                debugPrint('✅ [CryptoIsolate] Tâche $taskId complétée avec succès');
-              } catch (e) {
-                debugPrint('❌ [CryptoIsolate] Erreur parsing résultat pour $taskId: $e');
-                completer.completeError(e);
+          
+          // 🔧 FIX: Vérifier d'abord le type de résultat en fonction des champs présents
+          // Un résultat de pipeline a 'decryptedTextBytes', un résultat X25519 ECDH a 'sharedSecretBytes'
+          final hasDecryptedText = message.containsKey('decryptedTextBytes');
+          final hasSharedSecret = message.containsKey('sharedSecretBytes');
+          final isPipelineResult = hasDecryptedText;
+          final isEcdhResult = hasSharedSecret;
+          
+          // Traiter d'abord les résultats de pipeline (priorité car plus spécifique)
+          if (isPipelineResult) {
+            final pipelineCompleter = _pendingPipelineTasks.remove(taskId);
+            if (pipelineCompleter != null && !pipelineCompleter.isCompleted) {
+              if (message['error'] != null) {
+                debugPrint('❌ [CryptoIsolate] Erreur pour pipeline $taskId: ${message['error']}');
+                pipelineCompleter.completeError(Exception(message['error']));
+              } else {
+                try {
+                  final result = DecryptPipelineResult.fromJson(message);
+                  
+                  // Validation : vérifier que le résultat contient bien les données
+                  if (result.decryptedTextBytes == null && result.error == null) {
+                    debugPrint('⚠️ [CryptoIsolate] Pipeline $taskId retourné sans données ni erreur');
+                    pipelineCompleter.completeError(Exception('Pipeline returned null decrypted text'));
+                  } else {
+                    pipelineCompleter.complete(result);
+                  }
+                } catch (e) {
+                  debugPrint('❌ [CryptoIsolate] Erreur parsing résultat pipeline pour $taskId: $e');
+                  pipelineCompleter.completeError(e);
+                }
               }
+              return;
             }
-          } else {
-            debugPrint('⚠️ [CryptoIsolate] Aucun completer trouvé pour tâche: $taskId');
+          }
+          
+          // Vérifier si c'est une tâche X25519 ECDH (seulement si ce n'est pas un résultat de pipeline)
+          if (isEcdhResult) {
+            final ecdhCompleter = _pendingTasks.remove(taskId);
+            if (ecdhCompleter != null && !ecdhCompleter.isCompleted) {
+              if (message['error'] != null) {
+                debugPrint('❌ [CryptoIsolate] Erreur pour tâche $taskId: ${message['error']}');
+                ecdhCompleter.completeError(Exception(message['error']));
+              } else {
+                try {
+                  ecdhCompleter.complete(X25519EcdhResult.fromJson(message));
+                } catch (e) {
+                  debugPrint('❌ [CryptoIsolate] Erreur parsing résultat pour $taskId: $e');
+                  ecdhCompleter.completeError(e);
+                }
+              }
+              return;
+            }
+          }
+          
+          // Ne pas afficher de warning si c'est un résultat tardif (peut arriver si timeout)
+          // Seulement si c'est vraiment inattendu
+          if (!_pendingTasks.containsKey(taskId) && !_pendingPipelineTasks.containsKey(taskId)) {
+            debugPrint('⚠️ [CryptoIsolate] Aucun completer trouvé pour tâche: $taskId (probablement timeout ou déjà complété)');
           }
         }
       }
@@ -123,6 +165,37 @@ class CryptoIsolateService {
     return completer.future;
   }
   
+  /// Exécute un pipeline complet de déchiffrement dans l'Isolate
+  Future<DecryptPipelineResult> executeDecryptPipeline(DecryptPipelineTask task) async {
+    await _ensureStarted();
+    
+    if (_isDisposed) {
+      throw Exception('Service disposed');
+    }
+    
+    final completer = Completer<DecryptPipelineResult>();
+    _pendingPipelineTasks[task.taskId] = completer;
+    
+    // Timeout de sécurité (90 secondes - pipeline complet peut être lent)
+    Timer(const Duration(seconds: 90), () {
+      if (_pendingPipelineTasks.containsKey(task.taskId)) {
+        _pendingPipelineTasks.remove(task.taskId);
+        if (!completer.isCompleted) {
+          completer.completeError(TimeoutException('Decrypt pipeline task timeout after 90s'));
+        }
+      }
+    });
+    
+    debugPrint('📤 [CryptoIsolate] Envoi pipeline complet: ${task.taskId}');
+    
+    _sendPort!.send({
+      'type': 'decrypt_pipeline',
+      'data': task.toJson(),
+    });
+    
+    return completer.future;
+  }
+  
   /// Libère les ressources
   Future<void> dispose() async {
     _isDisposed = true;
@@ -134,6 +207,11 @@ class CryptoIsolateService {
       completer.completeError(Exception('Service disposed'));
     }
     _pendingTasks.clear();
+    
+    for (final completer in _pendingPipelineTasks.values) {
+      completer.completeError(Exception('Service disposed'));
+    }
+    _pendingPipelineTasks.clear();
     
     if (_sendPort != null) {
       _sendPort!.send('dispose');

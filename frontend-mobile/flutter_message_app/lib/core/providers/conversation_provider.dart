@@ -1033,14 +1033,18 @@ class ConversationProvider extends ChangeNotifier {
             // 🚀 OPTIMISATION: Notification immédiate pour l'affichage initial (critique)
             _notifyListenersImmediate();
             
-            debugPrint('✅ Messages locaux affichés immédiatement, synchronisation serveur en arrière-plan...');
+            debugPrint('✅ Messages locaux affichés immédiatement, synchronisation serveur en cours...');
             
             // CORRECTION CRITIQUE: Toujours charger depuis le serveur pour récupérer les messages récents
             // même si on a des messages locaux (l'app peut avoir été fermée)
             // On charge les messages les plus récents (sans curseur) pour s'assurer de tout récupérer
-            _syncMessagesFromServer(context, conversationId, limit: limit, forceRecent: true).catchError((e) {
+            // IMPORTANT: Attendre la synchronisation pour s'assurer que le dernier message est inclus
+            try {
+              await _syncMessagesFromServer(context, conversationId, limit: limit, forceRecent: true);
+              debugPrint('✅ Synchronisation serveur terminée');
+            } catch (e) {
               debugPrint('⚠️ Erreur synchronisation serveur: $e');
-            });
+            }
             
             return; // Afficher immédiatement les messages locaux
           } else {
