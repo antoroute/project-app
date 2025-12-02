@@ -61,27 +61,6 @@ class _MessageBubbleState extends State<MessageBubble> {
       HapticFeedback.lightImpact();
       
       await Clipboard.setData(ClipboardData(text: _currentText));
-      
-      // Afficher un feedback visuel
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.copy, color: Colors.white, size: 20),
-                SizedBox(width: 8),
-                Text('Message copié dans le presse-papiers'),
-              ],
-            ),
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            backgroundColor: Colors.green.shade600,
-          ),
-        );
-      }
     } catch (e) {
       debugPrint('❌ Erreur lors de la copie: $e');
     }
