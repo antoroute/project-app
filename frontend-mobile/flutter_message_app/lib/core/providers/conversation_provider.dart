@@ -35,6 +35,10 @@ class ConversationProvider extends ChangeNotifier {
   static const int _maxMessagesInMemory = 200;
 
   List<Conversation> _conversations = <Conversation>[];
+  /// ✅ OPTIMISATION: Flag pour éviter les appels multiples à fetchConversations
+  bool _conversationsLoaded = false;
+  DateTime? _lastConversationsLoad;
+  static const Duration _conversationsCacheDuration = Duration(seconds: 30);
   /// Cache local des messages, par conversationId
   final Map<String, List<Message>> _messages = {};
   /// Cache mémoire des messages déchiffrés (session courante uniquement)
@@ -178,6 +182,11 @@ class ConversationProvider extends ChangeNotifier {
     }
     // Les callbacks de présence sont maintenant gérés par le service global
     debugPrint('👥 [ConversationProvider] Presence callbacks handled by global service');
+    // ✅ NOUVEAU: Gérer les événements de présence batch
+    if (_webSocketService.onPresenceConversationBatch == null) {
+      _webSocketService.onPresenceConversationBatch = _onPresenceConversationBatch;
+      debugPrint('✅ [ConversationProvider] Callback onPresenceConversationBatch branché');
+    }
     if (_webSocketService.onConvRead == null) {
       _webSocketService.onConvRead = _onConvRead;
     }
@@ -700,18 +709,59 @@ class ConversationProvider extends ChangeNotifier {
   /// - typing:start/stop (indicateurs de frappe)
   /// - conv:read (messages lus)
   /// - presence:conversation (présence dans les conversations)
-  Future<void> fetchConversations() async {
+  Future<void> fetchConversations({bool forceRefresh = false}) async {
     try {
+      // ✅ OPTIMISATION: Vérifier si déjà chargé récemment
+      final now = DateTime.now();
+      if (!forceRefresh && 
+          _conversationsLoaded && 
+          _lastConversationsLoad != null &&
+          now.difference(_lastConversationsLoad!) < _conversationsCacheDuration) {
+        debugPrint('📡 [ConversationProvider] Conversations déjà chargées récemment, skip');
+        return;
+      }
+      
       _conversations = await _apiService.fetchConversations();
       
-      // SÉCURITÉ: S'abonner automatiquement à toutes les conversations
-      // Le backend vérifie les permissions dans conv:subscribe avant d'autoriser l'abonnement
-      // Une fois abonné, l'utilisateur reçoit TOUS les événements de cette conversation
-      debugPrint('📡 [ConversationProvider] Abonnement automatique à ${_conversations.length} conversations');
-      debugPrint('📡 [ConversationProvider] Événements qui seront reçus: message:new, typing:start/stop, conv:read, presence:conversation');
-      for (final conv in _conversations) {
-        subscribe(conv.conversationId);
+      // ✅ OPTIMISÉ: Vérifier les abonnements existants avant de s'abonner
+      // SÉCURITÉ: Le backend vérifie les permissions dans conv:subscribe avant d'autoriser l'abonnement
+      final alreadySubscribed = _webSocketService.subscribedConversations;
+      final conversationsToSubscribe = _conversations
+          .where((conv) => !alreadySubscribed.contains(conv.conversationId))
+          .map((conv) => conv.conversationId)
+          .toList();
+      
+      if (conversationsToSubscribe.isEmpty) {
+        debugPrint('📡 [ConversationProvider] Toutes les conversations sont déjà abonnées');
+      } else if (conversationsToSubscribe.length > 5) {
+        // ✅ OPTIMISÉ: Utiliser batch subscription pour les grandes listes
+        debugPrint('📡 [ConversationProvider] Abonnement batch à ${conversationsToSubscribe.length} conversations');
+        try {
+          final result = await _webSocketService.subscribeConversationsBatch(conversationsToSubscribe);
+          final subscribed = result['subscribed'] as int? ?? 0;
+          final alreadySubscribedCount = result['alreadySubscribed'] as int? ?? 0;
+          final unauthorized = result['unauthorized'] as int? ?? 0;
+          debugPrint('✅ [ConversationProvider] Batch subscription: $subscribed conversations abonnées, $alreadySubscribedCount déjà abonnées, $unauthorized non autorisées');
+        } catch (e) {
+          debugPrint('❌ [ConversationProvider] Erreur batch subscription, fallback individuel: $e');
+          // Fallback: abonner une par une
+          for (final convId in conversationsToSubscribe) {
+            subscribe(convId);
+          }
+        }
+      } else {
+        // Pour peu de conversations, abonner une par une
+        debugPrint('📡 [ConversationProvider] Abonnement individuel à ${conversationsToSubscribe.length} conversations');
+        for (final convId in conversationsToSubscribe) {
+          subscribe(convId);
+        }
       }
+      
+      debugPrint('📡 [ConversationProvider] Événements qui seront reçus: message:new, typing:start/stop, conv:read, presence:conversation');
+      
+      // ✅ OPTIMISATION: Mettre à jour les flags
+      _conversationsLoaded = true;
+      _lastConversationsLoad = now;
       
       // 🚀 OPTIMISATION: Notification immédiate pour l'affichage initial (critique)
       _notifyListenersImmediate();
@@ -719,6 +769,11 @@ class ConversationProvider extends ChangeNotifier {
       debugPrint('❌ fetchConversations error: $e');
       rethrow;
     }
+  }
+  
+  /// ✅ NOUVEAU: Méthode pour forcer le rechargement
+  Future<void> refreshConversations() async {
+    await fetchConversations(forceRefresh: true);
   }
 
   /// Appelle POST /conversations
@@ -2119,6 +2174,32 @@ class ConversationProvider extends ChangeNotifier {
   // Presence + read receipts hooks (UI can observe derived state later)
   // Les méthodes _onPresenceUpdate et _onPresenceConversation sont maintenant gérées par GlobalPresenceService
   
+  /// ✅ NOUVEAU: Gère les événements de présence batch
+  void _onPresenceConversationBatch(String conversationId, List<Map<String, dynamic>> presences) {
+    debugPrint('👥 [ConversationProvider] Batch presence reçu pour $conversationId: ${presences.length} utilisateurs');
+    
+    // Mettre à jour la présence pour tous les utilisateurs en une fois
+    if (_conversationPresence[conversationId] == null) {
+      _conversationPresence[conversationId] = {};
+    }
+    
+    for (final presence in presences) {
+      final userId = presence['userId'] as String?;
+      final online = presence['online'] as bool? ?? false;
+      
+      if (userId != null) {
+        _conversationPresence[conversationId]![userId] = online;
+        // Mettre à jour aussi la présence globale
+        _userOnline[userId] = online;
+      }
+    }
+    
+    // Synchroniser avec le service global de présence
+    _syncWithGlobalPresence();
+    
+    // 🚀 OPTIMISATION: Batching pour les mises à jour de présence (non-critique)
+    _notifyListenersBatched();
+  }
 
   void _onConvRead(String convId, String userId, String at) {
     // Refresh readers to fetch usernames and timestamps

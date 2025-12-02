@@ -126,9 +126,84 @@ async function build() {
         }, 'Failed to auto-join group rooms');
       });
     
+    // ✅ OPTIMISATION: Fonction helper pour émettre les événements de présence de manière optimisée
+    async function emitBatchPresenceEvents(
+      socket: any, 
+      convIds: string[], 
+      userId: string, 
+      app: any
+    ) {
+      // Pour chaque conversation, envoyer un seul événement avec toutes les présences
+      for (const convId of convIds) {
+        const conversationRoom = `conv:${convId}`;
+        const socketsInConversation = app.io.sockets.adapter.rooms.get(conversationRoom);
+        
+        if (!socketsInConversation) continue;
+        
+        // Compter les sockets par utilisateur
+        const presenceMap = new Map<string, number>();
+        const otherUsersPresence: Array<{userId: string, online: boolean, count: number}> = [];
+        
+        for (const socketId of socketsInConversation) {
+          const otherSocket = app.io.sockets.sockets.get(socketId);
+          if (otherSocket && otherSocket.id !== socket.id) {
+            const otherUserId = (otherSocket as any).auth?.userId;
+            if (otherUserId) {
+              presenceMap.set(otherUserId, (presenceMap.get(otherUserId) || 0) + 1);
+            }
+          }
+        }
+        
+        // ✅ OPTIMISÉ: Envoyer un seul événement avec toutes les présences
+        if (presenceMap.size > 0) {
+          for (const [otherUserId, socketCount] of presenceMap.entries()) {
+            otherUsersPresence.push({
+              userId: otherUserId,
+              online: true,
+              count: socketCount
+            });
+          }
+          
+          // Envoyer toutes les présences en un seul événement
+          socket.emit('presence:conversation:batch', {
+            conversationId: convId,
+            presences: otherUsersPresence
+          });
+          
+          app.log.info({ 
+            convId, 
+            userId, 
+            presenceCount: otherUsersPresence.length 
+          }, 'Sent batch presence state to new subscriber');
+        }
+        
+        // Notifier les autres utilisateurs de la présence du nouvel arrivant
+        const userSocketsInConversation = Array.from(socketsInConversation || []).filter(socketId => {
+          const s = app.io.sockets.sockets.get(socketId);
+          return s && (s as any).auth?.userId === userId;
+        });
+        
+        socket.to(conversationRoom).emit('presence:conversation', {
+          userId,
+          online: true,
+          count: userSocketsInConversation.length,
+          conversationId: convId
+        });
+      }
+    }
+
     // Gestion des abonnements aux conversations
     socket.on('conv:subscribe', async (data: any) => {
       const convId = data.convId || data;
+      const roomName = `conv:${convId}`;
+      
+      // ✅ OPTIMISATION: Vérifier si déjà abonné (évite requête DB inutile)
+      const room = app.io.sockets.adapter.rooms.get(roomName);
+      if (room && room.has(socket.id)) {
+        app.log.info({ convId, userId }, 'User already subscribed to conversation');
+        socket.emit('conv:subscribe', { success: true, convId, alreadySubscribed: true });
+        return;
+      }
       
       // Vérifier que l'utilisateur a accès à cette conversation
       const hasAccess = await app.db.oneOrNone(
@@ -139,58 +214,76 @@ async function build() {
       );
       
       if (hasAccess) {
-        socket.join(`conv:${convId}`);
+        socket.join(roomName);
         socket.emit('conv:subscribe', { success: true, convId });
         app.log.info({ convId, userId }, 'User subscribed to conversation');
         
-        // CORRECTION: Émettre la présence de l'utilisateur dans cette conversation
-        // Vérifier combien de sockets de cet utilisateur sont dans cette conversation
-        const conversationRoom = `conv:${convId}`;
-        const socketsInConversation = app.io.sockets.adapter.rooms.get(conversationRoom);
-        const userSocketsInConversation = Array.from(socketsInConversation || []).filter(socketId => {
-          const socket = app.io.sockets.sockets.get(socketId);
-          return socket && (socket as any).auth?.userId === userId;
-        });
-        
-        socket.to(`conv:${convId}`).emit('presence:conversation', {
-          userId,
-          online: true,
-          count: userSocketsInConversation.length,
-          conversationId: convId
-        });
-        app.log.info({ convId, userId, socketCount: userSocketsInConversation.length }, 'Presence broadcasted to conversation');
-        
-        // NOUVEAU: Envoyer l'état de présence actuel de tous les autres utilisateurs au nouvel arrivant
-        const conversationRoomSockets = app.io.sockets.adapter.rooms.get(conversationRoom);
-        if (conversationRoomSockets) {
-          const presenceMap = new Map<string, number>();
-          
-          // Compter les sockets par utilisateur dans cette conversation
-          for (const socketId of conversationRoomSockets) {
-            const otherSocket = app.io.sockets.sockets.get(socketId);
-            if (otherSocket && otherSocket.id !== socket.id) {
-              const otherUserId = (otherSocket as any).auth?.userId;
-              if (otherUserId) {
-                presenceMap.set(otherUserId, (presenceMap.get(otherUserId) || 0) + 1);
-              }
-            }
-          }
-          
-          // Envoyer l'état de présence de chaque utilisateur au nouvel arrivant
-          for (const [otherUserId, socketCount] of presenceMap.entries()) {
-            socket.emit('presence:conversation', {
-              userId: otherUserId,
-              online: true,
-              count: socketCount,
-              conversationId: convId
-            });
-            app.log.info({ convId, userId, otherUserId, socketCount }, 'Sent current presence state to new subscriber');
-          }
-        }
+        // ✅ OPTIMISÉ: Utiliser la fonction helper pour les événements de présence
+        await emitBatchPresenceEvents(socket, [convId], userId, app);
       } else {
         socket.emit('conv:subscribe', { success: false, error: 'Unauthorized' });
         app.log.warn({ convId, userId }, 'Unauthorized conversation subscription attempt');
       }
+    });
+    
+    // ✅ NOUVEAU: Endpoint batch pour abonner plusieurs conversations en une requête
+    socket.on('conv:subscribe:batch', async (data: any) => {
+      const convIds = Array.isArray(data.convIds) ? data.convIds : [data.convId];
+      
+      if (convIds.length === 0) {
+        socket.emit('conv:subscribe:batch', { success: false, error: 'No conversation IDs provided' });
+        return;
+      }
+      
+      app.log.info({ userId, count: convIds.length }, 'Batch subscription request');
+      
+      // ✅ OPTIMISÉ: Vérifier les accès en une seule requête avec ANY
+      const accessCheck = await app.db.any(
+        `SELECT c.id 
+         FROM conversation_users cu 
+         JOIN conversations c ON cu.conversation_id = c.id 
+         WHERE cu.user_id = $1 AND c.id = ANY($2::uuid[])`,
+        [userId, convIds]
+      );
+      
+      const authorizedConvIds = accessCheck.map((row: any) => row.id);
+      const unauthorizedCount = convIds.length - authorizedConvIds.length;
+      
+      // Abonner à toutes les conversations autorisées
+      const subscribed: string[] = [];
+      const alreadySubscribed: string[] = [];
+      
+      for (const convId of authorizedConvIds) {
+        const roomName = `conv:${convId}`;
+        const room = app.io.sockets.adapter.rooms.get(roomName);
+        
+        if (room && room.has(socket.id)) {
+          alreadySubscribed.push(convId);
+        } else {
+          socket.join(roomName);
+          subscribed.push(convId);
+        }
+      }
+      
+      // ✅ OPTIMISÉ: Émettre les événements de présence de manière batch
+      if (subscribed.length > 0) {
+        await emitBatchPresenceEvents(socket, subscribed, userId, app);
+      }
+      
+      socket.emit('conv:subscribe:batch', {
+        success: true,
+        subscribed: subscribed.length,
+        alreadySubscribed: alreadySubscribed.length,
+        unauthorized: unauthorizedCount,
+        convIds: subscribed
+      });
+      
+      app.log.info({ 
+        userId, 
+        subscribed: subscribed.length,
+        alreadySubscribed: alreadySubscribed.length,
+        unauthorized: unauthorizedCount
+      }, 'Batch subscription completed');
     });
     
     socket.on('conv:unsubscribe', (data: any) => {

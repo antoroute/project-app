@@ -40,6 +40,8 @@ class WebSocketService {
   void Function(Map<String, dynamic> payloadV2)? onNewMessageV2; // v2 payload
   void Function(String userId, bool online, int count)? onPresenceUpdate;
   void Function(String userId, bool online, int count, String conversationId)? onPresenceConversation;
+  /// ✅ NOUVEAU: Callback pour les événements de présence batch
+  void Function(String conversationId, List<Map<String, dynamic>> presences)? onPresenceConversationBatch;
   void Function(String convId, String userId, String at)? onConvRead;
   void Function(String conversationId, String userId)? onUserAdded;
   VoidCallback? onNotificationNew;
@@ -197,6 +199,23 @@ class WebSocketService {
           onPresenceConversation?.call(uid, online, count, conversationId);
         }
       })
+      ..on('presence:conversation:batch', (data) {
+        _updateActivityMetrics();
+        
+        if (data is Map) {
+          final m = Map<String, dynamic>.from(data);
+          final conversationId = m['conversationId'] as String?;
+          final presences = m['presences'] as List<dynamic>?;
+          
+          if (conversationId != null && presences != null) {
+            final presencesList = presences
+                .map((p) => Map<String, dynamic>.from(p))
+                .toList();
+            
+            onPresenceConversationBatch?.call(conversationId, presencesList);
+          }
+        }
+      })
       ..on('conv:read', (data) {
         if (data is Map) {
           final m = Map<String, dynamic>.from(data);
@@ -292,6 +311,12 @@ class WebSocketService {
   }
 
   void subscribeConversation(String conversationId) {
+    // ✅ OPTIMISATION: Vérifier si déjà abonné AVANT d'envoyer la requête
+    if (_subscribedConversations.contains(conversationId)) {
+      debugPrint('📡 [WebSocket] Conversation déjà abonnée, ignorée: $conversationId');
+      return; // Ne pas envoyer de requête redondante
+    }
+    
     debugPrint('📡 [WebSocket] Tentative d\'abonnement à la conversation: $conversationId');
     debugPrint('📡 [WebSocket] Statut actuel: $_status');
     debugPrint('📡 [WebSocket] Socket null? ${_socket == null}');
@@ -346,6 +371,76 @@ class WebSocketService {
     }
   }
   
+  /// ✅ NOUVEAU: S'abonne à plusieurs conversations en une seule requête batch
+  Future<Map<String, dynamic>> subscribeConversationsBatch(List<String> conversationIds) async {
+    if (conversationIds.isEmpty) {
+      return {'success': false, 'error': 'No conversation IDs provided'};
+    }
+    
+    // Filtrer les conversations déjà abonnées
+    final newConversations = conversationIds
+        .where((id) => !_subscribedConversations.contains(id))
+        .toList();
+    
+    if (newConversations.isEmpty) {
+      debugPrint('📡 [WebSocket] Toutes les conversations sont déjà abonnées');
+      return {
+        'success': true,
+        'subscribed': 0,
+        'alreadySubscribed': conversationIds.length,
+        'unauthorized': 0,
+        'convIds': []
+      };
+    }
+    
+    // Ajouter aux abonnements persistants
+    _subscribedConversations.addAll(newConversations);
+    debugPrint('📡 [WebSocket] Batch subscription: ${newConversations.length} nouvelles conversations');
+    
+    if (_status != SocketStatus.connected || _socket == null) {
+      // Si pas connecté, ajouter aux abonnements en attente
+      _pendingSubscriptions.addAll(newConversations);
+      debugPrint('⚠️ [WebSocket] WebSocket non connecté, abonnements mis en attente');
+      return {
+        'success': false,
+        'error': 'WebSocket not connected',
+        'pending': newConversations.length
+      };
+    }
+    
+    debugPrint('📡 [WebSocket] Envoi de conv:subscribe:batch pour ${newConversations.length} conversations');
+    
+    final completer = Completer<Map<String, dynamic>>();
+    
+    _socket!.emitWithAck(
+      'conv:subscribe:batch',
+      {'convIds': newConversations},
+      ack: (resp) {
+        if (resp != null && resp is Map) {
+          final success = resp['success'] as bool? ?? false;
+          if (success) {
+            final subscribed = resp['subscribed'] as int? ?? 0;
+            final alreadySubscribed = resp['alreadySubscribed'] as int? ?? 0;
+            final unauthorized = resp['unauthorized'] as int? ?? 0;
+            debugPrint('✅ [WebSocket] Batch subscription réussie: $subscribed nouveaux, $alreadySubscribed déjà abonnés, $unauthorized non autorisés');
+          }
+          completer.complete(Map<String, dynamic>.from(resp));
+        } else {
+          completer.completeError('Invalid response from batch subscription');
+        }
+      },
+    );
+    
+    // Timeout après 10 secondes
+    Future.delayed(const Duration(seconds: 10), () {
+      if (!completer.isCompleted) {
+        completer.completeError('Batch subscription timeout');
+      }
+    });
+    
+    return completer.future;
+  }
+  
   /// Émet un événement de début de frappe
   void emitTypingStart(String conversationId) {
     if (_status != SocketStatus.connected || _socket == null) {
@@ -364,23 +459,50 @@ class WebSocketService {
   
   /// Réabonne automatiquement aux conversations lors de la reconnexion
   void _resubscribeToConversations() {
+    if (_subscribedConversations.isEmpty) {
+      return;
+    }
+    
     debugPrint('📡 [WebSocket] Réabonnement aux conversations: ${_subscribedConversations.length} conversations');
-    for (final convId in _subscribedConversations) {
-      debugPrint('📡 [WebSocket] Réabonnement à la conversation: $convId');
-      _socket!.emitWithAck(
-        'conv:subscribe',
-        {'convId': convId},
-        ack: (resp) {
-          // Log silencieux pour les réabonnements
-        },
-      );
+    
+    // ✅ OPTIMISÉ: Utiliser batch subscription si plus de 5 conversations
+    if (_subscribedConversations.length > 5) {
+      subscribeConversationsBatch(_subscribedConversations.toList()).catchError((error) {
+        debugPrint('❌ [WebSocket] Erreur batch réabonnement: $error');
+        // Fallback: abonner une par une
+        for (final convId in _subscribedConversations) {
+          subscribeConversation(convId);
+        }
+        return <String, dynamic>{'success': false, 'error': error.toString()};
+      });
+    } else {
+      // Pour peu de conversations, abonner une par une
+      for (final convId in _subscribedConversations) {
+        subscribeConversation(convId);
+      }
     }
     
     // Traiter les abonnements en attente
-    for (final convId in _pendingSubscriptions) {
-      subscribeConversation(convId);
+    if (_pendingSubscriptions.isNotEmpty) {
+      final pendingList = _pendingSubscriptions.toList();
+      _pendingSubscriptions.clear();
+      
+      // ✅ OPTIMISÉ: Utiliser batch pour les abonnements en attente aussi
+      if (pendingList.length > 5) {
+        subscribeConversationsBatch(pendingList).catchError((error) {
+          debugPrint('❌ [WebSocket] Erreur batch abonnements en attente: $error');
+          // Fallback: abonner une par une
+          for (final convId in pendingList) {
+            subscribeConversation(convId);
+          }
+          return <String, dynamic>{'success': false, 'error': error.toString()};
+        });
+      } else {
+        for (final convId in pendingList) {
+          subscribeConversation(convId);
+        }
+      }
     }
-    _pendingSubscriptions.clear();
   }
   
   /// Gestion intelligente des abonnements avec métriques
