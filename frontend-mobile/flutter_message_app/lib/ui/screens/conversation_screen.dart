@@ -42,6 +42,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
   // 🚀 CORRECTION: Dernière position de scroll détectée pour éviter les déclenchements trop fréquents
   double? _lastScrollTriggerPosition;
   
+  // 🚀 CORRECTION: Variables pour préserver la position de scroll lors du chargement
+  double? _preservedScrollOffset;
+  double? _preservedMaxExtent;
+  
   // Timer pour les indicateurs de frappe
   Timer? _typingTimer;
 
@@ -50,6 +54,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
   
   // ValueNotifier pour les mises à jour ultra-granulaires
   final ValueNotifier<String?> _messageUpdateNotifier = ValueNotifier<String?>(null);
+  
+  // 🚀 CORRECTION: Flag pour indiquer qu'on est en train de préserver la position
+  // Empêche le listener de corriger pendant qu'on ajuste manuellement
+  bool _isPreservingScrollPosition = false;
 
   @override
   void initState() {
@@ -63,7 +71,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
     // Marquer la conversation comme lue (plus de badge)
     NotificationBadgeService().markConversationAsRead(widget.conversationId);
 
-    // Pas d'écoute du scroll - géré par NotificationListener
+    // 🚀 CORRECTION: Ajouter un listener sur le ScrollController pour détecter les changements non désirés
+    // et les corriger immédiatement pendant le chargement
+    _scrollController.addListener(_onScrollChanged);
     
     // WebSocket déjà connecté au niveau de l'app, juste s'abonner à la conversation
     _conversationProvider.subscribe(widget.conversationId);
@@ -94,6 +104,51 @@ class _ConversationScreenState extends State<ConversationScreen> {
           debugPrint('🔔 [ConversationScreen] Nouveau message dans autre conversation (badge uniquement, pas de notification texte)');
         }
       }
+    }
+  }
+
+  /// 🚀 CORRECTION: Listener pour détecter et corriger les changements de position non désirés
+  /// Pendant le chargement, si la position change de manière inattendue, on la restaure
+  /// Ne corrige que si l'utilisateur n'est pas en train de scroller activement
+  void _onScrollChanged() {
+    if (!_isPreservingScrollPosition || _preservedScrollOffset == null || _preservedMaxExtent == null) {
+      return;
+    }
+    
+    if (!_scrollController.hasClients || !mounted) {
+      return;
+    }
+    
+    // Ne pas corriger si l'utilisateur est en train de scroller activement
+    // (pour éviter les conflits avec le scroll manuel)
+    if (_scrollController.position.isScrollingNotifier.value) {
+      return;
+    }
+    
+    // Si on est en train de préserver la position et que la position actuelle ne correspond pas
+    // à ce qu'elle devrait être, la corriger immédiatement
+    final currentOffset = _scrollController.offset;
+    final currentMaxExtent = _scrollController.position.maxScrollExtent;
+    final expectedExtentDiff = currentMaxExtent - _preservedMaxExtent!;
+    
+    // Ne corriger que si maxExtent a changé (nouveaux messages ajoutés)
+    if (expectedExtentDiff <= 0) {
+      return;
+    }
+    
+    final expectedOffset = _preservedScrollOffset! + expectedExtentDiff;
+    
+    // Si la différence est significative (plus de 20px), corriger
+    // Utiliser un seuil plus élevé pour éviter les corrections trop fréquentes
+    final offsetDiff = (currentOffset - expectedOffset).abs();
+    if (offsetDiff > 20.0) {
+      debugPrint('🔧 Correction immédiate de la position: $currentOffset -> $expectedOffset (diff: $offsetDiff)');
+      // Utiliser un microtask pour éviter les conflits avec d'autres mises à jour
+      Future.microtask(() {
+        if (_scrollController.hasClients && mounted && _isPreservingScrollPosition) {
+          _scrollController.jumpTo(expectedOffset.clamp(0.0, currentMaxExtent));
+        }
+      });
     }
   }
 
@@ -469,21 +524,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   /// Ajuste la position de scroll après ajout de messages (reverse:true)
-  /// CORRECTION: Attend que l'utilisateur arrête de scroller avant d'ajuster pour éviter les conflits
-  void _adjustScrollPosition(double beforeMaxExtent, List<Message> currentMessages) {
+  /// CORRECTION: Utilise l'offset initial capturé avant le chargement pour préserver la position visuelle
+  void _adjustScrollPosition(double beforeMaxExtent, double beforeOffset, List<Message> currentMessages) {
     if (!_scrollController.hasClients || !mounted) {
       // 🚀 CORRECTION: Débloquer la détection si le scroll controller n'est plus disponible
       _isScrollDetectionBlocked = false;
       return;
     }
     
-    // CORRECTION: Capturer l'offset ACTUEL juste avant l'ajustement
-    // Pas celui capturé au début du chargement, car l'utilisateur a pu continuer à scroller
-    final currentOffset = _scrollController.offset;
     final afterMaxExtent = _scrollController.position.maxScrollExtent;
     final extentDiff = afterMaxExtent - beforeMaxExtent;
     
-    debugPrint('📍 Ajustement scroll - Offset actuel: $currentOffset, MaxExtent avant: $beforeMaxExtent, MaxExtent après: $afterMaxExtent, Différence: $extentDiff');
+    debugPrint('📍 Ajustement scroll - Offset initial: $beforeOffset, MaxExtent avant: $beforeMaxExtent, MaxExtent après: $afterMaxExtent, Différence: $extentDiff');
     
     // CORRECTION: Vérifier si l'utilisateur est en train de scroller activement
     // Si oui, attendre qu'il arrête avant d'ajuster pour éviter les conflits
@@ -497,19 +549,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
         _isListeningToScroll = true;
       }
       // Stocker les valeurs pour l'ajustement différé
-      _pendingScrollAdjustment = () {
-        _adjustScrollPosition(beforeMaxExtent, currentMessages);
+      _pendingScrollAdjustment = {
+        'beforeMaxExtent': beforeMaxExtent,
+        'beforeOffset': beforeOffset,
+        'currentMessages': currentMessages,
       };
       return;
     }
     
     // CORRECTION: Avec reverse:true, pour préserver la position visuelle,
-    // on doit augmenter l'offset de la différence de hauteur
+    // on doit augmenter l'offset initial de la différence de hauteur
+    // Utiliser l'offset initial (avant le chargement) pour éviter les sauts
     // Utiliser jumpTo pour un ajustement immédiat sans animation qui pourrait perturber
     if (extentDiff > 0) {
-      final newOffset = currentOffset + extentDiff;
+      final newOffset = beforeOffset + extentDiff;
       _scrollController.jumpTo(newOffset.clamp(0.0, afterMaxExtent));
-      debugPrint('✅ Position scroll ajustée: $newOffset');
+      debugPrint('✅ Position scroll ajustée: $newOffset (basé sur offset initial: $beforeOffset + diff: $extentDiff)');
     }
     
     // 🚀 OPTIMISATION: Déchiffrer "on-demand" les messages qui viennent d'être chargés
@@ -522,7 +577,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
   
   // Callback pour l'ajustement différé quand l'utilisateur arrête de scroller
-  VoidCallback? _pendingScrollAdjustment;
+  // Stocke les paramètres nécessaires pour l'ajustement
+  Map<String, dynamic>? _pendingScrollAdjustment;
   bool _isListeningToScroll = false;
   
   void _onScrollingStateChanged() {
@@ -542,7 +598,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
       // Attendre un court délai pour être sûr que le scroll est vraiment terminé
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted && adjustment != null) {
-          adjustment();
+          _adjustScrollPosition(
+            adjustment['beforeMaxExtent'] as double,
+            adjustment['beforeOffset'] as double,
+            adjustment['currentMessages'] as List<Message>,
+          );
           // 🚀 CORRECTION: Débloquer la détection après l'ajustement différé
           Future.delayed(const Duration(milliseconds: 300), () {
             if (mounted) {
@@ -577,11 +637,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
       return;
     }
     
-    // CORRECTION: Capturer seulement maxScrollExtent au début
-    // L'offset actuel sera capturé juste avant l'ajustement pour tenir compte du scroll continu de l'utilisateur
+    // CORRECTION: Capturer l'offset ET maxScrollExtent AVANT le chargement
+    // L'offset initial est crucial pour préserver la position visuelle après l'ajout des messages
+    final beforeOffset = _scrollController.offset;
     final beforeMaxExtent = _scrollController.position.maxScrollExtent;
     final currentMessages = _conversationProvider.messagesFor(widget.conversationId);
-    debugPrint('🔄 Début chargement - Messages actuels: ${currentMessages.length}, MaxExtent: $beforeMaxExtent');
+    debugPrint('🔄 Début chargement - Messages actuels: ${currentMessages.length}, Offset: $beforeOffset, MaxExtent: $beforeMaxExtent');
+    
+    // 🚀 CORRECTION: Préserver la position de scroll AVANT le chargement
+    // Ces valeurs seront utilisées pour restaurer la position après l'ajout des messages
+    _preservedScrollOffset = beforeOffset;
+    _preservedMaxExtent = beforeMaxExtent;
+    _isPreservingScrollPosition = true; // Activer la préservation
     
     // 📊 BENCHMARK: Mesurer la pagination complète (scroll)
     final scrollTimer = PerformanceBenchmark.instance.startTimer('conversation_screen_scroll_pagination');
@@ -625,41 +692,77 @@ class _ConversationScreenState extends State<ConversationScreen> {
       
       PerformanceBenchmark.instance.stopTimer(scrollTimer);
       
-      // CORRECTION: Préserver la position de scroll avec reverse:true
-      // Avec reverse:true, quand on ajoute des messages en haut, maxScrollExtent augmente
-      // Il faut ajuster l'offset pour compenser cette augmentation
-      // Utiliser plusieurs callbacks pour s'assurer que le layout est terminé
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Attendre un frame supplémentaire pour que le layout soit stable
+      // 🚀 CORRECTION: Ajuster la position de scroll IMMÉDIATEMENT après l'ajout des messages
+      // Utiliser un seul callback pour éviter les délais qui permettent à Flutter de recalculer
+      // La position doit être restaurée AVANT que Flutter ne fasse son propre ajustement
+      if (_preservedScrollOffset != null && _preservedMaxExtent != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          // Attendre encore un frame pour être sûr que le layout est complètement terminé
-          // Cela évite les sauts brusques lors de l'ajustement
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!_scrollController.hasClients || !mounted) {
-              // 🚀 CORRECTION: Débloquer la détection même si le scroll controller n'est plus disponible
-              _isScrollDetectionBlocked = false;
-              return;
+          if (!_scrollController.hasClients || !mounted) {
+            _isScrollDetectionBlocked = false;
+            _preservedScrollOffset = null;
+            _preservedMaxExtent = null;
+            return;
+          }
+          
+          // Ajuster immédiatement avec les valeurs préservées
+          final afterMaxExtent = _scrollController.position.maxScrollExtent;
+          final extentDiff = afterMaxExtent - _preservedMaxExtent!;
+          
+          if (extentDiff > 0 && _preservedScrollOffset != null) {
+            // Avec reverse:true, augmenter l'offset de la différence pour préserver la position visuelle
+            final newOffset = _preservedScrollOffset! + extentDiff;
+            _scrollController.jumpTo(newOffset.clamp(0.0, afterMaxExtent));
+            debugPrint('✅ Position scroll restaurée immédiatement: $newOffset (offset préservé: ${_preservedScrollOffset} + diff: $extentDiff)');
+          }
+          
+          // Déchiffrer les nouveaux messages
+          final finalMessages = _conversationProvider.messagesFor(widget.conversationId);
+          if (finalMessages.length > currentMessages.length) {
+            final newStartIndex = currentMessages.length;
+            _decryptOnScroll(finalMessages, newStartIndex);
+          }
+          
+          // 🚀 CORRECTION: Désactiver la préservation après un court délai
+          // pour permettre au listener de corriger une dernière fois si nécessaire
+          Future.delayed(const Duration(milliseconds: 100), () {
+            if (mounted) {
+              _isPreservingScrollPosition = false;
+              _preservedScrollOffset = null;
+              _preservedMaxExtent = null;
+              
+              // Débloquer la détection de scroll après l'ajustement
+              Future.delayed(const Duration(milliseconds: 200), () {
+                if (mounted) {
+                  _isScrollDetectionBlocked = false;
+                  _lastScrollTriggerPosition = null; // Réinitialiser pour permettre un nouveau déclenchement
+                  debugPrint('✅ Détection de scroll débloquée après chargement');
+                }
+              });
             }
-            _adjustScrollPosition(beforeMaxExtent, currentMessages);
-            
-            // 🚀 CORRECTION: Débloquer la détection de scroll après l'ajustement
-            // Ajouter un petit délai pour éviter les déclenchements immédiats après l'ajustement
-            Future.delayed(const Duration(milliseconds: 300), () {
-              if (mounted) {
-                _isScrollDetectionBlocked = false;
-                _lastScrollTriggerPosition = null; // Réinitialiser pour permettre un nouveau déclenchement
-                debugPrint('✅ Détection de scroll débloquée après chargement');
-              }
-            });
           });
         });
-      });
+      } else {
+        // Si les valeurs préservées ne sont pas disponibles, utiliser l'ancienne méthode
+        _isPreservingScrollPosition = false;
+        _adjustScrollPosition(beforeMaxExtent, beforeOffset, currentMessages);
+        
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) {
+            _isScrollDetectionBlocked = false;
+            _lastScrollTriggerPosition = null;
+            debugPrint('✅ Détection de scroll débloquée après chargement (fallback)');
+          }
+        });
+      }
     } catch (e) {
       debugPrint('❌ Erreur chargement messages anciens: $e');
       // Attendre quand même le délai minimum même en cas d'erreur
       await minimumDisplayTime;
       // 🚀 CORRECTION: Débloquer la détection en cas d'erreur
       _isScrollDetectionBlocked = false;
+      _isPreservingScrollPosition = false;
+      _preservedScrollOffset = null;
+      _preservedMaxExtent = null;
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -793,11 +896,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _conversationProvider.removeListener(_onMessagesUpdated);
     // Nettoyer le listener de scroll si présent
     _removeScrollListener();
+    // 🚀 CORRECTION: Retirer le listener du ScrollController
+    _scrollController.removeListener(_onScrollChanged);
     _textController.dispose();
     _scrollController.dispose();
     _messageUpdateNotifier.dispose(); // Nettoyer le ValueNotifier
     _typingTimer?.cancel(); // Annuler le timer de frappe
     _pendingScrollAdjustment = null; // Nettoyer l'ajustement en attente
+    _removeScrollListener(); // S'assurer que le listener est retiré
     super.dispose();
   }
 
@@ -1091,8 +1197,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           boxShadow: [
                             BoxShadow(
                               color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
+                              blurRadius: 3,
                             ),
                           ],
                         ),
