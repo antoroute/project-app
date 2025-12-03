@@ -46,6 +46,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   double? _preservedScrollOffset;
   double? _preservedMaxExtent;
   
+  // 🚀 NOUVEAU: Indicateur de nouveaux messages non lus
+  bool _hasNewMessages = false;
+  
   // Timer pour les indicateurs de frappe
   Timer? _typingTimer;
 
@@ -110,12 +113,21 @@ class _ConversationScreenState extends State<ConversationScreen> {
   /// 🚀 CORRECTION: Listener pour détecter et corriger les changements de position non désirés
   /// Pendant le chargement, si la position change de manière inattendue, on la restaure
   /// Ne corrige que si l'utilisateur n'est pas en train de scroller activement
+  /// Masque aussi l'indicateur de nouveaux messages si l'utilisateur revient en bas
   void _onScrollChanged() {
-    if (!_isPreservingScrollPosition || _preservedScrollOffset == null || _preservedMaxExtent == null) {
+    if (!_scrollController.hasClients || !mounted) {
       return;
     }
     
-    if (!_scrollController.hasClients || !mounted) {
+    // 🚀 NOUVEAU: Masquer l'indicateur de nouveaux messages si l'utilisateur revient en bas
+    if (_hasNewMessages && _isNearBottom()) {
+      setState(() {
+        _hasNewMessages = false;
+      });
+    }
+    
+    // Correction de position pendant le chargement
+    if (!_isPreservingScrollPosition || _preservedScrollOffset == null || _preservedMaxExtent == null) {
       return;
     }
     
@@ -150,6 +162,21 @@ class _ConversationScreenState extends State<ConversationScreen> {
         }
       });
     }
+  }
+  
+  /// 🚀 NOUVEAU: Fonction pour scroller vers le bas et masquer l'indicateur
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients || !mounted) return;
+    
+    setState(() {
+      _hasNewMessages = false;
+    });
+    
+    _scrollController.animateTo(
+      0, // reverse:true -> bas
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   /// Vérifie si l'utilisateur est proche du bas (reverse:true)
@@ -779,16 +806,26 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final currentMessages = _conversationProvider.messagesFor(widget.conversationId);
     final currentCount = currentMessages.length;
     
-    // Détecter les nouveaux messages
-    if (currentCount > _lastMessageCount && _lastMessageCount > 0) {
+    // Détecter les nouveaux messages (avant de mettre à jour _lastMessageCount)
+    final hasNewMessages = currentCount > _lastMessageCount && _lastMessageCount > 0;
+    
+    if (hasNewMessages) {
       final newMessages = currentMessages.sublist(_lastMessageCount);
       debugPrint('🔐 [NewMessages] ${newMessages.length} nouveaux messages détectés');
       _decryptNewMessages(newMessages);
     }
+    
+    // Mettre à jour le compteur après avoir détecté les nouveaux messages
     _lastMessageCount = currentCount;
     
     // Auto-scroll seulement si l'utilisateur est proche du bas (reverse:true)
     if (_isNearBottom()) {
+      // Masquer l'indicateur si l'utilisateur est en bas
+      if (_hasNewMessages) {
+        setState(() {
+          _hasNewMessages = false;
+        });
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -800,7 +837,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
       });
     } else {
       // Afficher un indicateur "Nouveaux messages" si pas en bas
-      // TODO: Implémenter le pill "Nouveaux messages"
+      // Activer l'indicateur seulement si on a vraiment de nouveaux messages
+      if (hasNewMessages) {
+        setState(() {
+          _hasNewMessages = true;
+        });
+      }
     }
   }
 
@@ -1117,6 +1159,49 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                   strokeWidth: 2.5,
                                   valueColor: AlwaysStoppedAnimation<Color>(
                                     Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        // 🚀 NOUVEAU: Indicateur de nouveaux messages en bas de l'écran
+                        if (_hasNewMessages)
+                          Positioned(
+                            bottom: 16,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Material(
+                                elevation: 4,
+                                borderRadius: BorderRadius.circular(24),
+                                color: Theme.of(context).colorScheme.primary,
+                                child: InkWell(
+                                  onTap: _scrollToBottom,
+                                  borderRadius: BorderRadius.circular(24),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(24),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.arrow_downward,
+                                          size: 20,
+                                          color: Theme.of(context).colorScheme.onPrimary,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Nouveaux messages',
+                                          style: TextStyle(
+                                            color: Theme.of(context).colorScheme.onPrimary,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
