@@ -1,6 +1,6 @@
 # Archive du code initial
 
-Statut : branche locale créée, publication distante en attente
+Statut : branche locale et distante vérifiée
 Date : 2026-08-23
 
 Le code initial avant le chantier de documentation/staging est conservé par la branche :
@@ -15,10 +15,11 @@ Elle pointe exactement vers :
 1988bf631aa98178fb38522c31b208e76f35d68b
 ```
 
-La création locale est vérifiée. Le push vers `origin` a échoué faute d'identifiants GitHub configurés sur HomeLAB. Le commit existe déjà dans l'historique de `origin/main`, mais la branche d'archive distante doit encore être publiée depuis un poste authentifié :
+La création locale et la publication sur `origin` sont vérifiées. La branche distante pointe sur le même commit :
 
-```bash
-git push origin archive/pre-hardening-1988bf6-20260823
+```text
+refs/heads/archive/pre-hardening-1988bf6-20260823
+1988bf631aa98178fb38522c31b208e76f35d68b
 ```
 
 Aucun secret ou fichier non suivi n'appartient à cette branche.
