@@ -1,0 +1,145 @@
+name: trust-circle-staging
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 128
+  mem_limit: 256m
+  cpus: 0.75
+  stop_grace_period: 30s
+  logging:
+    driver: journald
+    options:
+      tag: "trust-circle-staging/{{.Name}}"
+  labels:
+    com.trust-circle.environment: staging
+    com.trust-circle.revision: "${TC_GIT_COMMIT:?TC_GIT_COMMIT is required}"
+
+services:
+  postgres:
+    image: "${TC_POSTGRES_IMAGE:?TC_POSTGRES_IMAGE must be pinned by digest}"
+    restart: unless-stopped
+    init: true
+    environment:
+      POSTGRES_DB: "${TC_DB_NAME:?TC_DB_NAME is required}"
+      POSTGRES_USER: "${TC_DB_USER:?TC_DB_USER is required}"
+      POSTGRES_PASSWORD: "${TC_DB_PASSWORD:?TC_DB_PASSWORD is required}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/001-initial.sql:ro
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    shm_size: 128m
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 60s
+    logging:
+      driver: journald
+      options:
+        tag: "trust-circle-staging/{{.Name}}"
+    labels:
+      com.trust-circle.environment: staging
+      com.trust-circle.revision: "${TC_GIT_COMMIT:?TC_GIT_COMMIT is required}"
+
+  auth:
+    <<: *service-defaults
+    image: "trust-circle-staging-auth:${TC_IMAGE_TAG:?TC_IMAGE_TAG is required}"
+    build:
+      context: ../../backend/auth
+      labels:
+        org.opencontainers.image.revision: "${TC_GIT_COMMIT:?TC_GIT_COMMIT is required}"
+        org.opencontainers.image.version: "${TC_IMAGE_TAG:?TC_IMAGE_TAG is required}"
+        org.opencontainers.image.title: trust-circle-staging-auth
+    user: node
+    environment:
+      NODE_ENV: staging
+      PORT: "3000"
+      JWT_SECRET: "${TC_JWT_SECRET:?TC_JWT_SECRET is required}"
+      APP_SECRET: "${TC_APP_SECRET:?TC_APP_SECRET is required}"
+      DATABASE_URL: "postgresql://${TC_DB_USER}:${TC_DB_PASSWORD}@postgres:5432/${TC_DB_NAME}"
+    tmpfs:
+      - /tmp:size=32m,mode=1777,noexec,nosuid,nodev
+    expose:
+      - "3000"
+    networks:
+      - edge
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  messaging:
+    <<: *service-defaults
+    image: "trust-circle-staging-messaging:${TC_IMAGE_TAG:?TC_IMAGE_TAG is required}"
+    build:
+      context: ../../backend/messaging
+      labels:
+        org.opencontainers.image.revision: "${TC_GIT_COMMIT:?TC_GIT_COMMIT is required}"
+        org.opencontainers.image.version: "${TC_IMAGE_TAG:?TC_IMAGE_TAG is required}"
+        org.opencontainers.image.title: trust-circle-staging-messaging
+    user: node
+    environment:
+      NODE_ENV: staging
+      PORT: "3001"
+      JWT_SECRET: "${TC_JWT_SECRET:?TC_JWT_SECRET is required}"
+      APP_SECRET: "${TC_APP_SECRET:?TC_APP_SECRET is required}"
+      DATABASE_URL: "postgresql://${TC_DB_USER}:${TC_DB_PASSWORD}@postgres:5432/${TC_DB_NAME}"
+    tmpfs:
+      - /tmp:size=32m,mode=1777,noexec,nosuid,nodev
+    expose:
+      - "3001"
+    networks:
+      - edge
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    <<: *service-defaults
+    image: "${TC_NGINX_IMAGE:?TC_NGINX_IMAGE must be pinned by digest}"
+    user: "101:101"
+    ports:
+      - "127.0.0.1:${TC_STAGING_HTTP_PORT:-18080}:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    tmpfs:
+      - /var/cache/nginx:size=32m,uid=101,gid=101,mode=0755,noexec,nosuid,nodev
+      - /var/run:size=4m,uid=101,gid=101,mode=0755,noexec,nosuid,nodev
+      - /tmp:size=8m,uid=101,gid=101,mode=1777,noexec,nosuid,nodev
+    networks:
+      - edge
+    depends_on:
+      auth:
+        condition: service_healthy
+      messaging:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+networks:
+  edge:
+    name: trust-circle-staging-edge
+  data:
+    name: trust-circle-staging-data
+    internal: true
+
+volumes:
+  postgres_data:
+    name: trust-circle-staging-postgres-data

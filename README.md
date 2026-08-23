@@ -1,5 +1,7 @@
 # project-app
 
+> **Documentation historique.** Ce fichier décrit l'intention initiale et contient des choix désormais obsolètes (RSA, client admin React, secret partagé, Redis/CI supposés). Pour travailler sur l'état réel et la cible V1, commencer par [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md), puis [`docs/README.md`](docs/README.md) et [`AGENTS.md`](AGENTS.md).
+
 # 📦 Contexte Technique — Application de Messagerie Sécurisée Multiplateforme
 
 ## 🎯 Objectif général
