@@ -19,7 +19,9 @@ Dernière mise à jour : 2026-08-23
 
 ## Capacité Docker disponible
 
-Le propriétaire autorise l'utilisation de LXC106 pour les tests backend. L'inventaire du 2026-08-23 montre toutefois que ce LXC est partagé avec d'autres services et que les anciennes stacks Trust Circle sont arrêtées. Les tests seront donc dirigés vers une stack staging distincte créée par `TC-004`, jamais vers les volumes/projets historiques `app` et `infra`.
+Le propriétaire autorise l'utilisation de LXC106 pour les tests backend. Le LXC reste partagé avec d'autres services. Les anciennes stacks Trust Circle ont été supprimées et les tests sont dirigés vers `trust-circle-staging`, décrite dans `STAGING_INVENTORY.md`.
+
+Le staging est actuellement accessible uniquement depuis le LXC via `127.0.0.1:18080`. Cette restriction est intentionnelle tant que les vulnérabilités Phase 1 ne sont pas fermées. Aucun test ne doit réutiliser les anciens domaines publics.
 
 ## Configuration
 

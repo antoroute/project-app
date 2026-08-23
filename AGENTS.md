@@ -69,7 +69,8 @@ git diff --check
 ## Production et infrastructure
 
 - L'état réel de la VM ne peut pas être déduit du dépôt. Utiliser `TC-002` pour établir un inventaire assaini.
-- L'inventaire courant est `docs/operations/PRODUCTION_INVENTORY.md`. Le propriétaire autorise LXC106 pour les tests backend, uniquement via une stack staging isolée tant qu'une nouvelle autorisation n'indique pas explicitement une autre cible.
+- L'inventaire historique est `docs/operations/PRODUCTION_INVENTORY.md`; l'état test courant est `docs/operations/STAGING_INVENTORY.md`. Le propriétaire autorise LXC106 pour les tests backend uniquement via `trust-circle-staging`, tant qu'une nouvelle autorisation n'indique pas explicitement une autre cible.
+- Le fichier `/opt/trust-circle-staging/shared/staging.env` est privé : ne jamais l'afficher, le copier dans Git ou produire un `docker compose config` résolu dans une sortie partagée.
 - Ne collecter que les noms de variables d'environnement, jamais leurs valeurs.
 - Aucun développement courant directement en production. Utiliser l'environnement de staging défini dans `docs/operations/ENVIRONMENTS.md`.
 - Avant une action risquée : préciser la cible, l'impact, la sauvegarde, la commande, la vérification et le rollback ; attendre l'autorisation humaine.

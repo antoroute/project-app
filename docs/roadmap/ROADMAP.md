@@ -18,7 +18,7 @@ Objectif : connaître la cible et rendre tout travail ultérieur récupérable.
 | TC-001 | Valider le nom, les stores, marques et domaines | — | Prête |
 | TC-002 | Inventorier la VM de production en lecture seule | accès assaini | Terminée — écarts ouverts |
 | TC-003 | Créer une sauvegarde chiffrée et prouver la restauration | TC-002 | Terminée — données historiques abandonnées |
-| TC-004 | Créer un staging totalement séparé | TC-002, TC-003 | En cours |
+| TC-004 | Créer un staging totalement séparé | TC-002, TC-003 | Terminée — backend local |
 | TC-005 | Geler le périmètre et les non-objectifs V1 | — | Prête |
 | TC-006 | Décider les versions OS minimales et la matrice appareils | TC-005 | Prête |
 | TC-007 | Créer le contexte, les ADR, prompts et conventions IA | — | Terminée |
@@ -44,6 +44,7 @@ Objectif : empêcher l'usurpation, l'accès croisé et l'enregistrement illégit
 | TC-110 | Mettre à jour les dépendances vulnérables avec tests | TC-111 |
 | TC-111 | Créer les tests négatifs auth/ACL/keys et PostgreSQL d'intégration | TC-004 |
 | TC-112 | Revue de sécurité de fermeture P1 | TC-101 à TC-111 |
+| TC-113 | Exposer le staging par TLS et accès restreint après fermeture P1 | TC-112 |
 
 Porte de sortie : tests d'usurpation et accès croisé tous négatifs, aucun secret par défaut/embarqué, aucune vulnérabilité critique/haute exploitable acceptée silencieusement.
 

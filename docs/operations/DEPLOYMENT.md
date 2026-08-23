@@ -1,6 +1,6 @@
 # Déploiement
 
-Statut : garde-fous définis, runbook VM à compléter après `TC-002`
+Statut : garde-fous définis, staging déployé
 Dernière mise à jour : 2026-08-23
 
 ## Préconditions
@@ -36,3 +36,12 @@ Un rollback applicatif ne doit pas écrire sur un schéma devenu incompatible. E
 ## À documenter par TC-002/TC-004
 
 Noms réels des stacks et services, domaines assainis, réseau/proxy, registre d'images, emplacement des volumes, healthchecks, mécanisme de secrets, chemin de promotion et commandes exactes. Le document public ne contiendra aucune valeur sensible.
+
+## Implémentation staging actuelle
+
+- Projet : `trust-circle-staging`.
+- Source : `deploy/staging/compose.yml` et `deploy/staging/README.md`.
+- Releases immuables sous `/opt/trust-circle-staging/releases/<commit>`.
+- Secrets persistants hors release sous `/opt/trust-circle-staging/shared/staging.env`.
+- Gateway loopback seulement ; aucun déploiement production automatisé.
+- Inventaire et preuves : `docs/operations/STAGING_INVENTORY.md`.

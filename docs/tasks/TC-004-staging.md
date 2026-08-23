@@ -1,6 +1,6 @@
 # TC-004 — Créer un staging isolé
 
-Statut : En cours
+Statut : Terminée — staging backend local ; exposition client différée
 Priorité : P0
 Autorisation : propriétaire de l'infrastructure
 Dépendances : TC-002, TC-003
@@ -33,12 +33,14 @@ Disposer d'un environnement reproductible pour tester migrations, déploiements,
 
 ## Critères d'acceptation
 
-- [ ] Aucun endpoint, secret, volume ou fournisseur production n'est partagé.
-- [ ] L'environnement se déploie à partir d'un commit/digests enregistrés.
-- [ ] Fixtures reproductibles et comptes de test sont disponibles hors secrets versionnés.
-- [ ] E-mails/push ne peuvent atteindre un utilisateur réel.
-- [ ] Smoke tests et restauration isolée réussissent.
-- [ ] `ENVIRONMENTS.md` et `DEPLOYMENT.md` contiennent le runbook assaini.
+- [x] Aucun endpoint, secret, volume ou fournisseur production n'est partagé.
+- [x] L'environnement se déploie à partir d'un commit/digests enregistrés.
+- [x] Fixtures reproductibles et comptes de test sont disponibles hors secrets versionnés.
+- [x] E-mails/push ne peuvent atteindre un utilisateur réel.
+- [x] Smoke tests et reprise après recréation des conteneurs réussissent.
+- [x] `ENVIRONMENTS.md` et `DEPLOYMENT.md` contiennent le runbook assaini.
+
+La restauration d'un backup n'est pas revendiquée : les données historiques ont été abandonnées et la sauvegarde de la future production est reportée à TC-208. Le staging a démontré la persistance du nouveau volume après `down/up`.
 
 ## Hors périmètre
 
@@ -57,3 +59,17 @@ Disposer d'un environnement reproductible pour tester migrations, déploiements,
 - Stack source : `deploy/staging/compose.yml`.
 
 L'exposition TLS et la configuration Flutter staging seront réalisées après les smoke tests locaux et avant les tests sur appareils.
+
+## Résultat du 2026-08-23
+
+- [x] Stack `trust-circle-staging` déployée avec quatre services sains.
+- [x] PostgreSQL 16 neuf, 12 tables initialisées, données synthétiques uniquement.
+- [x] Redis supprimé de l'architecture déployée.
+- [x] Secrets générés avec CSPRNG et fichier `0600` hors Git.
+- [x] Auth/messaging/gateway non-root, read-only et limités en ressources.
+- [x] Gateway accessible uniquement sur le loopback du LXC.
+- [x] Tests health, auth, groupe, rejet secret et Socket.IO réussis.
+- [x] Recréation complète des conteneurs/réseaux et persistance réussies.
+- [x] Inventaire publié dans `docs/operations/STAGING_INVENTORY.md`.
+
+Le domaine TLS et le client Flutter ne font pas partie de cette première exposition : ils sont différés jusqu'à la fermeture des vulnérabilités critiques afin de ne pas publier un prototype connu comme contournable.

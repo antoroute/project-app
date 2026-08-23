@@ -1,0 +1,92 @@
+# Inventaire du staging backend
+
+Statut : opérationnel, accès local au LXC uniquement
+Déployé : 2026-08-23
+Environnement : LXC106, stack Compose `trust-circle-staging`
+
+## Résumé
+
+Le staging backend est une installation neuve et isolée des anciennes ressources supprimées. Il est destiné aux builds, smoke tests et futurs tests d'intégration automatisés. Il n'est pas un environnement de production et n'est pas exposé publiquement.
+
+## Release
+
+| Élément | Valeur assainie |
+|---|---|
+| Commit source | `29604542281492b50430f8cb7fc7170c663e4b35` |
+| Release | `/opt/trust-circle-staging/releases/29604542281492b50430f8cb7fc7170c663e4b35` |
+| Pointeur actif | `/opt/trust-circle-staging/current` |
+| Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
+| Source Compose | `deploy/staging/compose.yml` |
+| Projet Compose | `trust-circle-staging` |
+
+Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affichées pendant le déploiement.
+
+## Services
+
+| Service | Image | Preuve | État final |
+|---|---|---|---|
+| Auth | `trust-circle-staging-auth:staging-296045422814` | image ID `6c67e28b2025`, label revision complet | sain |
+| Messaging | `trust-circle-staging-messaging:staging-296045422814` | image ID `9b91335db9fa`, label revision complet | sain |
+| PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
+| Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
+
+Les références tierces exactes observées au déploiement sont :
+
+- PostgreSQL : `postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685` ;
+- Nginx : `nginx@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46`.
+
+## Isolation
+
+- Gateway : `127.0.0.1:18080` sur le LXC uniquement.
+- Auth et messaging : aucune publication de port hôte.
+- PostgreSQL : aucune publication de port hôte, réseau interne `trust-circle-staging-data`.
+- Réseaux : `trust-circle-staging-edge` et `trust-circle-staging-data`.
+- Volume : `trust-circle-staging-postgres-data`.
+- Aucun domaine, certificat, volume, réseau ou secret historique réutilisé.
+- Aucun e-mail ou fournisseur push configuré.
+- Redis absent car non utilisé par le code.
+
+Les tests backend sont exécutés via `pct exec 106` et la gateway loopback. Toute exposition LAN/Internet exige une décision séparée après la fermeture des vulnérabilités Phase 1.
+
+## Durcissement appliqué
+
+Auth, messaging et gateway utilisent : utilisateur non-root, rootfs en lecture seule, `no-new-privileges`, toutes les capabilities supprimées, limites CPU/mémoire/PID, init, délai d'arrêt et journald avec tag staging.
+
+PostgreSQL utilise un volume inscriptible, des limites de ressources, un healthcheck et un réseau interne. Son image officielle n'est pas encore durcie avec un utilisateur/jeu de capabilities Compose spécifique ; ce point appartient à `TC-204`.
+
+## Schéma et données
+
+- Base PostgreSQL 16 neuve.
+- `infrastructure/postgres/init.sql` monté en lecture seule pour la première initialisation.
+- 12 tables publiques observées.
+- Données uniquement synthétiques, créées par les smoke tests.
+- Aucun système de migration versionnée : blocage suivi par `TC-201`.
+
+## Validations exécutées
+
+1. Validation Compose avec sortie silencieuse.
+2. Build des deux images backend depuis le commit enregistré.
+3. Healthchecks PostgreSQL, auth, messaging et gateway.
+4. Inscription et connexion d'un compte `example.invalid` synthétique.
+5. Appel authentifié `/auth/me`.
+6. Rejet HTTP 403 d'un mauvais `x-app-secret`.
+7. Création puis lecture d'un cercle synthétique.
+8. Handshake Socket.IO par polling.
+9. `docker compose down` puis `up` sans suppression de volume.
+10. Vérification que les comptages utilisateurs/cercles sont identiques avant/après reprise.
+11. Nouvelle exécution complète des smoke tests après reprise.
+
+Tous ces tests ont réussi le 2026-08-23.
+
+## Limites assumées
+
+- Pas de domaine ni TLS : accès volontairement local avant Phase 1.
+- Pas encore de build Flutter ciblant le staging.
+- Pas de migrations ni preuve de restauration du nouveau volume.
+- Pas de tests d'autorisation négatifs exhaustifs ; le code contient les vulnérabilités recensées par l'audit.
+- Images backend locales non publiées dans un registre ; l'image ID et les labels assurent la traçabilité locale, pas une provenance distante.
+- Le LXC reste partagé et privilégié.
+
+## Commandes de référence
+
+Le déploiement, l'arrêt conservant les données et les smoke tests sont décrits dans `deploy/staging/README.md`. Ne jamais afficher la configuration Compose résolue ni le fichier d'environnement.

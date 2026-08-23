@@ -22,7 +22,7 @@ Le nom « Trust Circle » est provisoire jusqu'à la clôture de `TC-001` : une 
 - Authentification : Fastify/TypeScript/PostgreSQL dans `backend/auth`.
 - Messagerie : Fastify/TypeScript/Socket.IO/PostgreSQL dans `backend/messaging`.
 - Données : PostgreSQL ; présence de Redis dans l'infrastructure, sans intégration applicative démontrée.
-- Déploiement : Docker Compose et Nginx sur un LXC Docker partagé. L'inventaire du 2026-08-23 a montré que les stacks historiques existent mais sont arrêtées ; elles ne constituent donc pas actuellement un backend actif.
+- Déploiement : Docker Compose et Nginx sur un LXC Docker partagé. Les stacks historiques ont été supprimées par décision du propriétaire. Un backend staging neuf, nommé `trust-circle-staging`, est opérationnel uniquement sur le loopback du LXC ; voir `docs/operations/STAGING_INVENTORY.md`.
 - Contrat d'API existant : `docs/openapi/openapi-v2.yaml`, à réaligner avec le code avant de le considérer comme contractuel.
 - Cryptographie actuelle : X25519, HKDF-SHA256, AES-256-GCM et Ed25519 côté Flutter, protocole maison V2 à remplacer ou formaliser avant publication.
 

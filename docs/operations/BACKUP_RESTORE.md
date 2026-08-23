@@ -1,6 +1,6 @@
 # Sauvegarde et restauration
 
-Statut : politique cible, preuve requise par `TC-003`
+Statut : politique cible pour la future production, implémentation attendue dans `TC-208`
 Dernière mise à jour : 2026-08-23
 
 ## Objectifs provisoires
@@ -35,3 +35,7 @@ Les valeurs RPO/RTO doivent être décidées après mesure de la charge et des a
 ## Critère de réussite TC-003
 
 Une sauvegarde de production chiffrée existe hors VM et une restauration isolée a été réalisée avec un rapport daté, sans secret ni donnée personnelle exposée. Le runbook exact, la rétention et les responsables sont alors ajoutés à ce document.
+
+## Décision historique
+
+`TC-003` a été clôturée par abandon explicite des anciennes données, et non par réussite d'une restauration. Le staging actuel contient uniquement des données synthétiques et sa persistance après recréation des conteneurs a été vérifiée. Une véritable sauvegarde/restauration reste obligatoire avant toute bêta comportant des données à conserver.
