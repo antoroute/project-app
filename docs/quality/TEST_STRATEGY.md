@@ -42,7 +42,9 @@ Versions et architectures de référence : `docs/architecture/PLATFORM_COMPATIBI
 | installation, mise à jour, veille/reprise et accessibilité | propriétaire du produit | chaque release candidate |
 | signature, stores, TestFlight/MSIX/notarisation | propriétaire, assisté | release candidate et publication |
 
-L'inventaire des appareils réellement disponibles reste à renseigner dans `TC-006`. Une case sans appareil n'est jamais remplacée par une affirmation de compatibilité. La CI cible des labels explicites (`ubuntu-24.04`, `windows-2025`, `macos-26`) et une version Flutter exacte ; les labels `latest` ne sont pas utilisés dans la matrice contractuelle.
+Le propriétaire dispose actuellement d'un appareil Android et d'un PC Windows 11 ; leurs modèles et versions exactes restent à relever. Il ne dispose pas encore d'iPhone/iPad ni de Mac, mais peut organiser des tests Apple ultérieurement. La CI et les simulateurs couvrent les premières validations Apple ; un iPhone réel est obligatoire avant bêta iOS, tandis qu'un Mac réel n'est requis que si macOS est annoncé. Une case sans appareil n'est jamais remplacée par une affirmation de compatibilité.
+
+La CI cible des labels explicites (`ubuntu-24.04`, `windows-2025`, `macos-26`) et une version Flutter exacte ; les labels `latest` ne sont pas utilisés dans la matrice contractuelle.
 
 Les versions minimales sont décidées dans `TC-006`. Elles sont revérifiées dans `TC-801` avant publication, car les exigences stores évoluent.
 

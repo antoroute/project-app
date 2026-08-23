@@ -1,6 +1,6 @@
 # TC-006 — Décider la matrice plateformes et versions minimales
 
-Statut : En cours — décisions enregistrées, preuves sur cibles manquantes
+Statut : En cours — matériel partiellement inventorié, preuves sur cibles manquantes
 Priorité : P0
 Décision : propriétaire du produit
 Dépendances : TC-005
@@ -54,7 +54,15 @@ La tâche ne peut pas être déclarée terminée : Flutter/Dart ne sont pas inst
 
 ## Preuves encore requises
 
-- Inventaire des appareils physiques réellement disponibles, fourni par le propriétaire.
+- Caractéristiques exactes de l'Android disponible : modèle, version, API et architecture.
+- Caractéristiques exactes du PC Windows 11 disponible : édition, version/build et architecture.
 - Probe stockage/réseau réussi sur Android, iOS et Windows.
 - Builds sans signature réussis sur Android, iOS et Windows après séparation de la configuration publique et suppression du secret partagé.
 - Preuve macOS avant toute annonce de disponibilité macOS.
+
+## Inventaire déclaré le 2026-08-24
+
+- Disponible maintenant : un appareil Android et un PC Windows 11, utilisés comme cibles physiques principales de développement.
+- Non disponible maintenant : iPhone/iPad et Mac.
+- Le propriétaire pourra organiser des tests Apple ultérieurement.
+- Stratégie : CI/simulateurs Apple pendant le développement, puis iPhone physique obligatoire avant bêta iOS. macOS reste non bloquant et ne sera annoncé qu'après accès à un Mac Apple Silicon et validation réelle.

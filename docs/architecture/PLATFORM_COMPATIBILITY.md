@@ -1,7 +1,7 @@
 # Registre de compatibilité des plateformes
 
 Statut : baseline technique V1, preuves de build partielles
-Dernière vérification : 2026-08-23
+Dernière vérification : 2026-08-24
 Tâche : `TC-006`
 
 Ce registre fixe les cibles de conception et distingue une compatibilité déclarée d'une compatibilité réellement testée. Une ligne « compatible » ne devient une preuve de publication qu'après build, installation et test sur la matrice définie dans `docs/quality/TEST_STRATEGY.md`.
@@ -92,6 +92,17 @@ Chaque cible obligatoire doit exécuter le même probe avant clôture de TC-006 
 6. notification générique sans contenu ;
 7. invitation par deep link et code, avec scanner seulement sur plateformes compatibles ;
 8. passage premier plan/arrière-plan, verrouillage et révocation de session.
+
+## Matériel accessible au propriétaire au 2026-08-24
+
+| Plateforme | Disponibilité actuelle | Usage prévu | Information encore requise |
+|---|---|---|---|
+| Android | appareil physique disponible | développement et parcours manuels fréquents | modèle, version Android, niveau API et architecture |
+| Windows | PC Windows 11 disponible | développement, installation/MSIX et parcours manuels fréquents | édition, version `winver`, numéro de build et architecture |
+| iOS/iPadOS | aucun appareil actuellement | CI et simulateur d'abord ; accès ponctuel à organiser avant bêta | modèle et OS du futur appareil de test |
+| macOS | aucun Mac actuellement | CI seulement tant que la cible reste non annoncée | Mac Apple Silicon macOS 14+ avant toute annonce |
+
+Un simulateur valide le build et une partie du cycle de vie, mais ne remplace pas un appareil pour Keychain/Secure Enclave, biométrie, APNs, veille et consommation réseau. Un iPhone physique est donc une condition de la bêta iOS. Le Mac physique n'est une condition que si macOS est finalement annoncé.
 
 ## Sources officielles vérifiées le 2026-08-23
 
