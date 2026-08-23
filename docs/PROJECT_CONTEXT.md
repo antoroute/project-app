@@ -12,8 +12,8 @@ Le nom « Trust Circle » est provisoire jusqu'à la clôture de `TC-001` : une 
 
 ## Cible de publication
 
-- Obligatoire pour la V1 : Android, iOS et Windows.
-- Souhaité si la compatibilité est démontrée : macOS.
+- Obligatoire pour la V1 : Android 9/API 28+, iOS/iPadOS 15+ et Windows 11 25H2+ x64.
+- Souhaité si la compatibilité est démontrée : macOS 14+ sur Apple Silicon.
 - Web V1 : site public statique avec présentation, téléchargements, support, confidentialité et suppression de compte. Aucun client de messagerie Web n'est prévu en V1.
 
 ## Architecture actuelle

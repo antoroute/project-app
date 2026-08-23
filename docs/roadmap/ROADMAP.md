@@ -20,7 +20,7 @@ Objectif : connaître la cible et rendre tout travail ultérieur récupérable.
 | TC-003 | Créer une sauvegarde chiffrée et prouver la restauration | TC-002 | Terminée — données historiques abandonnées |
 | TC-004 | Créer un staging totalement séparé | TC-002, TC-003 | Terminée — backend local |
 | TC-005 | Geler le périmètre et les non-objectifs V1 | — | Terminée |
-| TC-006 | Décider les versions OS minimales et la matrice appareils | TC-005 | Prête |
+| TC-006 | Décider les versions OS minimales et la matrice appareils | TC-005 | En cours — builds/appareils à prouver |
 | TC-007 | Créer le contexte, les ADR, prompts et conventions IA | — | Terminée |
 | TC-008 | Établir le modèle de menace et les invariants initiaux | TC-007 | Terminée — baseline |
 
@@ -140,10 +140,10 @@ Porte de sortie : parcours V1 utilisables sans connaissance technique, accessibl
 |---|---|---|
 | TC-701 | Android : identité, signature release, permissions et AAB | TC-001, TC-006, TC-611 |
 | TC-702 | iOS : bundle, signature, capabilities, APNs et archive | TC-001, TC-006, TC-611 |
-| TC-703 | Windows : stockage SQLite/secure storage compatible | TC-006, TC-306 |
+| TC-703 | Windows : stockage SQLite/secure storage compatible | TC-006, TC-306, TC-602 |
 | TC-704 | Windows : invitation sans dépendance scanner incompatible | TC-607, TC-703 |
-| TC-705 | Windows : notifications, MSIX, signature et mises à jour | TC-509, TC-703 |
-| TC-706 | macOS : entitlements, stockage, notifications, signature/notarisation | TC-006, TC-611 |
+| TC-705 | Windows : notifications, MSIX, signature et mises à jour | TC-509, TC-703, TC-704 |
+| TC-706 | macOS : entitlements, stockage, notifications, signature/notarisation | TC-006, TC-611, TC-703 |
 | TC-707 | Automatiser la matrice build/test des plateformes annoncées | TC-701 à TC-706 |
 
 Porte de sortie : artefact release installable, signé et testé sur chaque plateforme annoncée.

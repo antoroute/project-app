@@ -27,3 +27,13 @@ Les fiches transforment la roadmap en unités confiables pour un développement 
 ## Taille
 
 Une fiche doit idéalement produire une seule évolution révisable. Si elle mélange schéma, protocole, UI et production, la découper. Une tâche critique inclut ses tests de non-régression et n'est pas close par une simple compilation.
+
+## Index Phase 7 — Plateformes
+
+- [TC-701 — Android release](TC-701-android-release.md)
+- [TC-702 — iOS/iPadOS release](TC-702-ios-release.md)
+- [TC-703 — Stockage Windows](TC-703-windows-stockage.md)
+- [TC-704 — Invitations Windows](TC-704-windows-invitations.md)
+- [TC-705 — Distribution Windows](TC-705-windows-distribution.md)
+- [TC-706 — macOS optionnel](TC-706-macos-release.md)
+- [TC-707 — CI plateformes](TC-707-ci-plateformes.md)

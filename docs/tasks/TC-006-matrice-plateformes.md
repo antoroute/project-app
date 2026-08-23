@@ -1,6 +1,6 @@
 # TC-006 — Décider la matrice plateformes et versions minimales
 
-Statut : Prête après décision initiale de TC-005
+Statut : En cours — décisions enregistrées, preuves sur cibles manquantes
 Priorité : P0
 Décision : propriétaire du produit
 Dépendances : TC-005
@@ -30,15 +30,31 @@ Ces candidats proviennent du cadrage initial ; les politiques stores et supports
 
 ## Critères d'acceptation
 
-- [ ] Tableau OS/version/architecture accepté et daté.
-- [ ] Chaque dépendance critique a une compatibilité prouvée ou une tâche de remplacement.
+- [x] Tableau OS/version/architecture accepté et daté.
+- [x] Chaque dépendance critique a une compatibilité documentée par son éditeur ou une tâche de remplacement.
 - [ ] Un build minimal et un test stockage/réseau passent sur chaque cible obligatoire.
-- [ ] La matrice CI et appareils manuels est définie avec responsable.
-- [ ] Les exigences stores utilisées ont source et date de vérification.
-- [ ] Le coût macOS et sa position de lancement sont tranchés.
+- [x] La matrice CI et appareils manuels requise est définie avec responsable.
+- [x] Les exigences stores utilisées ont source et date de vérification.
+- [x] Le coût macOS et sa position de lancement sont tranchés.
 
 ## Livrables
 
 - Mise à jour de `docs/quality/TEST_STRATEGY.md`.
 - Registre de compatibilité des plugins sous `docs/architecture/`.
 - Tâches `TC-701` à `TC-707` raffinées.
+
+## Résultat intermédiaire du 2026-08-23
+
+- Matrice décidée : Android 9/API 28, iOS/iPadOS 15, Windows 11 25H2 x64 ; macOS 14 arm64 souhaité et non bloquant.
+- Exigences Flutter, Google Play, Apple, Microsoft Store et runners CI vérifiées sur sources officielles.
+- Registre créé dans `docs/architecture/PLATFORM_COMPATIBILITY.md` et stratégie de test détaillée.
+- Tâches `TC-701` à `TC-707` raffinées.
+
+La tâche ne peut pas être déclarée terminée : Flutter/Dart ne sont pas installés sur l'hôte courant, aucun runner Windows/macOS n'est localement accessible, et l'application actuelle a des bloqueurs réels (`.env`/secret partagé, SQLite en clair et incompatible Windows, initialisations de plugins incomplètes). Aucun faux `.env` ne sera créé pour simuler un build réussi.
+
+## Preuves encore requises
+
+- Inventaire des appareils physiques réellement disponibles, fourni par le propriétaire.
+- Probe stockage/réseau réussi sur Android, iOS et Windows.
+- Builds sans signature réussis sur Android, iOS et Windows après séparation de la configuration publique et suppression du secret partagé.
+- Preuve macOS avant toute annonce de disponibilité macOS.

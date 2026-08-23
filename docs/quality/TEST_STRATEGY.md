@@ -23,14 +23,28 @@ La synchronisation couvre : timeout avant/après persistance, retry, redémarrag
 
 ## Matrice de plateformes
 
-| Niveau | Android | iOS | Windows | macOS |
-|---|---|---|---|---|
-| Analyse/tests Dart | CI Linux | partagé | partagé | partagé |
-| Build release | CI Android | runner macOS | runner Windows | runner macOS |
-| Tests intégration OS | émulateur + appareil | simulateur + appareil | VM + poste | simulateur/poste |
-| Parcours manuel release | appareil réel | appareil réel | Windows 10/11 | version minimale retenue |
+Versions et architectures de référence : `docs/architecture/PLATFORM_COMPATIBILITY.md`.
 
-Les versions minimales finales sont décidées dans `TC-006` après vérification des dépendances et politiques stores.
+| Niveau | Android 9/API 28 à Android 16/API 36 | iOS/iPadOS 15 à 26 | Windows 11 25H2+ x64 | macOS 14+ arm64 |
+|---|---|---|---|---|
+| Analyse/tests Dart | Ubuntu 24.04 | partagé | partagé | partagé |
+| Build sans signature | Ubuntu 24.04, API 36 | macOS 26/Xcode 26 | Windows 2025 | macOS 26/Xcode 26 |
+| Tests intégration OS | émulateurs API 28 et 36 + appareils | simulateurs 15 et 26 + iPhone/iPad | VM 25H2 + poste x64 | Mac Apple Silicon avec macOS 14 et courant |
+| Parcours manuel release | Android API 28 arm64 + Android courant | iPhone iOS 15 + iPhone courant ; iPad adaptatif | Windows 11 25H2 x64 | seulement avant annonce macOS |
+
+### Responsabilités et fréquence
+
+| Preuve | Responsable | Fréquence |
+|---|---|---|
+| format, analyse, tests Dart et build Android | CI maintenue avec l'assistant | chaque pull request concernée |
+| builds iOS, Windows et macOS sans signature | CI maintenue avec l'assistant | branche principale et release candidate |
+| probes stockage/réseau/biométrie/notification/deep link | CI + propriétaire sur appareils | changement de plugin et release candidate |
+| installation, mise à jour, veille/reprise et accessibilité | propriétaire du produit | chaque release candidate |
+| signature, stores, TestFlight/MSIX/notarisation | propriétaire, assisté | release candidate et publication |
+
+L'inventaire des appareils réellement disponibles reste à renseigner dans `TC-006`. Une case sans appareil n'est jamais remplacée par une affirmation de compatibilité. La CI cible des labels explicites (`ubuntu-24.04`, `windows-2025`, `macos-26`) et une version Flutter exacte ; les labels `latest` ne sont pas utilisés dans la matrice contractuelle.
+
+Les versions minimales sont décidées dans `TC-006`. Elles sont revérifiées dans `TC-801` avant publication, car les exigences stores évoluent.
 
 ## Gates proposés
 
