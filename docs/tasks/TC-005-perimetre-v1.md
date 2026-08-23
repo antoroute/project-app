@@ -1,6 +1,6 @@
 # TC-005 — Geler le périmètre V1
 
-Statut : Prête
+Statut : Terminée
 Priorité : P0
 Décision : propriétaire du produit
 Dépendances : aucune
@@ -31,13 +31,17 @@ Transformer `docs/product/V1_SCOPE.md` en engagement testable et empêcher l'ajo
 
 ## Critères d'acceptation
 
-- [ ] Chaque question ci-dessus a une décision enregistrée.
-- [ ] Les parcours compte/cercle/appareil/message/suppression sont décrits sans ambiguïté majeure.
-- [ ] Calendrier, fichiers, localisation, appels, Web messaging et monétisation sont confirmés inclus ou exclus.
-- [ ] Les critères de « publiable » et de bêta sont mesurables.
-- [ ] La roadmap et les tâches incompatibles sont mises à jour.
-- [ ] Toute nouvelle demande hors V1 exige une décision explicite de changement de scope.
+- [x] Chaque question ci-dessus a une décision enregistrée.
+- [x] Les parcours compte/cercle/appareil/message/suppression sont décrits sans ambiguïté majeure.
+- [x] Calendrier, fichiers, localisation, appels, Web messaging et monétisation sont confirmés exclus.
+- [x] Les critères de « publiable » et de bêta sont mesurables.
+- [x] La roadmap et les tâches incompatibles sont mises à jour.
+- [x] Toute nouvelle demande hors V1 exige une décision explicite de changement de scope.
 
 ## Validation
 
 Atelier court propriétaire + assistant à partir du document, puis revue écrite. Aucun code n'est nécessaire pour clore cette tâche.
+
+## Résultat du 2026-08-23
+
+`docs/product/V1_DECISIONS.md` enregistre les huit décisions, trois personas, les parcours et les seuils de bêta. `V1_SCOPE.md` et ADR-0002 sont acceptés. Aucune modification de code ou d'infrastructure n'a été nécessaire.

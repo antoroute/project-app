@@ -48,7 +48,11 @@ La roadmap détaillée se trouve dans `docs/roadmap/ROADMAP.md`.
 
 - Le cœur de sécurité ne sera jamais réservé à un abonnement payant.
 - Le modèle économique n'est pas implémenté en V1 ; priorité à la validation d'usage auprès des particuliers.
-- Calendrier, fichiers, localisation, appels, client Web complet et paiement sont hors V1 proposée.
+- Calendrier, fichiers, localisation, appels, client Web complet et paiement sont hors V1 acceptée.
+- Toutes les conversations V1 appartiennent à un cercle ; aucun message individuel hors cercle commun.
+- Les rôles sont propriétaire, administrateur et membre, sans quorum d'approbation en V1.
+- Un nouvel appareil ne reçoit que les nouveaux messages ; une récupération totale ne restaure pas l'ancien historique E2EE.
+- Les enveloppes chiffrées sont conservées 90 jours sur le serveur par défaut.
 - Ne pas affirmer « confidentialité parfaite », « forward secrecy », « post-compromise security » ou « équivalent Signal » tant que ces propriétés n'ont pas été conçues, testées et auditées.
 - L'E2EE protège le contenu, pas automatiquement les métadonnées telles que comptes, appartenances, appareils, horodatages, adresses réseau et journaux techniques.
 

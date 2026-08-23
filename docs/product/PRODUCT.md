@@ -1,6 +1,6 @@
 # Vision produit
 
-Statut : proposition à valider dans `TC-005`
+Statut : vision V1 acceptée
 Dernière mise à jour : 2026-08-23
 
 ## Problème
@@ -38,6 +38,8 @@ Les entreprises, établissements scolaires, équipes réglementées et grandes c
 4. Envoyer, recevoir et relire des messages texte, y compris après une coupure réseau.
 5. Comprendre l'état d'envoi et les erreurs sans perte silencieuse.
 6. Bloquer/signaler un utilisateur ou contenu, contacter le support et supprimer son compte.
+
+Les décisions détaillées, personas et résultats d'échec acceptables sont dans `V1_DECISIONS.md`.
 
 ## Indicateurs de validation
 

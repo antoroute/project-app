@@ -19,12 +19,12 @@ Objectif : connaître la cible et rendre tout travail ultérieur récupérable.
 | TC-002 | Inventorier la VM de production en lecture seule | accès assaini | Terminée — écarts ouverts |
 | TC-003 | Créer une sauvegarde chiffrée et prouver la restauration | TC-002 | Terminée — données historiques abandonnées |
 | TC-004 | Créer un staging totalement séparé | TC-002, TC-003 | Terminée — backend local |
-| TC-005 | Geler le périmètre et les non-objectifs V1 | — | Prête |
+| TC-005 | Geler le périmètre et les non-objectifs V1 | — | Terminée |
 | TC-006 | Décider les versions OS minimales et la matrice appareils | TC-005 | Prête |
 | TC-007 | Créer le contexte, les ADR, prompts et conventions IA | — | Terminée |
 | TC-008 | Établir le modèle de menace et les invariants initiaux | TC-007 | Terminée — baseline |
 
-Porte de sortie : nom décidé, V1 acceptée, inventaire production assaini, sauvegarde restaurée, staging isolé et décisions plateformes enregistrées.
+Porte de sortie : nom décidé, V1 acceptée, inventaire production assaini, sort des données historiques décidé, staging isolé et décisions plateformes enregistrées.
 
 ## Phase 1 — Fermer les vulnérabilités critiques
 

@@ -12,7 +12,7 @@ Cette documentation est la source de contexte pour le produit, l'architecture, l
 
 ## Références par domaine
 
-- Produit : [vision](product/PRODUCT.md), [périmètre V1](product/V1_SCOPE.md)
+- Produit : [vision](product/PRODUCT.md), [périmètre V1](product/V1_SCOPE.md), [décisions V1](product/V1_DECISIONS.md)
 - Architecture : [système](architecture/SYSTEM.md), [modèle de données](architecture/DATA_MODEL.md)
 - Sécurité : [menaces](security/THREAT_MODEL.md), [invariants](security/SECURITY_INVARIANTS.md), [protocole cryptographique](security/CRYPTO_PROTOCOL.md)
 - Décisions : [registre ADR](adr/README.md)

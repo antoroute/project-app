@@ -1,6 +1,6 @@
 # Périmètre V1
 
-Statut : proposé, décision à clôturer dans `TC-005`
+Statut : accepté
 Dernière mise à jour : 2026-08-23
 
 ## Résultat attendu
@@ -13,9 +13,9 @@ Une personne non technique peut installer l'application, créer un compte vérif
 - Récupération d'accès avec règles explicites concernant les anciennes clés et l'historique.
 - Suppression du compte depuis l'application et demande équivalente depuis le site public.
 - Création de cercle, invitation, acceptation/refus, rôles minimaux et retrait d'un membre.
-- Conversations texte de cercle et sous-ensembles privés clairement autorisés.
+- Conversations texte toujours rattachées à un cercle : conversation principale et sous-ensembles privés de ses membres.
 - E2EE versionné avec vérification avant affichage et gestion des changements de clés.
-- Ajout, approbation, nommage et révocation d'appareils.
+- Ajout, approbation depuis un appareil existant, nommage et révocation d'appareils ; les nouveaux appareils commencent sans historique antérieur.
 - File d'envoi durable, idempotence, reprise réseau et synchronisation déterministe.
 - Notifications distantes au contenu générique, sans texte en clair.
 - Blocage, signalement, conditions d'utilisation et contact support.
@@ -23,6 +23,7 @@ Une personne non technique peut installer l'application, créer un compte vérif
 - Français et anglais ; accessibilité de base et interface adaptative.
 - Android, iOS, Windows ; macOS seulement après validation du jalon plateforme.
 - Site public statique : présentation, liens de téléchargement, support, confidentialité, conditions et suppression de compte.
+- Rétention serveur de 90 jours pour les enveloppes de messages chiffrées ; conservation locale contrôlée par l'utilisateur.
 
 ## Exclus
 
@@ -31,6 +32,8 @@ Une personne non technique peut installer l'application, créer un compte vérif
 - Grandes communautés, canaux publics, fédération ou administration d'entreprise.
 - Paiement, abonnement, publicité, marketplace ou vente de données.
 - Sauvegarde serveur de clés permettant à l'opérateur de déchiffrer les messages.
+- Messages individuels entre comptes n'ayant pas de cercle commun.
+- Transfert d'ancien historique vers un nouvel appareil.
 
 ## Définition fonctionnelle de « publiable »
 
@@ -40,13 +43,10 @@ Une personne non technique peut installer l'application, créer un compte vérif
 - Sauvegarde/restauration, migration et rollback ont été exercés en staging.
 - Les politiques stores correspondent exactement aux données collectées et au fonctionnement du chiffrement.
 - Support, suppression de compte, signalement, politique de confidentialité et gestion d'incident sont opérationnels.
-- Une bêta fermée a produit des indicateurs acceptables, définis dans la checklist de release.
+- Une bêta fermée d'au moins 30 participants activés, 5 cercles et 4 semaines a atteint les seuils de `V1_DECISIONS.md`.
 
-## Questions à trancher dans TC-005
+## Décisions détaillées
 
-- Les conversations V1 sont-elles toujours rattachées à un cercle ?
-- Quel modèle de rôles minimal : propriétaire/admin/membre ou propriétaire/membre ?
-- Quel quorum, le cas échéant, approuve un nouveau membre ou appareil ?
-- Quel historique un nouvel appareil peut-il récupérer, et par quel mécanisme ?
-- Quelle conséquence exacte une récupération de compte a-t-elle sur l'historique E2EE ?
-- macOS est-il un engagement de lancement ou un jalon postérieur sans blocage de la V1 ?
+Les rôles, approbations, conséquences de récupération, historique, rétention, personas, parcours et seuils de bêta sont définis dans `docs/product/V1_DECISIONS.md`.
+
+Tout changement de cette liste passe par une décision explicite de scope et une mise à jour d'ADR-0002.

@@ -9,8 +9,8 @@ Dernière mise à jour : 2026-08-23
 | Session | hash refresh, appareil, dates/IP si journalisées | PostgreSQL/logs | oui | authentification/sécurité | à définir, minimale |
 | Graphe social | cercles, membres, rôles, conversations | PostgreSQL messaging | oui | fournir le service | durée du compte/cercle + règles à définir |
 | Clés publiques | identité/appareil, versions, révocation | PostgreSQL + clients | oui, publiques | acheminer/vérifier E2EE | historique de sécurité à définir |
-| Contenu message | texte en clair | appareils destinataires | non attendu | communication | réglage local/contrat à définir |
-| Enveloppe E2EE | ciphertext, wraps, signature, horodatage | PostgreSQL + clients | opaque sauf métadonnées | livraison/synchronisation | à définir |
+| Contenu message | texte en clair | appareils destinataires | non attendu | communication | local jusqu'à suppression/retrait du compte |
+| Enveloppe E2EE | ciphertext, wraps, signature, horodatage | PostgreSQL + clients | opaque sauf métadonnées | livraison/synchronisation | 90 jours serveur, sauf suppression antérieure |
 | Notifications | type, état, payload minimal | PostgreSQL/push | oui si présent | alerter sans contenu | courte, à définir |
 | Support/signalement | contact, motif, preuve choisie par utilisateur | système support futur | oui selon soumission | sécurité/modération | à définir |
 | Télémétrie | erreurs, version, plateforme, identifiant pseudonyme éventuel | outil futur | oui | fiabilité/sécurité | minimale, à décider avant collecte |
