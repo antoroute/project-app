@@ -94,7 +94,7 @@ Ces activités sont éloignées d'une messagerie grand public, mais elles empêc
 
 ## Contrôle des marques et limites
 
-Les interfaces officielles [INPI](https://data.inpi.fr/recherche_avancee/marques), [EUIPO eSearch](https://euipo.europa.eu/eSearch/) et [WIPO Global Brand Database](https://branddb.wipo.int/) ont été identifiées pour le contrôle. Une recherche identique et de similarité exploitable et archivable n'a pas pu être produite automatiquement depuis leurs interfaces interactives. Par conséquent :
+Les interfaces officielles [INPI](https://data.inpi.fr/recherche_avancee/marques), [EUIPO Search IP/TMview](https://www.euipo.europa.eu/en/search-ip) et [WIPO Global Brand Database](https://www.wipo.int/en/web/global-brand-database) ont été identifiées pour le contrôle. Une recherche identique et de similarité exploitable et archivable n'a pas pu être produite automatiquement depuis leurs interfaces interactives. Les requêtes, classes, territoires et preuves attendues sont désormais définis dans `TRADEMARK_CLEARANCE_CHECKLIST.md`. Par conséquent :
 
 - aucun candidat n'est déclaré juridiquement disponible ;
 - les variantes phonétiques et orthographiques doivent être cherchées dans les classes 9, 38, 42 et éventuellement 45 ;
@@ -116,7 +116,7 @@ Tant que la validation de marque et les réservations ne sont pas terminées :
 
 ## Suite après choix
 
-1. Finaliser les recherches INPI, EUIPO et WIPO sur `CircleHaven`, `Circle Haven` et leurs variantes phonétiques.
+1. Exécuter `TRADEMARK_CLEARANCE_CHECKLIST.md` dans INPI, EUIPO/TMview et WIPO sur le signe et ses variantes.
 2. Faire valider le risque juridique adapté au budget et au périmètre de lancement.
 3. Après autorisation, réserver ensemble `circlehaven.app`, `circlehaven.fr` et les principaux identifiants sociaux.
 4. Remplacer les noms publics, URLs historiques et package/bundle IDs dans une tâche technique dédiée, avec migration et tests par plateforme.

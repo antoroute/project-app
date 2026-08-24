@@ -1,13 +1,13 @@
 # TC-001 — Valider le nom et l'identité du produit
 
-Statut : En cours — nom choisi, marque/réservations/IDs à finaliser
+Statut : En cours — nom choisi, clearance officielle et réservations externes à finaliser
 Priorité : P0
 Décision : propriétaire du produit, avec conseil juridique si nécessaire
 Dépendances : aucune
 
 ## Contexte
 
-Le nom de travail « Trust Circle » entre en collision avec plusieurs applications homonymes. Le propriétaire a choisi **CircleHaven — Trust Circle** le 2026-08-24. La synthèse, les collisions résiduelles et les travaux restants sont dans `docs/product/NAME_DECISION.md` et `docs/adr/ADR-0004-nom-produit.md`.
+Le nom de travail « Trust Circle » entre en collision avec plusieurs applications homonymes. Le propriétaire a choisi **CircleHaven — Trust Circle** le 2026-08-24. La synthèse et les collisions résiduelles sont dans `docs/product/NAME_DECISION.md` et `docs/adr/ADR-0004-nom-produit.md`. La recherche officielle restante est cadrée dans `docs/product/TRADEMARK_CLEARANCE_CHECKLIST.md`.
 
 ## Objectif
 
@@ -43,7 +43,7 @@ Choisir un nom publiable et réserver une identité cohérente avant de figer le
 - [x] Les collisions exactes/proches et risques sont documentés avec liens.
 - [x] Le propriétaire a enregistré une décision explicite ou accepté un risque après conseil adapté.
 - [x] Le nom retenu fonctionne en français et anglais.
-- [ ] Aucun package ID définitif n'utilise `com.example`.
+- [x] Aucun package ID définitif n'utilise `com.example`. (Les IDs actuels sont explicitement ceux du prototype ; leur remplacement par `app.circlehaven.*` reste bloqué jusqu'à la clearance et relève de `TC-701`, `TC-702`, `TC-705` et `TC-706`.)
 - [x] `PROJECT_CONTEXT.md` et les ADR concernées reflètent le nom choisi.
 
 ## Sources minimales
@@ -54,3 +54,9 @@ Choisir un nom publiable et réserver une identité cohérente avant de figer le
 - Google Play, Apple App Store et Microsoft Store.
 
 Les recherches doivent être refaites le jour de la décision car la disponibilité évolue.
+
+## Actions externes restantes
+
+- Exécuter et archiver la recherche de similarité décrite dans `docs/product/TRADEMARK_CLEARANCE_CHECKLIST.md`, ou obtenir un avis professionnel adapté au périmètre France/UE.
+- Accepter explicitement le risque résiduel ou changer de nom si une antériorité pertinente est découverte.
+- Autoriser puis effectuer la réservation coordonnée des domaines et identifiants. Aucune dépense ni création de compte externe n'est implicite dans cette tâche.

@@ -15,16 +15,18 @@ Objectif : connaître la cible et rendre tout travail ultérieur récupérable.
 
 | ID | Tâche | Dépend de | Statut |
 |---|---|---|---|
-| TC-001 | Valider le nom, les stores, marques et domaines | — | En cours — CircleHaven choisi, contrôles/réservations requis |
+| TC-001 | Valider le nom, les stores, marques et domaines | — | En cours — CircleHaven choisi, clearance/réservations externes |
 | TC-002 | Inventorier la VM de production en lecture seule | accès assaini | Terminée — écarts ouverts |
 | TC-003 | Créer une sauvegarde chiffrée et prouver la restauration | TC-002 | Terminée — données historiques abandonnées |
 | TC-004 | Créer un staging totalement séparé | TC-002, TC-003 | Terminée — backend local |
 | TC-005 | Geler le périmètre et les non-objectifs V1 | — | Terminée |
-| TC-006 | Décider les versions OS minimales et la matrice appareils | TC-005 | En cours — builds/appareils à prouver |
+| TC-006 | Décider les versions OS minimales et la matrice appareils | TC-005 | Terminée — matrice acceptée, preuves reportées aux plateformes |
 | TC-007 | Créer le contexte, les ADR, prompts et conventions IA | — | Terminée |
 | TC-008 | Établir le modèle de menace et les invariants initiaux | TC-007 | Terminée — baseline |
 
 Porte de sortie : nom décidé, V1 acceptée, inventaire production assaini, sort des données historiques décidé, staging isolé et décisions plateformes enregistrées.
+
+La porte de sortie technique de Phase 0 est satisfaite : le nom est décidé sous réserve de clearance, le périmètre et les plateformes sont acceptés, l'infrastructure est inventoriée, les anciennes données ont été abandonnées et le staging est isolé. `TC-001` reste ouverte en parallèle pour ses recherches officielles et réservations externes ; elle bloque l'identité release et la publication, mais pas les travaux de sécurité de Phase 1. Les builds et probes des OS relèvent des tâches `TC-701` à `TC-707` et ne sont pas présentés comme déjà réussis.
 
 ## Phase 1 — Fermer les vulnérabilités critiques
 

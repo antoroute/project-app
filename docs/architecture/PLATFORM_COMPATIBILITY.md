@@ -1,6 +1,6 @@
 # Registre de compatibilité des plateformes
 
-Statut : baseline technique V1, preuves de build partielles
+Statut : baseline technique V1 acceptée, preuves de plateforme non encore exécutées
 Dernière vérification : 2026-08-24
 Tâche : `TC-006`
 
@@ -82,7 +82,7 @@ Ces écarts sont des bloqueurs de validation, pas des raisons d'abaisser la matr
 
 ## Prototypes et preuves attendues
 
-Chaque cible obligatoire doit exécuter le même probe avant clôture de TC-006 :
+Chaque cible obligatoire doit exécuter le même probe dans les tâches `TC-306`, `TC-505`/`TC-508` et `TC-701` à `TC-707`, avant toute bêta ou annonce de compatibilité :
 
 1. build debug/release sans secret partagé embarqué ;
 2. création d'une clé aléatoire par CSPRNG, stockage OS, lecture puis effacement ;
