@@ -16,8 +16,7 @@ Cette liste d'algorithmes ne suffit pas à démontrer un protocole sûr. La sér
 - Des clés destinataires statiques peuvent permettre de déchiffrer d'anciens messages capturés si leur clé privée est compromise plus tard.
 - Aucune post-compromise security démontrée ne renouvelle automatiquement la confiance après compromission.
 - Le format est lié à l'implémentation Dart et certaines conversions sont ambiguës entre texte et octets.
-- La vérification peut intervenir après l'affichage dans le flux client actuel.
-- Le chemin normal peut retourner le texte clair malgré une signature fausse ; le chemin rapide saute explicitement la vérification. `TC-114` doit imposer la vérification avant affichage, cache ou notification sans ajouter d'aller-retour réseau nominal.
+- Depuis `TC-114`, signature, contexte, appareil et tags sont imposés avant affichage, cache ou notification. Les calculs Ed25519/X25519 sont déportés dans l'isolate et le chemin nominal avec annuaire en cache n'ajoute aucun aller-retour réseau.
 - Les octets signés sont une concaténation sans séparateurs ni longueurs ; le sel HKDF n'est pas signé et aucune AAD n'est fournie à AES-GCM.
 - Le cycle de confiance d'un nouvel appareil est incomplet.
 - La clé maître du cache persistant de clés de message est dérivée de façon prévisible de l'horloge, sans aléa cryptographique ; la base SQLite locale n'est pas réellement chiffrée.

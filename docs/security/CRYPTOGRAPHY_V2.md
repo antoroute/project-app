@@ -203,34 +203,25 @@ Limites importantes :
 
 Elle doit être remplacée par une structure canonique, versionnée et testée avec des vecteurs dans `TC-302` et `TC-305`, sans changement silencieux du format V2 historique.
 
-## Déchiffrement normal observé
+## Déchiffrement authentifié depuis TC-114
 
 Pour l'appareil local :
 
-1. rechercher son entrée dans `recipients` ;
-2. calculer X25519 avec la clé privée statique locale et la clé éphémère de l'expéditeur ;
-3. recalculer HKDF avec le `salt` et le contexte exact ;
-4. ouvrir `wrap` pour obtenir `MK` ;
-5. récupérer la clé publique Ed25519 de l'expéditeur dans l'annuaire ;
-6. vérifier la signature et calculer le booléen `verified` ;
-7. ouvrir le contenu avec `MK` ;
-8. retourner le texte clair **même si `verified == false`**.
+1. valider version, algorithmes, types, tailles Base64 et unicité des destinataires ;
+2. imposer l'égalité entre cercle/conversation attendus et enveloppe ;
+3. imposer exactement une entrée pour l'utilisateur et l'appareil locaux ;
+4. récupérer dans l'annuaire l'appareil expéditeur actif avec la même version de clé ;
+5. vérifier Ed25519 dans l'isolate cryptographique ;
+6. seulement après ce succès, consulter un éventuel cache de `MK` ;
+7. à défaut, calculer X25519/HKDF puis ouvrir `wrap` et le contenu dans l'isolate ;
+8. mettre `MK` en cache uniquement après ouverture réussie du tag du contenu ;
+9. remettre atomiquement le texte avec `signatureValid: true`.
 
-Le tag GCM authentifie le contenu par rapport à `MK`, mais il n'identifie pas l'expéditeur. Une signature fausse ou une clé d'expéditeur introuvable n'empêche donc pas actuellement la remise du texte clair à l'appelant.
+Une signature absente, fausse ou invérifiable, un contexte inattendu, un appareil inactif, un wrap, nonce, sel ou tag altéré provoque un rejet sans texte, cache ou notification.
 
-## Déchiffrement rapide observé
+`decryptVerified` est désormais le chemin unique. Les méthodes historiques `decrypt` et `decryptFast` ne sont que des alias vers cette méthode ; malgré son ancien nom, `decryptFast` ne saute plus la signature. Les anciens services génériques capables de déchiffrer sans preuve d'enveloppe ont été retirés.
 
-`decryptFast` évite volontairement la vérification Ed25519. Il peut :
-
-- retrouver `MK` dans le cache mémoire ;
-- retrouver `MK` dans le cache persistant ;
-- sinon exécuter X25519, HKDF et les ouvertures AES-GCM dans un isolate.
-
-Il retourne le texte avec `signatureValid: false`. `ConversationProvider` peut ensuite afficher, conserver et utiliser ce texte dans une notification avant qu'une vérification complète asynchrone ait terminé.
-
-**Écart critique :** ce comportement viole les invariants qui imposent `verify-before-decrypt/use`. Un texte non authentifié ne doit jamais être affiché, indexé, notifié ou mis en cache comme un message valide. Le correctif est suivi par `TC-114`.
-
-La cible UX est de vérifier sans latence perceptible : parsing hors thread UI, clé publique mise en cache après validation, vérification Ed25519 et déchiffrement parallélisables seulement lorsque l'ordre de sûreté est préservé, état transitoire très court si nécessaire, puis affichage atomique après succès.
+La réactivité est préservée par l'annuaire et les clés de message en cache après validation, ainsi que par une file d'isolate priorisant les messages visibles. Aucun aller-retour réseau supplémentaire n'est ajouté lorsque l'annuaire est disponible localement. Les mesures `message_signature_verify`, `message_decrypt_verified_cached`, `message_decrypt_verified_pipeline` et `message_receive_verified_total` exposent médiane/p95 sans journaliser le contenu.
 
 ## Stockage local et durée de vie
 
@@ -239,7 +230,7 @@ La cible UX est de vérifier sans latence perceptible : parsing hors thread UI, 
 | graines privées Ed25519/X25519 | `flutter_secure_storage` | installation | stockage OS, isolation par compte incomplète |
 | jetons d'accès/refresh | `flutter_secure_storage` | session/30 jours | biométrie autour du refresh à valider par plateforme |
 | clé de message en mémoire | RAM | TTL 24 h, max. 1 000 | texte et clés accessibles au processus |
-| clé de message persistante | SQLite, chiffrée AES-GCM | TTL 7 jours | clé maître trop faible |
+| clé de message persistante | SQLite, chiffrée AES-GCM | TTL 7 jours | accessible seulement après preuve d'enveloppe ; clé maître encore trop faible |
 | enveloppes de messages | `messages_encrypted.db` SQLite | non bornée clairement | fichier SQLite non chiffré, contenu E2EE conservé |
 | texte déchiffré | objets/cache en RAM | session/cache | ne doit jamais être écrit ou journalisé |
 | clé publique de groupe | cache local | TTL 30 jours | mécanisme historique, rôle V2 limité |
@@ -280,7 +271,6 @@ Le backend applique l'identité JWT à l'expéditeur depuis `TC-103`, mais il ne
 - pas de déniabilité ou d'anonymat ;
 - pas de restauration automatique sûre de l'historique sur un nouvel appareil ;
 - pas de rotation ou migration de clé complète ;
-- pas de vérification obligatoire avant affichage dans le code actuel ;
 - pas de protection cryptographique suffisante du cache persistant de `MK` ;
 - pas de protocole complet anti-rejeu et de synchronisation par curseur.
 

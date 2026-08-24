@@ -6,36 +6,43 @@ import 'package:flutter/foundation.dart';
 class PerformanceBenchmark {
   PerformanceBenchmark._internal();
   static final PerformanceBenchmark instance = PerformanceBenchmark._internal();
-  
+
   // Stockage des métriques
   final Map<String, List<Duration>> _metrics = {};
   final Map<String, DateTime> _activeTimers = {};
-  
+  final Map<String, String> _timerOperations = {};
+  int _timerSequence = 0;
+
   /// Démarre un timer pour une opération
   String startTimer(String operationName) {
-    final timerId = '${operationName}_${DateTime.now().millisecondsSinceEpoch}';
+    final timerId =
+        '${operationName}_${DateTime.now().microsecondsSinceEpoch}_${_timerSequence++}';
     _activeTimers[timerId] = DateTime.now();
+    _timerOperations[timerId] = operationName;
     debugPrint('⏱️ [BENCHMARK] Début: $operationName (ID: $timerId)');
     return timerId;
   }
-  
+
   /// Arrête un timer et enregistre la durée
   void stopTimer(String timerId, {String? customName}) {
     final startTime = _activeTimers.remove(timerId);
+    final registeredName = _timerOperations.remove(timerId);
     if (startTime == null) {
       debugPrint('⚠️ [BENCHMARK] Timer $timerId non trouvé');
       return;
     }
-    
+
     final duration = DateTime.now().difference(startTime);
-    final operationName = customName ?? timerId.split('_').first;
-    
+    final operationName = customName ?? registeredName ?? 'unknown';
+
     _metrics.putIfAbsent(operationName, () => []);
     _metrics[operationName]!.add(duration);
-    
-    debugPrint('⏱️ [BENCHMARK] Fin: $operationName = ${duration.inMilliseconds}ms (ID: $timerId)');
+
+    debugPrint(
+      '⏱️ [BENCHMARK] Fin: $operationName = ${duration.inMilliseconds}ms (ID: $timerId)',
+    );
   }
-  
+
   /// Mesure une opération async
   Future<T> measureAsync<T>(
     String operationName,
@@ -51,12 +58,9 @@ class PerformanceBenchmark {
       rethrow;
     }
   }
-  
+
   /// Mesure une opération sync
-  T measureSync<T>(
-    String operationName,
-    T Function() operation,
-  ) {
+  T measureSync<T>(String operationName, T Function() operation) {
     final timerId = startTimer(operationName);
     try {
       final result = operation();
@@ -67,20 +71,16 @@ class PerformanceBenchmark {
       rethrow;
     }
   }
-  
+
   /// Obtient les statistiques pour une opération
   Map<String, dynamic> getStats(String operationName) {
     final durations = _metrics[operationName];
     if (durations == null || durations.isEmpty) {
-      return {
-        'operation': operationName,
-        'count': 0,
-        'error': 'No data',
-      };
+      return {'operation': operationName, 'count': 0, 'error': 'No data'};
     }
-    
+
     durations.sort((a, b) => a.compareTo(b));
-    
+
     final total = durations.fold<int>(0, (sum, d) => sum + d.inMilliseconds);
     final avg = total / durations.length;
     final min = durations.first.inMilliseconds;
@@ -88,7 +88,7 @@ class PerformanceBenchmark {
     final median = durations[durations.length ~/ 2].inMilliseconds;
     final p95 = durations[(durations.length * 0.95).floor()].inMilliseconds;
     final p99 = durations[(durations.length * 0.99).floor()].inMilliseconds;
-    
+
     return {
       'operation': operationName,
       'count': durations.length,
@@ -101,7 +101,7 @@ class PerformanceBenchmark {
       'p99_ms': p99,
     };
   }
-  
+
   /// Obtient toutes les statistiques
   Map<String, Map<String, dynamic>> getAllStats() {
     final stats = <String, Map<String, dynamic>>{};
@@ -110,21 +110,24 @@ class PerformanceBenchmark {
     }
     return stats;
   }
-  
+
   /// Affiche un rapport complet
   void printReport() {
     debugPrint('\n📊 ========== RAPPORT DE PERFORMANCE ==========');
     final stats = getAllStats();
-    
+
     if (stats.isEmpty) {
       debugPrint('Aucune donnée collectée');
       return;
     }
-    
+
     // Trier par nombre d'appels (plus fréquent en premier)
-    final sorted = stats.entries.toList()
-      ..sort((a, b) => (b.value['count'] as int).compareTo(a.value['count'] as int));
-    
+    final sorted =
+        stats.entries.toList()..sort(
+          (a, b) =>
+              (b.value['count'] as int).compareTo(a.value['count'] as int),
+        );
+
     for (final entry in sorted) {
       final stat = entry.value;
       debugPrint('\n📈 ${stat['operation']}:');
@@ -135,21 +138,21 @@ class PerformanceBenchmark {
       debugPrint('   Médiane: ${stat['median_ms']}ms');
       debugPrint('   P95: ${stat['p95_ms']}ms | P99: ${stat['p99_ms']}ms');
     }
-    
+
     debugPrint('\n📊 ===========================================\n');
   }
-  
+
   /// Nettoie les métriques
   void clear() {
     _metrics.clear();
     _activeTimers.clear();
+    _timerOperations.clear();
     debugPrint('🧹 [BENCHMARK] Métriques nettoyées');
   }
-  
+
   /// Nettoie les métriques pour une opération spécifique
   void clearOperation(String operationName) {
     _metrics.remove(operationName);
     debugPrint('🧹 [BENCHMARK] Métriques nettoyées pour: $operationName');
   }
 }
-

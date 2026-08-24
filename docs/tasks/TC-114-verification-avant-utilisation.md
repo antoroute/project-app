@@ -1,6 +1,6 @@
 # TC-114 — Vérifier tout message avant utilisation du texte clair
 
-Statut : Prête
+Statut : En cours — validation Android/Windows requise
 Priorité : P0 sécurité
 Décision : mainteneur
 Dépendances : TC-103
@@ -32,14 +32,14 @@ Conserver une expérience fluide : aucun aller-retour réseau supplémentaire su
 
 ## Critères d'acceptation
 
-- [ ] Une signature absente, invalide ou invérifiable bloque toute remise du texte à l'UI.
-- [ ] Un tag, un wrap, un destinataire, une version ou un contexte invalide est rejeté sans cache ni notification.
-- [ ] Les chemins temps réel, REST, cache mémoire et cache persistant appliquent la même barrière.
-- [ ] Aucun extrait de texte clair n'est écrit dans les logs, y compris en debug.
-- [ ] Une clé publique validée peut être mise en cache sans contourner la vérification par message.
-- [ ] Les calculs coûteux ne bloquent pas le thread UI.
+- [x] Une signature absente, invalide ou invérifiable bloque toute remise du texte à l'UI.
+- [x] Un tag, un wrap, un destinataire, une version ou un contexte invalide est rejeté sans cache ni notification.
+- [x] Les chemins temps réel, REST, cache mémoire et cache persistant appliquent la même barrière.
+- [x] Aucun extrait de texte clair n'est écrit dans les logs, y compris en debug.
+- [x] Une clé publique validée peut être mise en cache sans contourner la vérification par message.
+- [x] Les calculs coûteux ne bloquent pas le thread UI.
 - [ ] La latence p50/p95 de réception et d'ouverture est mesurée sur Android et Windows ; l'objectif UX est documenté et accepté.
-- [ ] Les erreurs sont génériques côté utilisateur et détaillées sans secret dans la télémétrie locale autorisée.
+- [x] Les erreurs sont génériques côté utilisateur et détaillées sans secret dans la télémétrie locale autorisée.
 
 ## Tests et preuves attendues
 
@@ -63,3 +63,26 @@ Le correctif peut révéler des enveloppes historiques invalides auparavant tol�
 ## Décisions humaines nécessaires
 
 Valider le budget de latence p95 par plateforme et l'état UI très bref à montrer lorsque la vérification dépasse ce budget.
+
+## Implémentation réalisée
+
+- `MessageEnvelopeVerifier` valide format, contexte, destinataire, appareil actif/version et signature avant tout déchiffrement.
+- Ed25519, X25519, HKDF et le pipeline d'ouverture sont placés dans l'isolate crypto avec priorité pour les messages visibles.
+- `decryptVerified` est l'unique chemin de remise du texte ; `decrypt` et `decryptFast` sont des alias sûrs.
+- Le cache exige un `VerifiedMessageEnvelope` impossible à construire hors du vérificateur et ne persiste une nouvelle `MK` qu'après succès du tag du contenu.
+- Les chemins REST, Socket.IO et écran n'affichent/notifient qu'un résultat marqué vérifié ; un événement forgé est rejeté sans bulle.
+- Les trois anciens services de déchiffrement non authentifié, inutilisés, ont été supprimés.
+- Les logs contenant le texte envoyé, déchiffré ou le corps de notification ont été supprimés.
+- L'encodage à l'envoi utilise désormais UTF-8, y compris accents et emoji.
+
+## Validation exécutée
+
+- `flutter test --no-pub test/core/crypto/message_authentication_test.dart` : 13 tests réussis.
+- Cas couverts : valide, vérification concurrente d'un même message, signature absente/altérée, contexte, destinataire, algorithme, appareil/version, wrap, nonce, sel HKDF et tag de contenu altérés.
+- `flutter analyze --no-pub` : aucune erreur de compilation ; 89 informations/avertissements non bloquants, dont l'asset `.env` volontairement absent du dépôt.
+- Recherche statique : aucun log de `plaintext`, `decryptedText`, `messageText` ou corps tronqué dans les chemins concernés.
+- `git diff --check` : attendu avant commit.
+
+## Validation restante
+
+Exécuter [`TC-114-DEVICE_VALIDATION.md`](../quality/TC-114-DEVICE_VALIDATION.md) sur Android et Windows, reporter médiane/p95 et accepter ou ajuster le budget proposé. Tant que ces preuves ne sont pas ajoutées, la tâche reste `En cours` et la porte de sortie Phase 1 n'est pas satisfaite.

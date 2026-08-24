@@ -46,7 +46,7 @@ Objectif : empêcher l'usurpation, l'accès croisé et l'enregistrement illégit
 | TC-109 | Retirer le faux secret partagé de l'application publique | TC-101 | À faire |
 | TC-110 | Mettre à jour les dépendances vulnérables avec tests | TC-111 | À faire |
 | TC-111 | Créer les tests négatifs auth/ACL/keys et PostgreSQL d'intégration | TC-004 | À faire |
-| TC-114 | Interdire affichage, cache et notification avant authentification du message | TC-103 | Prête |
+| TC-114 | Interdire affichage, cache et notification avant authentification du message | TC-103 | En cours |
 | TC-112 | Revue de sécurité de fermeture P1 | TC-101 à TC-111, TC-114 | À faire |
 | TC-113 | Exposer le staging par TLS et accès restreint après fermeture P1 | TC-112 | À faire |
 

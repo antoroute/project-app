@@ -229,15 +229,15 @@ Ces contrôles ne sont pas encore transactionnels et les validations de taille/e
 1. Le client tente de charger jusqu'à 20 enveloppes de la conversation depuis SQLite.
 2. Il interroge le serveur en arrière-plan et fusionne les messages par `messageId`/timestamp.
 3. Les messages visibles peuvent être déchiffrés à la demande par le chemin complet.
-4. Le texte déchiffré est gardé en mémoire ; SQLite conserve principalement l'enveloppe V2 et le statut de signature.
+4. Une enveloppe non authentifiée n'alimente jamais le cache de texte ; SQLite conserve principalement l'enveloppe V2 et le statut de signature.
 
 ### Nouveau message temps réel
 
 Messaging émet actuellement un ping minimal `message:new` contenant `convId` et `groupId`, pas le contenu. Si la conversation est ouverte, Flutter relit les derniers messages via REST et filtre ceux déjà connus.
 
-Pour réduire la latence, ce chemin utilise actuellement `decryptFast`, affiche le texte et peut construire une notification avant la fin de la vérification Ed25519. Une vérification complète est lancée ensuite en arrière-plan.
+Depuis `TC-114`, les chemins REST, Socket.IO, écran et caches passent par `decryptVerified`. Version, contexte, destinataire et appareil expéditeur sont contrôlés, puis Ed25519 est vérifié dans l'isolate avant toute ouverture exploitable. Le texte et la clé de message n'atteignent cache, UI et notification qu'après succès du tag AES-GCM.
 
-**Écart de sécurité critique : un contenu non authentifié peut donc être affiché, mis en cache ou utilisé dans une notification.** Cela contredit les invariants 16 à 18 et doit être corrigé avant publication. La documentation de cet état ne constitue pas une acceptation du risque.
+La latence est limitée sans affaiblissement : priorité aux messages visibles dans la file crypto, clés publiques déjà validées en cache et aucun aller-retour réseau supplémentaire lorsque l'annuaire local est disponible. Les mesures finales sur Android et Windows restent attachées à `TC-114`.
 
 ### Notifications
 
@@ -344,7 +344,7 @@ Le fichier OpenAPI actuel ne couvre pas encore fidèlement toutes ces routes et 
 | cercles | création, liste, demande, décision créateur | rôles V1 à implémenter |
 | QR d'adhésion | lecture d'un identifiant de cercle | format d'invitation sûr à concevoir |
 | conversations | création/liste/détail | ACL et atomicité à corriger |
-| texte E2EE V2 | envoi/réception fonctionnels | protocole V3 et verify-before-use requis |
+| texte E2EE V2 | envoi/réception avec vérification avant usage | protocole V3 et validation appareils réels requis |
 | appareils | liste/publication/révocation partielle | preuve et approbation requises |
 | présence/frappe/lecture | temps réel en mémoire | confidentialité, limites et fiabilité à tester |
 | stockage hors ligne | cache partiel | chiffrement au repos et sync fiable requis |

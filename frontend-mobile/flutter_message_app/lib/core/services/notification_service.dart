@@ -3,20 +3,23 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// Service de gestion des notifications push et in-app
 class NotificationService {
-  static final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
 
   /// Initialise le service de notifications
   static Future<void> initialize() async {
     if (_initialized) return;
 
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
-    
+
     const initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
@@ -78,7 +81,7 @@ class NotificationService {
       payload: conversationId, // Payload pour navigation
     );
 
-    debugPrint('🔔 Notification affichée: $title - $body');
+    debugPrint('🔔 Notification de message affichée');
   }
 
   /// Affiche une notification générique
@@ -119,7 +122,7 @@ class NotificationService {
       payload: payload,
     );
 
-    debugPrint('🔔 Notification générale affichée: $title - $body');
+    debugPrint('🔔 Notification générale affichée');
   }
 
   /// Annule toutes les notifications
@@ -129,20 +132,28 @@ class NotificationService {
   }
 
   /// Annule les notifications pour une conversation spécifique
-  static Future<void> cancelConversationNotifications(String conversationId) async {
+  static Future<void> cancelConversationNotifications(
+    String conversationId,
+  ) async {
     await _notifications.cancel(conversationId.hashCode);
-    debugPrint('🔔 Notifications annulées pour la conversation: $conversationId');
+    debugPrint(
+      '🔔 Notifications annulées pour la conversation: $conversationId',
+    );
   }
 
   /// Vérifie si les notifications sont activées
   static Future<bool> areNotificationsEnabled() async {
     if (!_initialized) return false;
-    
-    final androidPlugin = _notifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
+    final androidPlugin =
+        _notifications
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >();
     if (androidPlugin != null) {
       return await androidPlugin.areNotificationsEnabled() ?? false;
     }
-    
+
     // Pour iOS, on assume que c'est activé si on peut initialiser
     return true;
   }
@@ -150,12 +161,16 @@ class NotificationService {
   /// Demande les permissions de notification
   static Future<bool> requestPermissions() async {
     if (!_initialized) return false;
-    
-    final androidPlugin = _notifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
+    final androidPlugin =
+        _notifications
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >();
     if (androidPlugin != null) {
       return await androidPlugin.requestNotificationsPermission() ?? false;
     }
-    
+
     return true;
   }
 }

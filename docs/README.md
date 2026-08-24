@@ -21,7 +21,7 @@ Cette documentation est la source de contexte pour le produit, l'architecture, l
 - Décisions : [registre ADR](adr/README.md)
 - API : [contrats](api/README.md)
 - Exploitation : [inventaire historique](operations/PRODUCTION_INVENTORY.md), [inventaire staging](operations/STAGING_INVENTORY.md), [archive du code initial](operations/CODE_ARCHIVE.md), [environnements](operations/ENVIRONMENTS.md), [déploiement](operations/DEPLOYMENT.md), [sauvegarde/restauration](operations/BACKUP_RESTORE.md), [incidents](operations/INCIDENT_RESPONSE.md)
-- Qualité : [stratégie de test](quality/TEST_STRATEGY.md), [checklist de release](quality/RELEASE_CHECKLIST.md)
+- Qualité : [stratégie de test](quality/TEST_STRATEGY.md), [checklist de release](quality/RELEASE_CHECKLIST.md), [validation Android/Windows TC-114](quality/TC-114-DEVICE_VALIDATION.md)
 - Conformité : [cartographie des données](compliance/DATA_MAP.md), [matrice stores](compliance/STORE_MATRIX.md)
 - Prompts : [implémentation](prompts/IMPLEMENT_TASK.md), [revue](prompts/REVIEW_TASK.md), [diagnostic](prompts/DEBUG_TASK.md)
 

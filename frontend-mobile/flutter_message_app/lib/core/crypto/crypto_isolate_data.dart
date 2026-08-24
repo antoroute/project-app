@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
@@ -8,21 +7,21 @@ class X25519EcdhTask {
   final Uint8List myPrivateKeyBytes; // Seed X25519 (32 bytes)
   final Uint8List remotePublicKeyBytes; // eph_pub (32 bytes)
   final int priority; // 0 = normal, 1 = haute priorité (messages visibles)
-  
+
   X25519EcdhTask({
     required this.taskId,
     required this.myPrivateKeyBytes,
     required this.remotePublicKeyBytes,
     this.priority = 0,
   });
-  
+
   Map<String, dynamic> toJson() => {
     'taskId': taskId,
     'myPrivateKeyBytes': base64Encode(myPrivateKeyBytes),
     'remotePublicKeyBytes': base64Encode(remotePublicKeyBytes),
     'priority': priority,
   };
-  
+
   factory X25519EcdhTask.fromJson(Map<String, dynamic> json) => X25519EcdhTask(
     taskId: json['taskId'] as String,
     myPrivateKeyBytes: base64Decode(json['myPrivateKeyBytes'] as String),
@@ -36,26 +35,80 @@ class X25519EcdhResult {
   final String taskId;
   final Uint8List? sharedSecretBytes; // 32 bytes
   final String? error;
-  
-  X25519EcdhResult({
-    required this.taskId,
-    this.sharedSecretBytes,
-    this.error,
-  });
-  
+
+  X25519EcdhResult({required this.taskId, this.sharedSecretBytes, this.error});
+
   Map<String, dynamic> toJson() => {
     'taskId': taskId,
-    'sharedSecretBytes': sharedSecretBytes != null ? base64Encode(sharedSecretBytes!) : null,
+    'sharedSecretBytes':
+        sharedSecretBytes != null ? base64Encode(sharedSecretBytes!) : null,
     'error': error,
   };
-  
-  factory X25519EcdhResult.fromJson(Map<String, dynamic> json) => X25519EcdhResult(
-    taskId: json['taskId'] as String,
-    sharedSecretBytes: json['sharedSecretBytes'] != null 
-      ? base64Decode(json['sharedSecretBytes'] as String)
-      : null,
-    error: json['error'] as String?,
-  );
+
+  factory X25519EcdhResult.fromJson(Map<String, dynamic> json) =>
+      X25519EcdhResult(
+        taskId: json['taskId'] as String,
+        sharedSecretBytes:
+            json['sharedSecretBytes'] != null
+                ? base64Decode(json['sharedSecretBytes'] as String)
+                : null,
+        error: json['error'] as String?,
+      );
+}
+
+/// Tâche de vérification Ed25519 exécutée hors du thread UI.
+class Ed25519VerifyTask {
+  final String taskId;
+  final Uint8List messageBytes;
+  final Uint8List signatureBytes;
+  final Uint8List publicKeyBytes;
+  final int priority;
+
+  Ed25519VerifyTask({
+    required this.taskId,
+    required this.messageBytes,
+    required this.signatureBytes,
+    required this.publicKeyBytes,
+    this.priority = 0,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'taskId': taskId,
+    'messageBytes': base64Encode(messageBytes),
+    'signatureBytes': base64Encode(signatureBytes),
+    'publicKeyBytes': base64Encode(publicKeyBytes),
+    'priority': priority,
+  };
+
+  factory Ed25519VerifyTask.fromJson(Map<String, dynamic> json) =>
+      Ed25519VerifyTask(
+        taskId: json['taskId'] as String,
+        messageBytes: base64Decode(json['messageBytes'] as String),
+        signatureBytes: base64Decode(json['signatureBytes'] as String),
+        publicKeyBytes: base64Decode(json['publicKeyBytes'] as String),
+        priority: json['priority'] as int? ?? 0,
+      );
+}
+
+class Ed25519VerifyResult {
+  final String taskId;
+  final bool? isValid;
+  final String? error;
+
+  Ed25519VerifyResult({required this.taskId, this.isValid, this.error});
+
+  Map<String, dynamic> toJson() => {
+    'taskId': taskId,
+    'signatureValid': isValid,
+    'error': error,
+  };
+
+  factory Ed25519VerifyResult.fromJson(Map<String, dynamic> json) =>
+      Ed25519VerifyResult(
+        taskId: json['taskId'] as String,
+        isValid: json['signatureValid'] as bool?,
+        error: json['error'] as String?,
+      );
 }
 
 /// Tâche pour le pipeline complet de déchiffrement dans l'Isolate
@@ -64,22 +117,22 @@ class DecryptPipelineTask {
   final int priority; // 0 = normal, 1 = haute priorité
   final Uint8List myPrivateKeyBytes; // 32 bytes (seed X25519)
   final Uint8List remotePublicKeyBytes; // 32 bytes (eph_pub)
-  
+
   // Données pour HKDF
   final String groupId;
   final String convId;
   final String myUserId;
   final String myDeviceId;
   final Uint8List salt; // 16 bytes
-  
+
   // Données pour AES-GCM Unwrap
   final Uint8List wrapBytes; // wrap chiffré
   final Uint8List wrapNonce; // 12 bytes
-  
+
   // Données pour AES-GCM Decrypt
   final Uint8List iv; // 12 bytes
   final Uint8List ciphertext; // contenu chiffré
-  
+
   DecryptPipelineTask({
     required this.taskId,
     this.priority = 0,
@@ -95,7 +148,7 @@ class DecryptPipelineTask {
     required this.iv,
     required this.ciphertext,
   });
-  
+
   Map<String, dynamic> toJson() => {
     'taskId': taskId,
     'priority': priority,
@@ -111,49 +164,57 @@ class DecryptPipelineTask {
     'iv': base64Encode(iv),
     'ciphertext': base64Encode(ciphertext),
   };
-  
-  factory DecryptPipelineTask.fromJson(Map<String, dynamic> json) => DecryptPipelineTask(
-    taskId: json['taskId'] as String,
-    priority: json['priority'] as int? ?? 0,
-    myPrivateKeyBytes: base64Decode(json['myPrivateKeyBytes'] as String),
-    remotePublicKeyBytes: base64Decode(json['remotePublicKeyBytes'] as String),
-    groupId: json['groupId'] as String,
-    convId: json['convId'] as String,
-    myUserId: json['myUserId'] as String,
-    myDeviceId: json['myDeviceId'] as String,
-    salt: base64Decode(json['salt'] as String),
-    wrapBytes: base64Decode(json['wrapBytes'] as String),
-    wrapNonce: base64Decode(json['wrapNonce'] as String),
-    iv: base64Decode(json['iv'] as String),
-    ciphertext: base64Decode(json['ciphertext'] as String),
-  );
+
+  factory DecryptPipelineTask.fromJson(Map<String, dynamic> json) =>
+      DecryptPipelineTask(
+        taskId: json['taskId'] as String,
+        priority: json['priority'] as int? ?? 0,
+        myPrivateKeyBytes: base64Decode(json['myPrivateKeyBytes'] as String),
+        remotePublicKeyBytes: base64Decode(
+          json['remotePublicKeyBytes'] as String,
+        ),
+        groupId: json['groupId'] as String,
+        convId: json['convId'] as String,
+        myUserId: json['myUserId'] as String,
+        myDeviceId: json['myDeviceId'] as String,
+        salt: base64Decode(json['salt'] as String),
+        wrapBytes: base64Decode(json['wrapBytes'] as String),
+        wrapNonce: base64Decode(json['wrapNonce'] as String),
+        iv: base64Decode(json['iv'] as String),
+        ciphertext: base64Decode(json['ciphertext'] as String),
+      );
 }
 
 /// Résultat du pipeline complet de déchiffrement depuis l'Isolate
 class DecryptPipelineResult {
   final String taskId;
   final Uint8List? decryptedTextBytes; // Texte déchiffré (null si erreur)
+  final Uint8List?
+  messageKeyBytes; // Clé à mettre en cache après authentification
   final String? error; // Message d'erreur (null si succès)
-  
+
   DecryptPipelineResult({
     required this.taskId,
     this.decryptedTextBytes,
+    this.messageKeyBytes,
     this.error,
   });
-  
+
   Map<String, dynamic> toJson() => {
     'taskId': taskId,
-    'decryptedTextBytes': decryptedTextBytes != null 
-        ? base64Encode(decryptedTextBytes!) 
-        : null,
+    'decryptedTextBytes':
+        decryptedTextBytes != null ? base64Encode(decryptedTextBytes!) : null,
+    'messageKeyBytes':
+        messageKeyBytes != null ? base64Encode(messageKeyBytes!) : null,
     'error': error,
   };
-  
+
   factory DecryptPipelineResult.fromJson(Map<String, dynamic> json) {
     try {
       final taskId = json['taskId'] as String;
       Uint8List? decryptedTextBytes;
-      
+      Uint8List? messageKeyBytes;
+
       if (json['decryptedTextBytes'] != null) {
         try {
           final base64Str = json['decryptedTextBytes'] as String;
@@ -163,12 +224,17 @@ class DecryptPipelineResult {
           rethrow;
         }
       }
-      
+
+      if (json['messageKeyBytes'] != null) {
+        messageKeyBytes = base64Decode(json['messageKeyBytes'] as String);
+      }
+
       final error = json['error'] as String?;
-      
+
       return DecryptPipelineResult(
         taskId: taskId,
         decryptedTextBytes: decryptedTextBytes,
+        messageKeyBytes: messageKeyBytes,
         error: error,
       );
     } catch (e) {
@@ -177,4 +243,3 @@ class DecryptPipelineResult {
     }
   }
 }
-
