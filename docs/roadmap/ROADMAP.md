@@ -32,21 +32,21 @@ La porte de sortie technique de Phase 0 est satisfaite : le nom est décidé sou
 
 Objectif : empêcher l'usurpation, l'accès croisé et l'enregistrement illégitime de clés avant toute extension fonctionnelle.
 
-| ID | Tâche | Dépend de |
-|---|---|---|
-| TC-101 | Faire échouer les services si un secret/config critique manque | TC-004 |
-| TC-102 | Séparer strictement access/refresh JWT et valider toutes les claims | TC-101 |
-| TC-103 | Dériver l'identité serveur et supprimer les `userId` faisant autorité côté client | TC-102 |
-| TC-104 | Centraliser la matrice ACL cercle/conversation/rôle | TC-103 |
-| TC-105 | Corriger l'atomicité des contrôles et écritures | TC-104 |
-| TC-106 | Sécuriser preuve, approbation, rotation et révocation des clés d'appareil | TC-104 |
-| TC-107 | Borner et valider tous les payloads, identifiants et tailles | TC-103 |
-| TC-108 | Durcir CORS, rate limits, proxy trust et WebSocket | TC-102, TC-107 |
-| TC-109 | Retirer le faux secret partagé de l'application publique | TC-101 |
-| TC-110 | Mettre à jour les dépendances vulnérables avec tests | TC-111 |
-| TC-111 | Créer les tests négatifs auth/ACL/keys et PostgreSQL d'intégration | TC-004 |
-| TC-112 | Revue de sécurité de fermeture P1 | TC-101 à TC-111 |
-| TC-113 | Exposer le staging par TLS et accès restreint après fermeture P1 | TC-112 |
+| ID | Tâche | Dépend de | Statut |
+|---|---|---|---|
+| TC-101 | Faire échouer les services si un secret/config critique manque | TC-004 | Terminée |
+| TC-102 | Séparer strictement access/refresh JWT et valider toutes les claims | TC-101 | À faire |
+| TC-103 | Dériver l'identité serveur et supprimer les `userId` faisant autorité côté client | TC-102 | À faire |
+| TC-104 | Centraliser la matrice ACL cercle/conversation/rôle | TC-103 | À faire |
+| TC-105 | Corriger l'atomicité des contrôles et écritures | TC-104 | À faire |
+| TC-106 | Sécuriser preuve, approbation, rotation et révocation des clés d'appareil | TC-104 | À faire |
+| TC-107 | Borner et valider tous les payloads, identifiants et tailles | TC-103 | À faire |
+| TC-108 | Durcir CORS, rate limits, proxy trust et WebSocket | TC-102, TC-107 | À faire |
+| TC-109 | Retirer le faux secret partagé de l'application publique | TC-101 | À faire |
+| TC-110 | Mettre à jour les dépendances vulnérables avec tests | TC-111 | À faire |
+| TC-111 | Créer les tests négatifs auth/ACL/keys et PostgreSQL d'intégration | TC-004 | À faire |
+| TC-112 | Revue de sécurité de fermeture P1 | TC-101 à TC-111 | À faire |
+| TC-113 | Exposer le staging par TLS et accès restreint après fermeture P1 | TC-112 | À faire |
 
 Porte de sortie : tests d'usurpation et accès croisé tous négatifs, aucun secret par défaut/embarqué, aucune vulnérabilité critique/haute exploitable acceptée silencieusement.
 

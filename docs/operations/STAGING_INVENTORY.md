@@ -1,7 +1,7 @@
 # Inventaire du staging backend
 
 Statut : opérationnel, accès local au LXC uniquement
-Déployé : 2026-08-23
+Dernier déploiement : 2026-08-24 (`TC-101`)
 Environnement : LXC106, stack Compose `trust-circle-staging`
 
 ## Résumé
@@ -12,8 +12,8 @@ Le staging backend est une installation neuve et isolée des anciennes ressource
 
 | Élément | Valeur assainie |
 |---|---|
-| Commit source | `29604542281492b50430f8cb7fc7170c663e4b35` |
-| Release | `/opt/trust-circle-staging/releases/29604542281492b50430f8cb7fc7170c663e4b35` |
+| Commit source | `dcf4977dde085f8d24a661952369281232b8ec00` |
+| Release | `/opt/trust-circle-staging/releases/dcf4977dde085f8d24a661952369281232b8ec00` |
 | Pointeur actif | `/opt/trust-circle-staging/current` |
 | Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
 | Source Compose | `deploy/staging/compose.yml` |
@@ -25,8 +25,8 @@ Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affich
 
 | Service | Image | Preuve | État final |
 |---|---|---|---|
-| Auth | `trust-circle-staging-auth:staging-296045422814` | image ID `6c67e28b2025`, label revision complet | sain |
-| Messaging | `trust-circle-staging-messaging:staging-296045422814` | image ID `9b91335db9fa`, label revision complet | sain |
+| Auth | `trust-circle-staging-auth:staging-dcf4977dde08` | image ID `8577306e0f90`, label revision complet | sain |
+| Messaging | `trust-circle-staging-messaging:staging-dcf4977dde08` | image ID `05eb4086afd1`, label revision complet | sain |
 | PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 | Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 
@@ -77,6 +77,16 @@ PostgreSQL utilise un volume inscriptible, des limites de ressources, un healthc
 11. Nouvelle exécution complète des smoke tests après reprise.
 
 Tous ces tests ont réussi le 2026-08-23.
+
+Le redéploiement `TC-101` du 2026-08-24 a en plus validé :
+
+1. build des images Auth et Messaging avec la configuration centralisée ;
+2. arrêt avec code `1` de chaque image lancée sans configuration critique ;
+3. conservation du fichier privé en mode `0600`, sans affichage de valeur ;
+4. healthchecks des quatre services et smoke test fonctionnel complet après remplacement des conteneurs ;
+5. traçabilité du commit dans les labels des deux images.
+
+La release précédente et un instantané privé de la configuration antérieure au changement des métadonnées de release sont conservés sur le LXC pour rollback. Les secrets applicatifs eux-mêmes n'ont pas été changés.
 
 ## Limites assumées
 

@@ -1,6 +1,6 @@
 # TC-101 — Faire échouer les services si une configuration critique manque
 
-Statut : En cours
+Statut : Terminée
 Priorité : P0 sécurité
 Décision : mainteneur, avec revue sécurité
 Dépendances : TC-004
@@ -41,13 +41,13 @@ Supprimer tous les fallbacks silencieux de configuration critique des services A
 
 ## Critères d'acceptation
 
-- [ ] Aucun fallback de secret ou de connexion PostgreSQL ne subsiste dans les sources backend.
-- [ ] Chaque service échoue avec un code non nul avant écoute si une variable critique manque ou est invalide.
-- [ ] Les erreurs nomment le paramètre fautif sans afficher sa valeur.
-- [ ] Les configurations valides de développement synthétique et de staging sont acceptées.
-- [ ] Builds TypeScript et tests automatisés passent pour les deux services.
-- [ ] Le staging redéployé reste sain et ses smoke tests passent sans exposer de secret.
-- [ ] La liste des variables et le rollback sont documentés.
+- [x] Aucun fallback de secret ou de connexion PostgreSQL ne subsiste dans les sources backend.
+- [x] Chaque service échoue avec un code non nul avant écoute si une variable critique manque ou est invalide.
+- [x] Les erreurs nomment le paramètre fautif sans afficher sa valeur.
+- [x] Les configurations valides de développement synthétique et de staging sont acceptées.
+- [x] Builds TypeScript et tests automatisés passent pour les deux services.
+- [x] Le staging redéployé reste sain et ses smoke tests passent sans exposer de secret.
+- [x] La liste des variables et le rollback sont documentés.
 
 ## Validation prévue
 
@@ -64,3 +64,15 @@ Sur LXC106, uniquement via `trust-circle-staging` : rebuild des deux images au c
 ## Rollback
 
 Revenir aux images du commit staging précédent et conserver le fichier d'environnement privé existant. Ne jamais réintroduire les fallbacks : si une incompatibilité de configuration apparaît, corriger les noms/valeurs dans le mécanisme de secrets de l'environnement concerné.
+
+## Résultat du 2026-08-24
+
+- Commit applicatif déployé sur LXC106 : `dcf4977dde085f8d24a661952369281232b8ec00`.
+- Auth et Messaging chargent `NODE_ENV`, `JWT_SECRET`, `APP_SECRET`, `DATABASE_URL` et `PORT` depuis un module de configuration validé avant création de Fastify.
+- Les plugins JWT, PostgreSQL, HTTP et Socket.IO reçoivent explicitement la configuration validée ; ils ne relisent plus l'environnement et ne possèdent plus de fallback.
+- `npm ci`, `npm test` et `npm run build` réussis pour les deux services, soit 8 tests de configuration par service.
+- Les deux images Docker réelles retournent le code `1` lorsqu'elles sont lancées sans configuration critique.
+- Healthchecks Auth, Messaging, PostgreSQL et Gateway sains ; smoke test inscription, connexion, accès authentifié, rejet du mauvais app-secret, cercle et handshake Socket.IO réussi.
+- Contrat et rollback documentés dans `docs/operations/BACKEND_CONFIGURATION.md`.
+
+Risque restant : `APP_SECRET` reste temporairement requis pour préserver le prototype, mais ne constitue pas une protection fiable d'un client public. Sa suppression reste obligatoire dans `TC-109`. Les vulnérabilités npm observées sont suivies séparément dans `TC-110`.
