@@ -30,7 +30,7 @@ Le propriétaire a choisi **CircleHaven** comme marque et **CircleHaven — Trus
 
 Le projet est un prototype fonctionnel, pas une version publiable. Les builds TypeScript ont réussi lors de l'audit initial. Flutter/Dart n'étaient pas installés dans l'environnement d'audit ; aucun build client n'a donc été validé. Il n'existe ni suite de tests significative ni CI.
 
-Les principaux bloqueurs sont : autorisations backend contournables, confusion entre jetons d'accès et de rafraîchissement, cycle de vie multi-appareil incomplet, stockage local insuffisamment protégé, protocole cryptographique non spécifié/audité, fiabilité hors ligne fragile, compatibilité desktop incomplète, configuration de release non préparée et absence de processus de migration/sauvegarde/restauration éprouvé. L'inventaire Docker détaillé est dans `docs/operations/PRODUCTION_INVENTORY.md`.
+Les principaux bloqueurs restants sont : autorisations backend contournables, cycle de vie multi-appareil incomplet, stockage local insuffisamment protégé, protocole cryptographique non spécifié/audité, fiabilité hors ligne fragile, compatibilité desktop incomplète, configuration de release non préparée et absence de processus de migration/sauvegarde/restauration éprouvé. La confusion entre access et refresh tokens a été fermée par `TC-102`. L'inventaire Docker détaillé est dans `docs/operations/PRODUCTION_INVENTORY.md`.
 
 ## Ordre de travail
 

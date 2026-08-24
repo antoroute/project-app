@@ -1,6 +1,6 @@
 # TC-102 — Séparer access/refresh JWT et valider toutes les claims
 
-Statut : En cours
+Statut : Terminée
 Priorité : P0 sécurité
 Décision : mainteneur, avec revue sécurité
 Dépendances : TC-101
@@ -61,16 +61,29 @@ Garantir qu'un refresh token ne puisse jamais authentifier une route REST ou Soc
 
 ## Critères d'acceptation
 
-- [ ] Clés access/refresh distinctes, obligatoires et jamais affichées.
-- [ ] REST Auth, REST Messaging et Socket.IO refusent tout refresh token.
-- [ ] `/auth/refresh` et `/auth/logout` n'acceptent qu'un refresh token valide.
-- [ ] Algorithme, header `typ`, issuer, audience, expiration, sujet, identifiant, type et version sont imposés.
-- [ ] Un `nbf` futur est refusé.
-- [ ] Les nouveaux refresh tokens sont stockés par empreinte SHA-256 complète, jamais en clair ni via bcrypt tronqué.
-- [ ] Tests automatisés et builds passent dans les deux services.
-- [ ] Le staging est sain et les smoke tests prouvent les usages croisés négatifs.
-- [ ] Migration de session, contrat et rollback sont documentés.
+- [x] Clés access/refresh distinctes, obligatoires et jamais affichées.
+- [x] REST Auth, REST Messaging et Socket.IO refusent tout refresh token.
+- [x] `/auth/refresh` et `/auth/logout` n'acceptent qu'un refresh token valide.
+- [x] Algorithme, header `typ`, issuer, audience, expiration, sujet, identifiant, type et version sont imposés.
+- [x] Un `nbf` futur est refusé.
+- [x] Les nouveaux refresh tokens sont stockés par empreinte SHA-256 complète, jamais en clair ni via bcrypt tronqué.
+- [x] Tests automatisés et builds passent dans les deux services.
+- [x] Le staging est sain et les smoke tests prouvent les usages croisés négatifs.
+- [x] Migration de session, contrat et rollback sont documentés.
 
 ## Migration et rollback
 
 Le déploiement invalide volontairement tous les refresh tokens antérieurs, car la clé, l'audience et le format changent. Les utilisateurs devront se reconnecter ; le staging ne contient que des comptes synthétiques. Le rollback remet les images et métadonnées de release précédentes, mais ne doit pas réactiver une ancienne clé en production sans décision explicite. Aucun changement de production n'est autorisé dans cette tâche.
+
+## Résultat du 2026-08-24
+
+- Commit applicatif déployé sur LXC106 : `301de4a5f14acb3131b37274ba3060e2116d5a15`.
+- Auth reçoit `JWT_ACCESS_SECRET` et `JWT_REFRESH_SECRET` ; Messaging reçoit uniquement `JWT_ACCESS_SECRET`. La valeur access du staging a été conservée sous son nouveau nom et une clé refresh indépendante a été générée sans affichage.
+- Les validateurs imposent HS256, header `typ=JWT`, issuer/audience, claims obligatoires, durées maximales, type d'usage et version `1`.
+- Les refresh tokens sont empreintés avec SHA-256 dans PostgreSQL ; les lignes bcrypt historiques ne peuvent plus correspondre.
+- `npm ci`, `npm test` et `npm run build` réussis : 14 tests Auth et 12 tests Messaging, dont Socket.IO et tous les cas négatifs prévus.
+- OpenAPI valide syntaxiquement, scripts shell valides et Compose validé avec `config --quiet` sur LXC106.
+- Les quatre conteneurs sont sains. Le smoke test réel prouve access→refresh refusé, refresh→Auth/Messaging refusé, refresh valide accepté, access→logout refusé, révocation puis réutilisation refusée.
+- Un JWT historique signé avec la clé access conservée mais les anciennes claims `project-app`/`messaging` est refusé avec HTTP 401.
+
+Risque résiduel : HS256 impose de partager la clé access entre Auth et Messaging, donc les deux services peuvent techniquement signer un access token. Cette limite est documentée dans `TOKEN_CONTRACT.md`; une migration asymétrique future nécessitera une ADR. La rotation à usage unique et les familles de sessions restent dans `TC-403`.

@@ -1,7 +1,7 @@
 # Inventaire du staging backend
 
 Statut : opérationnel, accès local au LXC uniquement
-Dernier déploiement : 2026-08-24 (`TC-101`)
+Dernier déploiement : 2026-08-24 (`TC-102`)
 Environnement : LXC106, stack Compose `trust-circle-staging`
 
 ## Résumé
@@ -12,8 +12,8 @@ Le staging backend est une installation neuve et isolée des anciennes ressource
 
 | Élément | Valeur assainie |
 |---|---|
-| Commit source | `dcf4977dde085f8d24a661952369281232b8ec00` |
-| Release | `/opt/trust-circle-staging/releases/dcf4977dde085f8d24a661952369281232b8ec00` |
+| Commit source | `301de4a5f14acb3131b37274ba3060e2116d5a15` |
+| Release | `/opt/trust-circle-staging/releases/301de4a5f14acb3131b37274ba3060e2116d5a15` |
 | Pointeur actif | `/opt/trust-circle-staging/current` |
 | Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
 | Source Compose | `deploy/staging/compose.yml` |
@@ -25,8 +25,8 @@ Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affich
 
 | Service | Image | Preuve | État final |
 |---|---|---|---|
-| Auth | `trust-circle-staging-auth:staging-dcf4977dde08` | image ID `8577306e0f90`, label revision complet | sain |
-| Messaging | `trust-circle-staging-messaging:staging-dcf4977dde08` | image ID `05eb4086afd1`, label revision complet | sain |
+| Auth | `trust-circle-staging-auth:staging-301de4a5f14a` | image ID `57f2ad8e4d2d`, label revision complet | sain |
+| Messaging | `trust-circle-staging-messaging:staging-301de4a5f14a` | image ID `ae292b8b34bf`, label revision complet | sain |
 | PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 | Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 
@@ -88,9 +88,20 @@ Le redéploiement `TC-101` du 2026-08-24 a en plus validé :
 
 La release précédente et un instantané privé de la configuration antérieure au changement des métadonnées de release sont conservés sur le LXC pour rollback. Les secrets applicatifs eux-mêmes n'ont pas été changés.
 
+Le redéploiement `TC-102` du 2026-08-24 a ensuite validé :
+
+1. migration du nom de la clé access et génération d'une clé refresh séparée, sans afficher de valeur ;
+2. présence des noms `JWT_ACCESS_SECRET` et `JWT_REFRESH_SECRET` dans Auth, et de la seule clé access dans Messaging ;
+3. contrat strict HS256/issuer/audience/type/version/temps par 26 tests automatisés ;
+4. refus REST du refresh token dans Auth et Messaging, refus access sur refresh/logout, révocation effective et refus Socket.IO couvert par test automatisé ;
+5. refus HTTP 401 d'un JWT au format historique malgré la conservation de la matière de clé access ;
+6. healthchecks des quatre services et smoke test complet après redéploiement.
+
+La clé access existante a été conservée sous son nouveau nom ; une clé refresh indépendante a été ajoutée. Toutes les anciennes sessions sont néanmoins invalides à cause du nouveau contrat de claims et de la séparation de clé refresh. La configuration privée antérieure et la release `dcf4977dde085f8d24a661952369281232b8ec00` restent disponibles pour rollback du staging.
+
 ## Limites assumées
 
-- Pas de domaine ni TLS : accès volontairement local avant Phase 1.
+- Pas de domaine ni TLS : accès volontairement local jusqu'à la revue de fermeture de Phase 1.
 - Pas encore de build Flutter ciblant le staging.
 - Pas de migrations ni preuve de restauration du nouveau volume.
 - Pas de tests d'autorisation négatifs exhaustifs ; le code contient les vulnérabilités recensées par l'audit.
