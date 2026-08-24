@@ -1,13 +1,13 @@
 # TC-001 — Valider le nom et l'identité du produit
 
-Statut : En cours — nouveau nom à choisir par le propriétaire
+Statut : En cours — nom choisi, marque/réservations/IDs à finaliser
 Priorité : P0
 Décision : propriétaire du produit, avec conseil juridique si nécessaire
 Dépendances : aucune
 
 ## Contexte
 
-Le nom de travail est « Trust Circle ». Les recherches du 2026-08-24 ont confirmé plusieurs applications homonymes, dont une messagerie privée au positionnement très proche sur Google Play et une application de sécurité familiale sur Android et iOS. La synthèse et la shortlist sont dans `docs/product/NAME_DECISION.md`.
+Le nom de travail « Trust Circle » entre en collision avec plusieurs applications homonymes. Le propriétaire a choisi **CircleHaven — Trust Circle** le 2026-08-24. La synthèse, les collisions résiduelles et les travaux restants sont dans `docs/product/NAME_DECISION.md` et `docs/adr/ADR-0004-nom-produit.md`.
 
 ## Objectif
 
@@ -41,10 +41,10 @@ Choisir un nom publiable et réserver une identité cohérente avant de figer le
 
 - [ ] Stores et bases de marques des marchés visés ont été vérifiés à date. (Stores contrôlés ; recherche officielle de similarité des marques à finaliser.)
 - [x] Les collisions exactes/proches et risques sont documentés avec liens.
-- [ ] Le propriétaire a enregistré une décision explicite ou accepté un risque après conseil adapté.
-- [ ] Le nom retenu fonctionne en français et anglais.
+- [x] Le propriétaire a enregistré une décision explicite ou accepté un risque après conseil adapté.
+- [x] Le nom retenu fonctionne en français et anglais.
 - [ ] Aucun package ID définitif n'utilise `com.example`.
-- [ ] `PROJECT_CONTEXT.md` et les ADR concernées reflètent le nom choisi.
+- [x] `PROJECT_CONTEXT.md` et les ADR concernées reflètent le nom choisi.
 
 ## Sources minimales
 

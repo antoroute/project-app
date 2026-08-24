@@ -1,7 +1,7 @@
 # Vision produit
 
 Statut : vision V1 acceptée
-Dernière mise à jour : 2026-08-23
+Dernière mise à jour : 2026-08-24
 
 ## Problème
 
@@ -9,7 +9,7 @@ Les familles et petits groupes d'amis utilisent des outils généralistes dont l
 
 ## Proposition de valeur
 
-Trust Circle fournit des cercles privés, une messagerie texte chiffrée de bout en bout, une validation claire des nouveaux membres/appareils et une expérience cohérente sur téléphone et ordinateur.
+CircleHaven — Trust Circle fournit des cercles privés, une messagerie texte chiffrée de bout en bout, une validation claire des nouveaux membres/appareils et une expérience cohérente sur téléphone et ordinateur.
 
 La sécurité doit rester compréhensible : l'application explique ce qui est protégé, ce qui reste visible sous forme de métadonnées, et ce qui arrive lors d'une perte d'appareil ou de compte.
 

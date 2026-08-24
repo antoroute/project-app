@@ -6,9 +6,9 @@ Instantané de code audité : branche `main`, commit `1988bf6`
 
 ## Mission
 
-Trust Circle est une messagerie privée destinée d'abord aux familles et groupes d'amis. Sa promesse centrale est une conversation de cercle simple, fiable et chiffrée de bout en bout, sans lecture du contenu des messages par l'opérateur du service.
+**CircleHaven — Trust Circle** est une messagerie privée destinée d'abord aux familles et groupes d'amis. Sa promesse centrale est une conversation de cercle simple, fiable et chiffrée de bout en bout, sans lecture du contenu des messages par l'opérateur du service.
 
-Le nom « Trust Circle » est uniquement un nom interne provisoire. Les recherches de `TC-001` ont confirmé plusieurs collisions exactes sur Android et iOS, dont une messagerie au positionnement très proche : il ne doit pas être utilisé pour la publication. Une shortlist est documentée dans `product/NAME_DECISION.md` ; le choix du propriétaire et la vérification formelle de la marque restent requis.
+Le propriétaire a choisi **CircleHaven** comme marque et **CircleHaven — Trust Circle** comme nom public le 2026-08-24. « Trust Circle » seul reste uniquement le nom historique du dépôt. La décision et les collisions résiduelles sont documentées dans `product/NAME_DECISION.md` et `adr/ADR-0004-nom-produit.md`. La vérification formelle de la marque, les réservations et le renommage technique restent requis.
 
 ## Cible de publication
 

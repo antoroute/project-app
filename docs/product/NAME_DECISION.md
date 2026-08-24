@@ -1,6 +1,6 @@
 # Décision de nom et d'identité
 
-Statut : décision du propriétaire requise
+Statut : nom choisi — validation de marque et réservations requises
 Dernière mise à jour : 2026-08-24
 Tâche : `TC-001`
 
@@ -8,9 +8,9 @@ Tâche : `TC-001`
 
 Le nom de travail **Trust Circle ne doit pas être utilisé pour la publication**. Il existe déjà au moins deux applications Android portant exactement ce nom, dont une messagerie privée organisée autour de cercles de confiance, ainsi qu'une application Apple homonyme de sécurité familiale. Le risque de confusion sur les stores, de mauvais référencement et de contestation est trop élevé, même sans conclure sur les droits de marque.
 
-La recommandation de travail est **Cercelya**, sous réserve du choix explicite du propriétaire, d'une recherche de marque identique et similaire finalisée, puis de la réservation coordonnée des domaines et identifiants.
+Le propriétaire a choisi le 2026-08-24 le nom public **CircleHaven — Trust Circle**, avec **CircleHaven** comme marque et nom court. Ce choix remplace la recommandation initiale « Cercelya ». Il reste soumis à une recherche de marque identique et similaire finalisée, puis à la réservation coordonnée des domaines et identifiants.
 
-Ce document est une recherche préliminaire, pas un avis juridique ni une garantie de disponibilité. Les résultats devront être refaits le jour de la décision.
+Ce document est une recherche préliminaire, pas un avis juridique ni une garantie de disponibilité. Les recherches de marques devront être finalisées avant réservation ou publication.
 
 ## Périmètre étudié
 
@@ -35,9 +35,26 @@ Constats au 2026-08-24 :
 
 Conclusion : la collision produit suffit à écarter ce nom de publication. Une recherche de marque ne pourrait pas résoudre la confusion commerciale déjà visible.
 
+## Nom choisi
+
+- Nom public : **CircleHaven — Trust Circle**.
+- Marque et nom court : **CircleHaven**, sans espace et avec deux majuscules.
+- Forme ASCII lorsque le tiret cadratin n'est pas accepté : `CircleHaven - Trust Circle`.
+- Prononciation indicative : `seur-keul hé-ven` en français, `SUR-kəl HAY-vən` en anglais.
+- Titre stores : 26 caractères avec le tiret cadratin et les espaces, sous la limite actuelle de 30 caractères d'[Apple](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information) et [Google Play](https://support.google.com/googleplay/android-developer/answer/9859152).
+- Domaine principal proposé : `circlehaven.app` ; domaine français proposé : `circlehaven.fr`.
+- Racine technique proposée après réservation du domaine : `app.circlehaven`.
+
+Le contrôle exact du 2026-08-24 n'a trouvé aucune application indexée sous « CircleHaven » ou « CircleHaven — Trust Circle » sur Google Play, l'App Store ou le Microsoft Store. Deux usages non logiciels doivent néanmoins rester dans le dossier de risque :
+
+1. [Circle Haven, Inc.](https://www.circlehaven.org/our-mission) est une association américaine créée pour accompagner des adultes en situation de handicap ; elle utilise les mots séparés et le domaine `circlehaven.org`.
+2. [Heroes of CircleHaven](https://speedforce.org/2013/08/greg-larocque-kickstarter/) a utilisé « CircleHaven » pour un projet de bande dessinée en 2013.
+
+Ces activités sont éloignées d'une messagerie grand public, mais elles empêchent d'affirmer que le terme est inédit. `circlehaven.com` est enregistré ; `circlehaven.fr` et `circlehaven.app` ont renvoyé « not found » en RDAP au moment du contrôle. Cette observation instantanée ne vaut ni réservation ni droit de marque.
+
 ## Shortlist
 
-### 1. Cercelya — recommandé
+### 1. Cercelya — ancienne recommandation
 
 - Écriture publique : **Cercelya** ; nom court : `cercelya`.
 - Intention : évocation d'un cercle sans reprendre les termes génériques « trust » ou « circle ».
@@ -84,28 +101,22 @@ Les interfaces officielles [INPI](https://data.inpi.fr/recherche_avancee/marques
 - la recherche doit couvrir les marques françaises, de l'Union européenne et internationales visant la France ou l'UE ;
 - une validation par un conseil en propriété industrielle est recommandée avant investissement significatif dans la marque.
 
-Les disponibilités de comptes sociaux et de dépôts de code ne sont pas réservées. Elles seront contrôlées et enregistrées seulement après le choix pour éviter de multiplier des comptes inutiles.
+Les disponibilités de comptes sociaux et de dépôts de code ne sont pas réservées. Elles seront contrôlées et enregistrées avec les domaines après autorisation du propriétaire.
 
-## Décision attendue du propriétaire
+## Décision enregistrée
 
-Le propriétaire doit enregistrer explicitement l'une des décisions suivantes :
+Le propriétaire a retenu **CircleHaven — Trust Circle** le 2026-08-24. La décision est enregistrée dans `ADR-0004-nom-produit.md`.
 
-1. choisir **Cercelya** et autoriser les vérifications finales/réservations ;
-2. choisir **Kinmesh** ou **Kavalek**, en acceptant les risques documentés ;
-3. demander une nouvelle série de noms avec une direction créative précisée.
-
-Tant que cette décision n'est pas prise :
+Tant que la validation de marque et les réservations ne sont pas terminées :
 
 - « Trust Circle » reste uniquement le nom interne du dépôt ;
 - aucun renommage massif du code n'est lancé ;
 - les identifiants `com.example` ne sont pas considérés comme définitifs ;
-- aucun domaine, compte store ou compte social n'est réservé au nom du propriétaire.
+- aucun domaine, compte store ou compte social n'est réservé sans autorisation explicite du propriétaire.
 
 ## Suite après choix
 
-1. Refaire le jour même les recherches stores, Web, INPI, EUIPO et WIPO sur le nom et ses variantes.
+1. Finaliser les recherches INPI, EUIPO et WIPO sur `CircleHaven`, `Circle Haven` et leurs variantes phonétiques.
 2. Faire valider le risque juridique adapté au budget et au périmètre de lancement.
-3. Réserver ensemble les domaines prioritaires et les principaux identifiants sociaux.
-4. Enregistrer l'identité définitive dans une ADR.
-5. Remplacer les noms publics, URLs historiques et package/bundle IDs dans une tâche technique dédiée, avec migration et tests par plateforme.
-
+3. Après autorisation, réserver ensemble `circlehaven.app`, `circlehaven.fr` et les principaux identifiants sociaux.
+4. Remplacer les noms publics, URLs historiques et package/bundle IDs dans une tâche technique dédiée, avec migration et tests par plateforme.
