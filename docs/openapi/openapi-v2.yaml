@@ -12,7 +12,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Access token uniquement, audience trust-circle-api et typ=access.
+      description: Access token EdDSA/Ed25519 uniquement, audience trust-circle-api et typ=access.
     refreshAuth:
       type: http
       scheme: bearer

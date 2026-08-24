@@ -1,3 +1,5 @@
+import { createPublicKey } from 'node:crypto';
+
 const SUPPORTED_ENVIRONMENTS = new Set(['development', 'test', 'staging', 'production']);
 const FORBIDDEN_SECRET_VALUES = new Set([
   'dev-secret',
@@ -7,10 +9,30 @@ const FORBIDDEN_SECRET_VALUES = new Set([
 
 export interface ServiceConfig {
   nodeEnv: string;
-  jwtAccessSecret: string;
+  jwtAccessPublicKey: string;
   appSecret: string;
   databaseUrl: string;
   port: number;
+}
+
+function requiredAccessPublicKey(env: NodeJS.ProcessEnv): string {
+  const name = 'JWT_ACCESS_PUBLIC_KEY_B64';
+  const value = requiredValue(env, name);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
+    throw new Error(`Invalid configuration: ${name} must be canonical base64`);
+  }
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) {
+    throw new Error(`Invalid configuration: ${name} must be canonical base64`);
+  }
+  const publicKeyValue = decoded.toString('utf8');
+  try {
+    const publicKey = createPublicKey(publicKeyValue);
+    if (publicKey.asymmetricKeyType !== 'ed25519') throw new Error('wrong key type');
+  } catch {
+    throw new Error(`Invalid configuration: ${name} must contain an Ed25519 public key`);
+  }
+  return publicKeyValue;
 }
 
 function requiredValue(env: NodeJS.ProcessEnv, name: string): string {
@@ -72,15 +94,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Readonly<Servi
     throw new Error('Invalid configuration: NODE_ENV is not supported');
   }
 
-  const jwtAccessSecret = requiredSecret(env, 'JWT_ACCESS_SECRET');
+  const jwtAccessPublicKey = requiredAccessPublicKey(env);
   const appSecret = requiredSecret(env, 'APP_SECRET');
-  if (jwtAccessSecret === appSecret) {
-    throw new Error('Invalid configuration: JWT_ACCESS_SECRET and APP_SECRET must be different');
-  }
 
   return Object.freeze({
     nodeEnv,
-    jwtAccessSecret,
+    jwtAccessPublicKey,
     appSecret,
     databaseUrl: databaseUrl(env),
     port: port(env),

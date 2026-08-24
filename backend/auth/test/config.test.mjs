@@ -1,14 +1,24 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { loadConfig } from '../dist/config.js';
 
+const ACCESS_KEYS = generateKeyPairSync('ed25519');
+const ACCESS_PRIVATE_KEY_B64 = Buffer.from(
+  ACCESS_KEYS.privateKey.export({ type: 'pkcs8', format: 'pem' }),
+).toString('base64');
+const ACCESS_PUBLIC_KEY_B64 = Buffer.from(
+  ACCESS_KEYS.publicKey.export({ type: 'spki', format: 'pem' }),
+).toString('base64');
+
 function validEnvironment() {
   return {
     NODE_ENV: 'test',
-    JWT_ACCESS_SECRET: 'synthetic-access-secret-material-00000000000001',
+    JWT_ACCESS_PRIVATE_KEY_B64: ACCESS_PRIVATE_KEY_B64,
+    JWT_ACCESS_PUBLIC_KEY_B64: ACCESS_PUBLIC_KEY_B64,
     JWT_REFRESH_SECRET: 'synthetic-refresh-secret-material-0000000000002',
     APP_SECRET: 'synthetic-app-secret-material-0000000000000003',
     DATABASE_URL: 'postgresql://test_user:test_password@127.0.0.1:5432/test_db',
@@ -22,7 +32,14 @@ test('accepts a complete synthetic configuration', () => {
   assert.equal(config.port, 4300);
 });
 
-for (const name of ['NODE_ENV', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'APP_SECRET', 'DATABASE_URL']) {
+for (const name of [
+  'NODE_ENV',
+  'JWT_ACCESS_PRIVATE_KEY_B64',
+  'JWT_ACCESS_PUBLIC_KEY_B64',
+  'JWT_REFRESH_SECRET',
+  'APP_SECRET',
+  'DATABASE_URL',
+]) {
   test(`rejects a missing ${name}`, () => {
     const env = validEnvironment();
     delete env[name];
@@ -32,21 +49,32 @@ for (const name of ['NODE_ENV', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'APP_
 
 test('rejects weak, reused or whitespace-padded secrets without disclosing them', () => {
   const weak = validEnvironment();
-  weak.JWT_ACCESS_SECRET = 'dev-secret';
-  assert.throws(() => loadConfig(weak), /JWT_ACCESS_SECRET/);
+  weak.JWT_REFRESH_SECRET = 'dev-secret';
+  assert.throws(() => loadConfig(weak), /JWT_REFRESH_SECRET/);
 
   const reused = validEnvironment();
-  reused.JWT_REFRESH_SECRET = reused.JWT_ACCESS_SECRET;
+  reused.JWT_REFRESH_SECRET = reused.APP_SECRET;
   assert.throws(() => loadConfig(reused), /must be different/);
 
-  const paddedValue = `${validEnvironment().JWT_ACCESS_SECRET} `;
-  const padded = { ...validEnvironment(), JWT_ACCESS_SECRET: paddedValue };
+  const paddedValue = `${validEnvironment().JWT_ACCESS_PRIVATE_KEY_B64} `;
+  const padded = { ...validEnvironment(), JWT_ACCESS_PRIVATE_KEY_B64: paddedValue };
   try {
     loadConfig(padded);
     assert.fail('expected a configuration error');
   } catch (error) {
     assert.doesNotMatch(String(error), new RegExp(paddedValue));
   }
+});
+
+test('rejects a mismatched or non-Ed25519 access key pair', () => {
+  const other = generateKeyPairSync('ed25519');
+  const mismatchedPublic = Buffer.from(
+    other.publicKey.export({ type: 'spki', format: 'pem' }),
+  ).toString('base64');
+  assert.throws(
+    () => loadConfig({ ...validEnvironment(), JWT_ACCESS_PUBLIC_KEY_B64: mismatchedPublic }),
+    /matching Ed25519 pair/,
+  );
 });
 
 test('rejects invalid database URLs and ports', () => {
@@ -67,6 +95,6 @@ test('the real service process exits before startup when configuration is missin
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /JWT_ACCESS_SECRET/);
+  assert.match(result.stderr, /JWT_ACCESS_PRIVATE_KEY_B64/);
   assert.doesNotMatch(result.stderr, /dev-secret/);
 });

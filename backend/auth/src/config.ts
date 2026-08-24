@@ -1,3 +1,5 @@
+import { createPrivateKey, createPublicKey } from 'node:crypto';
+
 const SUPPORTED_ENVIRONMENTS = new Set(['development', 'test', 'staging', 'production']);
 const FORBIDDEN_SECRET_VALUES = new Set([
   'dev-secret',
@@ -7,11 +9,43 @@ const FORBIDDEN_SECRET_VALUES = new Set([
 
 export interface ServiceConfig {
   nodeEnv: string;
-  jwtAccessSecret: string;
+  jwtAccessPrivateKey: string;
+  jwtAccessPublicKey: string;
   jwtRefreshSecret: string;
   appSecret: string;
   databaseUrl: string;
   port: number;
+}
+
+function requiredBase64(env: NodeJS.ProcessEnv, name: string): Buffer {
+  const value = requiredValue(env, name);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
+    throw new Error(`Invalid configuration: ${name} must be canonical base64`);
+  }
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) {
+    throw new Error(`Invalid configuration: ${name} must be canonical base64`);
+  }
+  return decoded;
+}
+
+function accessKeyPair(env: NodeJS.ProcessEnv): { privateKey: string; publicKey: string } {
+  const privateKeyValue = requiredBase64(env, 'JWT_ACCESS_PRIVATE_KEY_B64').toString('utf8');
+  const publicKeyValue = requiredBase64(env, 'JWT_ACCESS_PUBLIC_KEY_B64').toString('utf8');
+  try {
+    const privateKey = createPrivateKey(privateKeyValue);
+    const publicKey = createPublicKey(publicKeyValue);
+    const derivedPublicKey = createPublicKey(privateKey);
+    if (privateKey.asymmetricKeyType !== 'ed25519' || publicKey.asymmetricKeyType !== 'ed25519') {
+      throw new Error('wrong key type');
+    }
+    const configuredDer = publicKey.export({ type: 'spki', format: 'der' });
+    const derivedDer = derivedPublicKey.export({ type: 'spki', format: 'der' });
+    if (!configuredDer.equals(derivedDer)) throw new Error('key pair mismatch');
+  } catch {
+    throw new Error('Invalid configuration: JWT access keys must be a matching Ed25519 pair');
+  }
+  return { privateKey: privateKeyValue, publicKey: publicKeyValue };
 }
 
 function requiredValue(env: NodeJS.ProcessEnv, name: string): string {
@@ -73,16 +107,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Readonly<Servi
     throw new Error('Invalid configuration: NODE_ENV is not supported');
   }
 
-  const jwtAccessSecret = requiredSecret(env, 'JWT_ACCESS_SECRET');
+  const accessKeys = accessKeyPair(env);
   const jwtRefreshSecret = requiredSecret(env, 'JWT_REFRESH_SECRET');
   const appSecret = requiredSecret(env, 'APP_SECRET');
-  if (new Set([jwtAccessSecret, jwtRefreshSecret, appSecret]).size !== 3) {
-    throw new Error('Invalid configuration: JWT_ACCESS_SECRET, JWT_REFRESH_SECRET and APP_SECRET must be different');
+  if (jwtRefreshSecret === appSecret) {
+    throw new Error('Invalid configuration: JWT_REFRESH_SECRET and APP_SECRET must be different');
   }
 
   return Object.freeze({
     nodeEnv,
-    jwtAccessSecret,
+    jwtAccessPrivateKey: accessKeys.privateKey,
+    jwtAccessPublicKey: accessKeys.publicKey,
     jwtRefreshSecret,
     appSecret,
     databaseUrl: databaseUrl(env),

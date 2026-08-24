@@ -1,6 +1,6 @@
 # TC-102 — Séparer access/refresh JWT et valider toutes les claims
 
-Statut : Terminée
+Statut : En cours — durcissement asymétrique demandé après revue propriétaire
 Priorité : P0 sécurité
 Décision : mainteneur, avec revue sécurité
 Dépendances : TC-101
@@ -32,10 +32,11 @@ Garantir qu'un refresh token ne puisse jamais authentifier une route REST ou Soc
 
 ## Contrat cible
 
-- Algorithme : `HS256`, explicitement imposé à la signature et à la vérification.
+- Algorithme access : `EdDSA` avec une paire Ed25519 ; Auth seul reçoit la clé privée et Messaging reçoit uniquement la clé publique.
+- Algorithme refresh : `HS256` avec une clé symétrique détenue uniquement par Auth.
 - Header : `typ=JWT`.
 - Issuer : `trust-circle-auth`.
-- Access : clé `JWT_ACCESS_SECRET`, audience `trust-circle-api`, claim `typ=access`, durée 15 minutes.
+- Access : clés `JWT_ACCESS_PRIVATE_KEY_B64`/`JWT_ACCESS_PUBLIC_KEY_B64`, audience `trust-circle-api`, claim `typ=access`, durée 15 minutes.
 - Refresh : clé `JWT_REFRESH_SECRET`, audience `trust-circle-auth`, claim `typ=refresh`, durée 30 jours.
 - Claims obligatoires : `sub`, `iss`, `aud`, `iat`, `exp`, `jti`, `typ` et `ver=1`.
 - Toute claim `nbf` présente est vérifiée ; aucune tolérance ne permet un token pas encore actif.

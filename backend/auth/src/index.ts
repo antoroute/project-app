@@ -24,7 +24,12 @@ async function build() {
     timeWindow: '1 minute'
   });
 
-  await registerJwt(app, config.jwtAccessSecret, config.jwtRefreshSecret);
+  await registerJwt(
+    app,
+    config.jwtAccessPrivateKey,
+    config.jwtAccessPublicKey,
+    config.jwtRefreshSecret,
+  );
 
   app.decorate('authenticate', async (req: any, reply: any) => {
     try {

@@ -66,7 +66,8 @@ services:
     environment:
       NODE_ENV: staging
       PORT: "3000"
-      JWT_ACCESS_SECRET: "${TC_JWT_ACCESS_SECRET:?TC_JWT_ACCESS_SECRET is required}"
+      JWT_ACCESS_PRIVATE_KEY_B64: "${TC_JWT_ACCESS_PRIVATE_KEY_B64:?TC_JWT_ACCESS_PRIVATE_KEY_B64 is required}"
+      JWT_ACCESS_PUBLIC_KEY_B64: "${TC_JWT_ACCESS_PUBLIC_KEY_B64:?TC_JWT_ACCESS_PUBLIC_KEY_B64 is required}"
       JWT_REFRESH_SECRET: "${TC_JWT_REFRESH_SECRET:?TC_JWT_REFRESH_SECRET is required}"
       APP_SECRET: "${TC_APP_SECRET:?TC_APP_SECRET is required}"
       DATABASE_URL: "postgresql://${TC_DB_USER}:${TC_DB_PASSWORD}@postgres:5432/${TC_DB_NAME}"
@@ -94,7 +95,7 @@ services:
     environment:
       NODE_ENV: staging
       PORT: "3001"
-      JWT_ACCESS_SECRET: "${TC_JWT_ACCESS_SECRET:?TC_JWT_ACCESS_SECRET is required}"
+      JWT_ACCESS_PUBLIC_KEY_B64: "${TC_JWT_ACCESS_PUBLIC_KEY_B64:?TC_JWT_ACCESS_PUBLIC_KEY_B64 is required}"
       APP_SECRET: "${TC_APP_SECRET:?TC_APP_SECRET is required}"
       DATABASE_URL: "postgresql://${TC_DB_USER}:${TC_DB_PASSWORD}@postgres:5432/${TC_DB_NAME}"
     tmpfs:

@@ -49,7 +49,7 @@ async function build() {
   // Plugins Fastify
   await app.register(fastifyHelmet, { contentSecurityPolicy: false });
   await app.register(fastifyCors, { origin: true, credentials: true });
-  await registerAccessJwt(app, config.jwtAccessSecret);
+  await registerAccessJwt(app, config.jwtAccessPublicKey);
 
   app.decorate('authenticate', async (req: any, reply: any) => {
     try {

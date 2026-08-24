@@ -37,7 +37,10 @@ install -d -m 0700 -- "$env_dir"
 umask 077
 
 db_password=$(openssl rand -hex 32)
-jwt_access_secret=$(openssl rand -hex 48)
+jwt_access_private_pem=$(openssl genpkey -algorithm ED25519 2>/dev/null)
+jwt_access_public_pem=$(printf '%s\n' "$jwt_access_private_pem" | openssl pkey -pubout 2>/dev/null)
+jwt_access_private_b64=$(printf '%s\n' "$jwt_access_private_pem" | openssl base64 -A)
+jwt_access_public_b64=$(printf '%s\n' "$jwt_access_public_pem" | openssl base64 -A)
 jwt_refresh_secret=$(openssl rand -hex 48)
 app_secret=$(openssl rand -hex 32)
 
@@ -49,11 +52,14 @@ app_secret=$(openssl rand -hex 32)
   printf 'TC_DB_NAME=trust_circle_staging\n'
   printf 'TC_DB_USER=trust_circle_staging\n'
   printf 'TC_DB_PASSWORD=%s\n' "$db_password"
-  printf 'TC_JWT_ACCESS_SECRET=%s\n' "$jwt_access_secret"
+  printf 'TC_JWT_ACCESS_PRIVATE_KEY_B64=%s\n' "$jwt_access_private_b64"
+  printf 'TC_JWT_ACCESS_PUBLIC_KEY_B64=%s\n' "$jwt_access_public_b64"
   printf 'TC_JWT_REFRESH_SECRET=%s\n' "$jwt_refresh_secret"
   printf 'TC_APP_SECRET=%s\n' "$app_secret"
   printf 'TC_STAGING_HTTP_PORT=18080\n'
 } > "$env_file"
+
+unset jwt_access_private_pem jwt_access_public_pem jwt_access_private_b64 jwt_access_public_b64
 
 chmod 0600 -- "$env_file"
 echo "Staging environment file created with mode 0600. Values were not printed."

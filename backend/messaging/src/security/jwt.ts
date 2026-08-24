@@ -20,18 +20,11 @@ export interface AccessTokenClaims {
   nbf?: number;
 }
 
-export async function registerAccessJwt(app: FastifyInstance, accessSecret: string): Promise<void> {
+export async function registerAccessJwt(app: FastifyInstance, accessPublicKey: string): Promise<void> {
   await app.register(fastifyJwt, {
-    secret: accessSecret,
-    sign: {
-      algorithm: 'HS256',
-      iss: JWT_ISSUER,
-      aud: JWT_ACCESS_AUDIENCE,
-      header: { alg: 'HS256', typ: 'JWT' },
-      expiresIn: '15m',
-    },
+    secret: { public: accessPublicKey },
     verify: {
-      algorithms: ['HS256'],
+      algorithms: ['EdDSA'],
       allowedIss: JWT_ISSUER,
       allowedAud: JWT_ACCESS_AUDIENCE,
       requiredClaims: REQUIRED_CLAIMS,

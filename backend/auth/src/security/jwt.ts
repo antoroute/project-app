@@ -29,20 +29,21 @@ type JwtWithRefresh = FastifyInstance['jwt'] & {
 
 export async function registerJwt(
   app: FastifyInstance,
-  accessSecret: string,
+  accessPrivateKey: string,
+  accessPublicKey: string,
   refreshSecret: string,
 ): Promise<void> {
   await app.register(fastifyJwt, {
-    secret: accessSecret,
+    secret: { private: accessPrivateKey, public: accessPublicKey },
     sign: {
-      algorithm: 'HS256',
+      algorithm: 'EdDSA',
       iss: JWT_ISSUER,
       aud: JWT_ACCESS_AUDIENCE,
-      header: { alg: 'HS256', typ: 'JWT' },
+      header: { alg: 'EdDSA', typ: 'JWT' },
       expiresIn: '15m',
     },
     verify: {
-      algorithms: ['HS256'],
+      algorithms: ['EdDSA'],
       allowedIss: JWT_ISSUER,
       allowedAud: JWT_ACCESS_AUDIENCE,
       requiredClaims: REQUIRED_CLAIMS,
