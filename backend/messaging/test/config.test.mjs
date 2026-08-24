@@ -8,7 +8,7 @@ import { loadConfig } from '../dist/config.js';
 function validEnvironment() {
   return {
     NODE_ENV: 'test',
-    JWT_SECRET: 'synthetic-jwt-secret-material-0000000000000001',
+    JWT_ACCESS_SECRET: 'synthetic-access-secret-material-00000000000001',
     APP_SECRET: 'synthetic-app-secret-material-0000000000000002',
     DATABASE_URL: 'postgresql://test_user:test_password@127.0.0.1:5432/test_db',
     PORT: '4301',
@@ -21,7 +21,7 @@ test('accepts a complete synthetic configuration', () => {
   assert.equal(config.port, 4301);
 });
 
-for (const name of ['NODE_ENV', 'JWT_SECRET', 'APP_SECRET', 'DATABASE_URL']) {
+for (const name of ['NODE_ENV', 'JWT_ACCESS_SECRET', 'APP_SECRET', 'DATABASE_URL']) {
   test(`rejects a missing ${name}`, () => {
     const env = validEnvironment();
     delete env[name];
@@ -31,15 +31,15 @@ for (const name of ['NODE_ENV', 'JWT_SECRET', 'APP_SECRET', 'DATABASE_URL']) {
 
 test('rejects weak, reused or whitespace-padded secrets without disclosing them', () => {
   const weak = validEnvironment();
-  weak.JWT_SECRET = 'dev-secret';
-  assert.throws(() => loadConfig(weak), /JWT_SECRET/);
+  weak.JWT_ACCESS_SECRET = 'dev-secret';
+  assert.throws(() => loadConfig(weak), /JWT_ACCESS_SECRET/);
 
   const reused = validEnvironment();
-  reused.APP_SECRET = reused.JWT_SECRET;
+  reused.APP_SECRET = reused.JWT_ACCESS_SECRET;
   assert.throws(() => loadConfig(reused), /must be different/);
 
-  const paddedValue = `${validEnvironment().JWT_SECRET} `;
-  const padded = { ...validEnvironment(), JWT_SECRET: paddedValue };
+  const paddedValue = `${validEnvironment().JWT_ACCESS_SECRET} `;
+  const padded = { ...validEnvironment(), JWT_ACCESS_SECRET: paddedValue };
   try {
     loadConfig(padded);
     assert.fail('expected a configuration error');
@@ -66,6 +66,6 @@ test('the real service process exits before startup when configuration is missin
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /JWT_SECRET/);
+  assert.match(result.stderr, /JWT_ACCESS_SECRET/);
   assert.doesNotMatch(result.stderr, /dev-secret/);
 });

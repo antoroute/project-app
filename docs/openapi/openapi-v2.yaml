@@ -3,7 +3,7 @@ info:
   title: Project App – API v2 (E2EE X25519/Ed25519)
   version: "2.0.0"
 servers:
-  - url: https://api.kavalek.fr
+  - url: https://trust-circle.kavalek.fr
 security:
   - bearerAuth: []
 components:
@@ -12,6 +12,12 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: Access token uniquement, audience trust-circle-api et typ=access.
+    refreshAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Refresh token uniquement, audience trust-circle-auth et typ=refresh.
   schemas:
     DeviceKey:
       type: object
@@ -87,6 +93,7 @@ paths:
   /auth/register:
     post:
       tags: [auth]
+      security: []
       requestBody:
         required: true
         content:
@@ -104,6 +111,7 @@ paths:
   /auth/login:
     post:
       tags: [auth]
+      security: []
       requestBody:
         required: true
         content:
@@ -121,13 +129,17 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [access, refresh, user]
                 properties:
                   access: { type: string }
                   refresh: { type: string }
+                  user: { type: object }
 
   /auth/refresh:
     post:
       tags: [auth]
+      security:
+        - refreshAuth: []
       responses:
         "200":
           description: OK
@@ -135,8 +147,18 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [access]
                 properties:
                   access: { type: string }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      security:
+        - refreshAuth: []
+      responses:
+        "200": { description: Refresh token révoqué ou session déjà absente }
+        "401": { description: Token fourni invalide ou destiné à un autre usage }
 
   /groups:
     post:

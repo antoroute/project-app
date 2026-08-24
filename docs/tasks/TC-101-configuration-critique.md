@@ -12,7 +12,7 @@ Supprimer tous les fallbacks silencieux de configuration critique des services A
 ## Périmètre
 
 - `backend/auth` et `backend/messaging`.
-- Variables obligatoires : `NODE_ENV`, `JWT_SECRET`, `DATABASE_URL` et, temporairement jusqu'à `TC-109`, `APP_SECRET`.
+- Variables obligatoires : `NODE_ENV`, les clés JWT définies par `TC-102`, `DATABASE_URL` et, temporairement jusqu'à `TC-109`, `APP_SECRET`.
 - Paramètre opérationnel : `PORT`, optionnel avec valeur interne connue, mais strictement validé s'il est fourni.
 - Compose et procédures du staging `trust-circle-staging`.
 
@@ -32,7 +32,7 @@ Supprimer tous les fallbacks silencieux de configuration critique des services A
 ## Travail
 
 1. Centraliser le chargement et la validation de configuration dans chaque service.
-2. Supprimer les valeurs de repli de `JWT_SECRET`, `APP_SECRET` et `DATABASE_URL`.
+2. Supprimer les valeurs de repli des clés JWT, de `APP_SECRET` et de `DATABASE_URL`.
 3. Refuser valeurs vides, espaces parasites, secrets trop courts ou valeurs historiques connues.
 4. Vérifier le schéma PostgreSQL de `DATABASE_URL` et la plage de `PORT` sans jamais journaliser les valeurs.
 5. Injecter la configuration validée dans Fastify, PostgreSQL et Socket.IO au lieu de relire directement `process.env`.
@@ -68,7 +68,7 @@ Revenir aux images du commit staging précédent et conserver le fichier d'envir
 ## Résultat du 2026-08-24
 
 - Commit applicatif déployé sur LXC106 : `dcf4977dde085f8d24a661952369281232b8ec00`.
-- Auth et Messaging chargent `NODE_ENV`, `JWT_SECRET`, `APP_SECRET`, `DATABASE_URL` et `PORT` depuis un module de configuration validé avant création de Fastify.
+- Auth et Messaging chargent `NODE_ENV`, les clés JWT, `APP_SECRET`, `DATABASE_URL` et `PORT` depuis un module de configuration validé avant création de Fastify. `TC-102` a ensuite séparé la clé historique en `JWT_ACCESS_SECRET` et `JWT_REFRESH_SECRET`.
 - Les plugins JWT, PostgreSQL, HTTP et Socket.IO reçoivent explicitement la configuration validée ; ils ne relisent plus l'environnement et ne possèdent plus de fallback.
 - `npm ci`, `npm test` et `npm run build` réussis pour les deux services, soit 8 tests de configuration par service.
 - Les deux images Docker réelles retournent le code `1` lorsqu'elles sont lancées sans configuration critique.

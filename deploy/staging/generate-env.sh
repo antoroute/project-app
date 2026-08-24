@@ -37,7 +37,8 @@ install -d -m 0700 -- "$env_dir"
 umask 077
 
 db_password=$(openssl rand -hex 32)
-jwt_secret=$(openssl rand -hex 48)
+jwt_access_secret=$(openssl rand -hex 48)
+jwt_refresh_secret=$(openssl rand -hex 48)
 app_secret=$(openssl rand -hex 32)
 
 {
@@ -48,7 +49,8 @@ app_secret=$(openssl rand -hex 32)
   printf 'TC_DB_NAME=trust_circle_staging\n'
   printf 'TC_DB_USER=trust_circle_staging\n'
   printf 'TC_DB_PASSWORD=%s\n' "$db_password"
-  printf 'TC_JWT_SECRET=%s\n' "$jwt_secret"
+  printf 'TC_JWT_ACCESS_SECRET=%s\n' "$jwt_access_secret"
+  printf 'TC_JWT_REFRESH_SECRET=%s\n' "$jwt_refresh_secret"
   printf 'TC_APP_SECRET=%s\n' "$app_secret"
   printf 'TC_STAGING_HTTP_PORT=18080\n'
 } > "$env_file"

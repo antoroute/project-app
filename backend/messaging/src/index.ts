@@ -5,12 +5,12 @@
 // – Enregistre les routes et services (presence, ACL, messages v2, groups, conversations)
 
 import Fastify from 'fastify';
-import fastifyJwt from '@fastify/jwt';
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import { Server as IOServer } from 'socket.io';
 
 import { loadConfig } from './config.js';
+import { assertAccessClaims, registerAccessJwt } from './security/jwt.js';
 import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
 import validateAppSecret from './middlewares/validateAppSecret.js';
@@ -49,10 +49,15 @@ async function build() {
   // Plugins Fastify
   await app.register(fastifyHelmet, { contentSecurityPolicy: false });
   await app.register(fastifyCors, { origin: true, credentials: true });
-  await app.register(fastifyJwt, { secret: config.jwtSecret });
+  await registerAccessJwt(app, config.jwtAccessSecret);
 
   app.decorate('authenticate', async (req: any, reply: any) => {
-    try { await req.jwtVerify(); } catch { reply.code(401).send({ error: 'unauthorized' }); }
+    try {
+      const payload = await req.jwtVerify();
+      req.user = assertAccessClaims(payload);
+    } catch {
+      await reply.code(401).send({ error: 'unauthorized' });
+    }
   });
 
   // DB + health

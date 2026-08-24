@@ -2,6 +2,8 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import bcrypt from 'bcrypt';
 
+import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../security/jwt.js';
+
 const RegisterBody = Type.Object({
   email: Type.String({ format: 'email' }),
   username: Type.String({ minLength: 3, maxLength: 64 }),
@@ -12,6 +14,11 @@ const LoginBody = Type.Object({
   email: Type.String({ format: 'email' }),
   password: Type.String({ minLength: 8 })
 });
+
+function bearerToken(header: string | undefined): string | null {
+  const match = header?.match(/^Bearer ([^\s]+)$/);
+  return match?.[1] ?? null;
+}
 
 export default async function routes(app: FastifyInstance) {
 
@@ -49,48 +56,37 @@ export default async function routes(app: FastifyInstance) {
     const ok = await bcrypt.compare(password, row.password);
     if (!ok) return reply.code(401).send({ error: 'invalid_credentials' });
 
-    // NOTE: 'sub' et 'iss' dans le payload – pas dans les options.
-    const access = await app.jwt.sign(
-      { sub: row.id, iss: 'project-app', aud: 'messaging' },
-      { expiresIn: '15m' }
-    );
-    const refresh = await app.jwt.sign(
-      { sub: row.id, iss: 'project-app', aud: 'messaging', typ: 'refresh' },
-      { expiresIn: '30d' }
-    );
+    const access = signAccessToken(app, row.id);
+    const refresh = signRefreshToken(app, row.id);
+    const refreshClaims = verifyRefreshToken(app, refresh);
 
     await app.db.none(
       `INSERT INTO refresh_tokens(user_id, token_hash, expires_at)
-       VALUES($1, crypt($2, gen_salt('bf')), NOW() + interval '30 days')`,
-      [row.id, refresh]
+       VALUES($1, encode(digest($2, 'sha256'), 'hex'), to_timestamp($3))`,
+      [row.id, refresh, refreshClaims.exp]
     );
 
     return reply.send({ access, refresh, user: { id: row.id, email: row.email, username: row.username } });
   });
 
   app.post('/refresh', {}, async (req: FastifyRequest, reply: FastifyReply) => {
-    const auth = req.headers.authorization;
-    if (!auth?.startsWith('Bearer ')) return reply.code(401).send({ error: 'no_token' });
-    const token = auth.slice(7);
+    const token = bearerToken(req.headers.authorization);
+    if (!token) return reply.code(401).send({ error: 'no_token' });
 
-    let payload: any;
-    try { payload = await app.jwt.verify(token); }
+    let payload;
+    try { payload = verifyRefreshToken(app, token); }
     catch { return reply.code(401).send({ error: 'invalid_token' }); }
-    if (payload.typ !== 'refresh') return reply.code(400).send({ error: 'not_refresh' });
 
     const ok = await app.db.any(
       `SELECT 1 FROM refresh_tokens
-        WHERE user_id=$1 AND crypt($2, token_hash) = token_hash
+        WHERE user_id=$1 AND token_hash = encode(digest($2, 'sha256'), 'hex')
           AND expires_at > NOW()`,
       [payload.sub, token]
     );
     if (!ok.length) return reply.code(401).send({ error: 'revoked' });
 
-    const accessToken = await app.jwt.sign(
-      { sub: payload.sub, iss: 'project-app', aud: 'messaging' },
-      { expiresIn: '15m' }
-    );
-    return reply.send({ accessToken });
+    const access = signAccessToken(app, payload.sub);
+    return reply.send({ access });
   });
 
   app.get('/me', { onRequest: [app.authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
@@ -100,10 +96,18 @@ export default async function routes(app: FastifyInstance) {
   });
 
   app.post('/logout', {}, async (req: FastifyRequest, reply: FastifyReply) => {
-    const auth = req.headers.authorization;
-    if (!auth?.startsWith('Bearer ')) return reply.code(200).send({ ok: true });
-    const token = auth.slice(7);
-    await app.db.none(`DELETE FROM refresh_tokens WHERE crypt($1, token_hash) = token_hash`, [token]);
+    const token = bearerToken(req.headers.authorization);
+    if (!token) return reply.code(200).send({ ok: true });
+
+    let payload;
+    try { payload = verifyRefreshToken(app, token); }
+    catch { return reply.code(401).send({ error: 'invalid_token' }); }
+
+    await app.db.none(
+      `DELETE FROM refresh_tokens
+       WHERE user_id=$1 AND token_hash = encode(digest($2, 'sha256'), 'hex')`,
+      [payload.sub, token],
+    );
     return { ok: true };
   });
 }

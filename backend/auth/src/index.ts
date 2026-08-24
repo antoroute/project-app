@@ -1,12 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 
 import Fastify from 'fastify';
-import fastifyJwt from '@fastify/jwt';
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 
 import { loadConfig } from './config.js';
+import { assertAccessClaims, registerJwt } from './security/jwt.js';
 import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
 import validateAppSecret from './middlewares/validateAppSecret.js';
@@ -24,14 +24,15 @@ async function build() {
     timeWindow: '1 minute'
   });
 
-  await app.register(fastifyJwt, {
-    secret: config.jwtSecret
-    // NOTE: pas d'issuer/subject ici. On mettra iss/sub dans le payload lors du sign().
-  });
+  await registerJwt(app, config.jwtAccessSecret, config.jwtRefreshSecret);
 
   app.decorate('authenticate', async (req: any, reply: any) => {
-    try { await req.jwtVerify(); }
-    catch { reply.code(401).send({ error: 'unauthorized' }); }
+    try {
+      const payload = await req.jwtVerify();
+      req.user = assertAccessClaims(payload);
+    } catch {
+      await reply.code(401).send({ error: 'unauthorized' });
+    }
   });
 
   await app.register(dbPlugin, { connectionString: config.databaseUrl });

@@ -67,9 +67,32 @@ login_response=$(curl --silent --show-error \
   --data "$login_payload" \
   "$base_url/auth/login")
 access_token=$(jq -er '.access' <<<"$login_response")
+refresh_token=$(jq -er '.refresh' <<<"$login_response")
+
+assert_status 401 "$base_url/auth/refresh" \
+  -X POST \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret"
+
+assert_status 401 "$base_url/auth/me" \
+  -H "authorization: Bearer $refresh_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0'
+
+assert_status 401 "$base_url/api/groups" \
+  -H "authorization: Bearer $refresh_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0'
+
+refresh_response=$(curl --silent --show-error \
+  -X POST \
+  -H "authorization: Bearer $refresh_token" \
+  -H "x-app-secret: $app_secret" \
+  "$base_url/auth/refresh")
+refreshed_access_token=$(jq -er '.access' <<<"$refresh_response")
 
 assert_status 200 "$base_url/auth/me" \
-  -H "authorization: Bearer $access_token" \
+  -H "authorization: Bearer $refreshed_access_token" \
   -H "x-app-secret: $app_secret" \
   -H 'x-client-version: 2.0.0'
 
@@ -104,4 +127,19 @@ if [[ "$socket_status" != "200" ]]; then
   exit 1
 fi
 
-echo "Smoke tests passed: gateway, service health, registration, login, authenticated account, app-secret rejection, group write/read and Socket.IO handshake."
+assert_status 401 "$base_url/auth/logout" \
+  -X POST \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret"
+
+assert_status 200 "$base_url/auth/logout" \
+  -X POST \
+  -H "authorization: Bearer $refresh_token" \
+  -H "x-app-secret: $app_secret"
+
+assert_status 401 "$base_url/auth/refresh" \
+  -X POST \
+  -H "authorization: Bearer $refresh_token" \
+  -H "x-app-secret: $app_secret"
+
+echo "Smoke tests passed: health, login, strict access/refresh separation, refresh revocation, app-secret rejection, group write/read and Socket.IO handshake."

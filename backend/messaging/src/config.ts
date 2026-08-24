@@ -7,7 +7,7 @@ const FORBIDDEN_SECRET_VALUES = new Set([
 
 export interface ServiceConfig {
   nodeEnv: string;
-  jwtSecret: string;
+  jwtAccessSecret: string;
   appSecret: string;
   databaseUrl: string;
   port: number;
@@ -72,15 +72,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Readonly<Servi
     throw new Error('Invalid configuration: NODE_ENV is not supported');
   }
 
-  const jwtSecret = requiredSecret(env, 'JWT_SECRET');
+  const jwtAccessSecret = requiredSecret(env, 'JWT_ACCESS_SECRET');
   const appSecret = requiredSecret(env, 'APP_SECRET');
-  if (jwtSecret === appSecret) {
-    throw new Error('Invalid configuration: JWT_SECRET and APP_SECRET must be different');
+  if (jwtAccessSecret === appSecret) {
+    throw new Error('Invalid configuration: JWT_ACCESS_SECRET and APP_SECRET must be different');
   }
 
   return Object.freeze({
     nodeEnv,
-    jwtSecret,
+    jwtAccessSecret,
     appSecret,
     databaseUrl: databaseUrl(env),
     port: port(env),

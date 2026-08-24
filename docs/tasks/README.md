@@ -16,6 +16,7 @@ Les fiches transforment la roadmap en unités confiables pour un développement 
 ## Index Phase 1
 
 - [TC-101 — Configuration critique](TC-101-configuration-critique.md)
+- [TC-102 — JWT access/refresh](TC-102-jwt-access-refresh.md)
 
 ## Format obligatoire des nouvelles fiches
 
