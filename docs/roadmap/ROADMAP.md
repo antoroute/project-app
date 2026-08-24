@@ -36,8 +36,8 @@ Objectif : empêcher l'usurpation, l'accès croisé et l'enregistrement illégit
 |---|---|---|---|
 | TC-101 | Faire échouer les services si un secret/config critique manque | TC-004 | Terminée |
 | TC-102 | Séparer strictement access/refresh JWT et valider toutes les claims | TC-101 | Terminée — Ed25519 déployé |
-| TC-103 | Dériver l'identité serveur et supprimer les `userId` faisant autorité côté client | TC-102 | En cours |
-| TC-104 | Centraliser la matrice ACL cercle/conversation/rôle | TC-103 | À faire |
+| TC-103 | Dériver l'identité serveur et supprimer les `userId` faisant autorité côté client | TC-102 | Terminée |
+| TC-104 | Centraliser la matrice ACL cercle/conversation/rôle | TC-103 | Prête |
 | TC-105 | Corriger l'atomicité des contrôles et écritures | TC-104 | À faire |
 | TC-106 | Sécuriser preuve, approbation, rotation et révocation des clés d'appareil | TC-104 | À faire |
 | TC-107 | Borner et valider tous les payloads, identifiants et tailles | TC-103 | À faire |

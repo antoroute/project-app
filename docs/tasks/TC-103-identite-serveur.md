@@ -1,6 +1,6 @@
 # TC-103 — Dériver l'identité côté serveur
 
-Statut : En cours
+Statut : Terminée
 Priorité : P0 sécurité
 Décision : mainteneur, avec revue sécurité
 Dépendances : TC-102
@@ -54,13 +54,13 @@ Les identifiants de destinataires, de membres ciblés et d'appareils ne constitu
 
 ## Critères d'acceptation
 
-- [ ] Toute route protégée qui attribue une action à un utilisateur obtient l'identité via le helper commun.
-- [ ] Aucun identifiant client n'est utilisé comme preuve de l'acteur.
-- [ ] Une enveloppe A portant `sender.userId=B` reçoit HTTP 403 avant ACL, écriture et émission.
-- [ ] Une enveloppe valide conserve son identité signée et l'ACL, la base et les rooms reçoivent le sujet JWT.
-- [ ] Socket.IO continue à dériver son `userId` du token strict et ignore tout identifiant acteur dans les événements entrants.
-- [ ] Tests et builds Auth/Messaging passent ; le smoke test négatif passe sur LXC106.
-- [ ] Aucun aller-retour ni délai perceptible n'est ajouté au client.
+- [x] Toute route protégée qui attribue une action à un utilisateur obtient l'identité via le helper commun.
+- [x] Aucun identifiant client n'est utilisé comme preuve de l'acteur.
+- [x] Une enveloppe A portant `sender.userId=B` reçoit HTTP 403 avant ACL, écriture et émission.
+- [x] Une enveloppe valide conserve son identité signée et l'ACL, la base et les rooms reçoivent le sujet JWT.
+- [x] Socket.IO continue à dériver son `userId` du token strict et ignore tout identifiant acteur dans les événements entrants.
+- [x] Tests et builds Auth/Messaging passent ; le smoke test négatif passe sur LXC106.
+- [x] Aucun aller-retour ni délai perceptible n'est ajouté au client.
 
 ## Tests et preuves attendues
 
@@ -76,3 +76,17 @@ Aucun schéma ni format d'enveloppe ne change. Les clients honnêtes envoient d�
 ## Décisions humaines nécessaires
 
 Aucune pour l'implémentation. Les règles de rôles et d'appartenance seront décidées et centralisées dans `TC-104`.
+
+## Résultat du 2026-08-24
+
+- Commit applicatif déployé sur LXC106 : `8ebeaa30f243a010d22070b8de20d969adedba89`.
+- Auth et Messaging exposent chacun un helper typé qui revalide la forme des claims déjà vérifiées puis retourne exclusivement `sub`. Tous les casts directs de `req.user` dans les routes ont été supprimés.
+- L'envoi V2 compare le `sender.userId` du domaine signé au sujet JWT. Une divergence retourne HTTP 403 avant appel ACL, insertion PostgreSQL ou émission Socket.IO ; un envoi cohérent passe uniquement le sujet JWT à ces trois frontières.
+- Les identifiants de destinataires et de membres ciblés restent des données métier soumises aux ACL, jamais une preuve de l'acteur.
+- Le test d'injection Fastify couvre l'usurpation et le chemin légitime avec base, ACL et Socket.IO factices. Les tests unitaires couvrent aussi le helper sur claims valides et invalides.
+- `npm ci`, `npm test` et `npm run build` réussissent : 17 tests Auth et 16 tests Messaging. OpenAPI est syntaxiquement valide et les scripts staging passent `bash -n`.
+- Le smoke test du staging crée deux comptes synthétiques et prouve que le token de A ne peut pas envoyer une enveloppe déclarant B. Les quatre conteneurs sont sains et étiquetés avec le commit attendu.
+- Aucun format client n'a changé. L'audit statique Flutter confirme que l'enveloppe existante utilise déjà l'utilisateur authentifié ; Flutter n'est pas installé sur l'hôte et aucun build client n'a donc été exécuté pour cette tâche.
+- Aucun accès réseau ou PostgreSQL supplémentaire n'est ajouté. Dans le conteneur Messaging, 500 000 dérivations ont coûté 0,000125 ms chacune en moyenne.
+
+Risque résiduel : l'identité de l'acteur est maintenant fiable, mais plusieurs routes ne vérifient pas encore correctement l'appartenance, le rôle ou la portée de l'objet. Ces accès croisés sont le périmètre immédiat de `TC-104`, puis leur atomicité relève de `TC-105`.

@@ -1,7 +1,7 @@
 # Inventaire du staging backend
 
 Statut : opérationnel, accès local au LXC uniquement
-Dernier déploiement : 2026-08-24 (`TC-102`, Ed25519)
+Dernier déploiement : 2026-08-24 (`TC-103`)
 Environnement : LXC106, stack Compose `trust-circle-staging`
 
 ## Résumé
@@ -12,8 +12,8 @@ Le staging backend est une installation neuve et isolée des anciennes ressource
 
 | Élément | Valeur assainie |
 |---|---|
-| Commit source | `e7be1b027923a7868cca3145694e9bcc27217332` |
-| Release | `/opt/trust-circle-staging/releases/e7be1b027923a7868cca3145694e9bcc27217332` |
+| Commit source | `8ebeaa30f243a010d22070b8de20d969adedba89` |
+| Release | `/opt/trust-circle-staging/releases/8ebeaa30f243a010d22070b8de20d969adedba89` |
 | Pointeur actif | `/opt/trust-circle-staging/current` |
 | Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
 | Source Compose | `deploy/staging/compose.yml` |
@@ -25,8 +25,8 @@ Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affich
 
 | Service | Image | Preuve | État final |
 |---|---|---|---|
-| Auth | `trust-circle-staging-auth:staging-e7be1b027923` | image ID `04d6d4424277`, label revision complet | sain |
-| Messaging | `trust-circle-staging-messaging:staging-e7be1b027923` | image ID `1e70de65e700`, label revision complet | sain |
+| Auth | `trust-circle-staging-auth:staging-8ebeaa30f243` | image ID `84b79f800a6b`, label revision complet | sain |
+| Messaging | `trust-circle-staging-messaging:staging-8ebeaa30f243` | image ID `9859e2d897d7`, label revision complet | sain |
 | PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 | Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 
@@ -107,12 +107,22 @@ Le durcissement asymétrique final de `TC-102` a en plus validé :
 
 La paire access a été renouvelée, ce qui invalide volontairement les access tokens antérieurs. La configuration privée immédiatement antérieure est conservée en mode `0600` sous `staging.env.before-e7be1b027923`, et les releases précédentes restent disponibles pour rollback du staging.
 
+Le redéploiement `TC-103` du 2026-08-24 a enfin validé :
+
+1. build des images Auth et Messaging depuis le commit `8ebeaa30f243a010d22070b8de20d969adedba89` et traçabilité de cette révision dans leurs labels ;
+2. healthchecks des quatre services ;
+3. smoke test complet, incluant deux comptes synthétiques et le refus HTTP 403 d'une enveloppe dont le `sender.userId` ne correspond pas au token ;
+4. conservation de la paire Ed25519 existante et de la séparation des secrets établie par `TC-102` ;
+5. coût moyen de la dérivation typée de l'identité de 0,000125 ms sur 500 000 appels dans Messaging, sans réseau ni base.
+
+La configuration immédiatement antérieure au changement de métadonnées est conservée en mode `0600` sous `staging.env.before-8ebeaa30f243`. La release `e7be1b027923a7868cca3145694e9bcc27217332` reste disponible pour rollback applicatif sans restauration de données.
+
 ## Limites assumées
 
 - Pas de domaine ni TLS : accès volontairement local jusqu'à la revue de fermeture de Phase 1.
 - Pas encore de build Flutter ciblant le staging.
 - Pas de migrations ni preuve de restauration du nouveau volume.
-- Pas de tests d'autorisation négatifs exhaustifs ; le code contient les vulnérabilités recensées par l'audit.
+- Le scénario d'usurpation d'identité est couvert, mais les tests d'autorisation croisée cercle/conversation/clé ne sont pas encore exhaustifs (`TC-104` et `TC-111`).
 - Images backend locales non publiées dans un registre ; l'image ID et les labels assurent la traçabilité locale, pas une provenance distante.
 - Le LXC reste partagé et privilégié.
 
