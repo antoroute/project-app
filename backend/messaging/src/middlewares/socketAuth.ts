@@ -1,15 +1,12 @@
 import { FastifyInstance } from 'fastify';
 import { Socket } from 'socket.io';
 
-// 🔐 App Secret - DOIT correspondre à celui dans l'app Flutter
-const APP_SECRET = process.env.APP_SECRET || 'kavalek_app_2024_secure_secret_key_v2';
-
-export default function socketAuth(app: FastifyInstance) {
+export default function socketAuth(app: FastifyInstance, appSecret: string) {
   return async (socket: Socket, next: (err?: any) => void) => {
     try {
       // 🔐 Vérifier le App Secret pour les WebSockets
       const providedSecret = String(socket.handshake.headers['x-app-secret'] || '').trim();
-      if (providedSecret !== APP_SECRET) {
+      if (providedSecret !== appSecret) {
         app.log.warn({
           socketId: socket.id,
           ip: socket.handshake.address,

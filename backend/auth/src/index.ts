@@ -6,12 +6,14 @@ import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 
+import { loadConfig } from './config.js';
 import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
 import validateAppSecret from './middlewares/validateAppSecret.js';
 import authRoutes from './routes/auth.js';
 
 async function build() {
+  const config = loadConfig();
   const app = Fastify({ logger: true });
 
   await app.register(fastifyHelmet, { contentSecurityPolicy: false });
@@ -23,7 +25,7 @@ async function build() {
   });
 
   await app.register(fastifyJwt, {
-    secret: process.env.JWT_SECRET || 'dev-secret'
+    secret: config.jwtSecret
     // NOTE: pas d'issuer/subject ici. On mettra iss/sub dans le payload lors du sign().
   });
 
@@ -32,15 +34,14 @@ async function build() {
     catch { reply.code(401).send({ error: 'unauthorized' }); }
   });
 
-  await app.register(dbPlugin);
+  await app.register(dbPlugin, { connectionString: config.databaseUrl });
 
   app.get('/health', async () => ({ ok: true }));
 
   await app.register(enforceVersion);
-  await app.register(validateAppSecret); // 🔐 Valide que les requêtes viennent de l'app officielle
+  await app.register(validateAppSecret, { appSecret: config.appSecret });
   await app.register(authRoutes, { prefix: '/auth' });
 
-  const port = Number(process.env.PORT || 3000);
-  await app.listen({ port, host: '0.0.0.0' });
+  await app.listen({ port: config.port, host: '0.0.0.0' });
 }
 build().catch((e) => { console.error(e); process.exit(1); });

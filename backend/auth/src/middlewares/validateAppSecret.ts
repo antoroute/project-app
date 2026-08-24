@@ -1,8 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
 
-// 🔐 App Secret - DOIT correspondre à celui dans l'app Flutter
-const APP_SECRET = process.env.APP_SECRET || 'kavalek_app_2024_secure_secret_key_v2';
+interface ValidateAppSecretOptions {
+  appSecret: string;
+}
 
 // Routes publiques qui ne nécessitent pas le App Secret
 // Login et Register sont publics pour permettre l'inscription/connexion
@@ -12,7 +13,7 @@ const PUBLIC_ROUTES = [
   /^\/auth\/register$/,
 ];
 
-const validateAppSecret: FastifyPluginAsync = async (app) => {
+const validateAppSecret: FastifyPluginAsync<ValidateAppSecretOptions> = async (app, options) => {
   app.addHook('onRequest', async (req, reply) => {
     // Ignorer OPTIONS (CORS preflight)
     if (req.method === 'OPTIONS') return;
@@ -26,7 +27,7 @@ const validateAppSecret: FastifyPluginAsync = async (app) => {
     const providedSecret = String(req.headers['x-app-secret'] || '').trim();
 
     // Vérifier que le secret correspond
-    if (providedSecret !== APP_SECRET) {
+    if (providedSecret !== options.appSecret) {
       app.log.warn({
         url: req.url,
         ip: req.ip,
@@ -46,4 +47,3 @@ const validateAppSecret: FastifyPluginAsync = async (app) => {
 };
 
 export default fp(validateAppSecret);
-

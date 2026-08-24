@@ -13,6 +13,10 @@ Les fiches transforment la roadmap en unités confiables pour un développement 
 - [TC-007 — Socle documentaire IA](TC-007-socle-documentaire.md)
 - [TC-008 — Menaces et invariants](TC-008-menaces-invariants.md)
 
+## Index Phase 1
+
+- [TC-101 — Configuration critique](TC-101-configuration-critique.md)
+
 ## Format obligatoire des nouvelles fiches
 
 - Identifiant, statut, priorité, responsable de décision et dépendances.

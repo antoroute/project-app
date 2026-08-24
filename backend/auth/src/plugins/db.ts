@@ -4,10 +4,13 @@ import fp from 'fastify-plugin';
 import pg from 'pg';
 const { Pool } = pg;
 
-const dbPlugin: FastifyPluginAsync = async (app) => {
+interface DbPluginOptions {
+  connectionString: string;
+}
+
+const dbPlugin: FastifyPluginAsync<DbPluginOptions> = async (app, options) => {
   const pool = new Pool({
-    connectionString:
-      process.env.DATABASE_URL || 'postgres://postgres:postgres@postgres:5432/postgres',
+    connectionString: options.connectionString,
   });
 
   app.decorate('db', {

@@ -45,6 +45,8 @@ Conclusion : la collision produit suffit à écarter ce nom de publication. Une 
 - Domaine principal proposé : `circlehaven.app` ; domaine français proposé : `circlehaven.fr`.
 - Racine technique proposée après réservation du domaine : `app.circlehaven`.
 
+Décision provisoire du 2026-08-24 : tant que la clearance et les réservations CircleHaven ne sont pas réalisées, les services éventuellement exposés continuent d'utiliser des sous-domaines contrôlés sous `*.kavalek.fr`. Cette décision évite une réservation prématurée ; elle ne transfère pas la marque vers Kavalek et ne rend aucune URL historique définitive. Le staging backend reste sur le loopback et n'est pas exposé par cette décision.
+
 Le contrôle exact du 2026-08-24 n'a trouvé aucune application indexée sous « CircleHaven » ou « CircleHaven — Trust Circle » sur Google Play, l'App Store ou le Microsoft Store. Deux usages non logiciels doivent néanmoins rester dans le dossier de risque :
 
 1. [Circle Haven, Inc.](https://www.circlehaven.org/our-mission) est une association américaine créée pour accompagner des adultes en situation de handicap ; elle utilise les mots séparés et le domaine `circlehaven.org`.
@@ -118,5 +120,5 @@ Tant que la validation de marque et les réservations ne sont pas terminées :
 
 1. Exécuter `TRADEMARK_CLEARANCE_CHECKLIST.md` dans INPI, EUIPO/TMview et WIPO sur le signe et ses variantes.
 2. Faire valider le risque juridique adapté au budget et au périmètre de lancement.
-3. Après autorisation, réserver ensemble `circlehaven.app`, `circlehaven.fr` et les principaux identifiants sociaux.
+3. Après autorisation, réserver ensemble `circlehaven.app`, `circlehaven.fr` et les principaux identifiants sociaux ; jusque-là, conserver `*.kavalek.fr` comme domaine réseau provisoire.
 4. Remplacer les noms publics, URLs historiques et package/bundle IDs dans une tâche technique dédiée, avec migration et tests par plateforme.

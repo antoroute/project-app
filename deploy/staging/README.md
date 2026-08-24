@@ -12,6 +12,7 @@ Cette stack remplace les anciens projets génériques `app` et `infra`. Son nom 
 - Secrets générés hors dépôt dans un fichier `0600`.
 - Images backend étiquetées avec le commit et la version de staging.
 - Images PostgreSQL/Nginx fournies par digest dans le fichier d'environnement privé.
+- Configuration backend validée avant écoute selon `docs/operations/BACKEND_CONFIGURATION.md` ; aucun fallback de secret ou de connexion PostgreSQL.
 
 ## Déploiement sur LXC106
 

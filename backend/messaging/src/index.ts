@@ -10,6 +10,7 @@ import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import { Server as IOServer } from 'socket.io';
 
+import { loadConfig } from './config.js';
 import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
 import validateAppSecret from './middlewares/validateAppSecret.js';
@@ -38,6 +39,7 @@ declare module 'fastify' {
 }
 
 async function build() {
+  const config = loadConfig();
   const app = Fastify({ logger: true });
 
   // Pré-déclarer les décorateurs AVANT démarrage
@@ -47,20 +49,20 @@ async function build() {
   // Plugins Fastify
   await app.register(fastifyHelmet, { contentSecurityPolicy: false });
   await app.register(fastifyCors, { origin: true, credentials: true });
-  await app.register(fastifyJwt, { secret: process.env.JWT_SECRET || 'dev-secret' });
+  await app.register(fastifyJwt, { secret: config.jwtSecret });
 
   app.decorate('authenticate', async (req: any, reply: any) => {
     try { await req.jwtVerify(); } catch { reply.code(401).send({ error: 'unauthorized' }); }
   });
 
   // DB + health
-  await app.register(dbPlugin);
+  await app.register(dbPlugin, { connectionString: config.databaseUrl });
 
   // Health AVANT enforceVersion (et whiteliste dans le middleware)
   app.get('/health', async () => ({ ok: true }));
 
   await app.register(enforceVersion);
-  await app.register(validateAppSecret); // 🔐 Valide que les requêtes viennent de l'app officielle
+  await app.register(validateAppSecret, { appSecret: config.appSecret });
 
   // Routes REST
   await app.register(keysDevicesRoutes);
@@ -87,7 +89,7 @@ async function build() {
   };
 
   // Auth WS + rooms
-  io.use(socketAuth(app));
+  io.use(socketAuth(app, config.appSecret));
   io.on('connection', (socket) => {
     const { userId } = (socket as any).auth;
     socket.join(`user:${userId}`);
@@ -367,9 +369,8 @@ async function build() {
     });
   });
 
-  const port = Number(process.env.PORT || 3001);
-  await app.listen({ port, host: '0.0.0.0' });
-  app.log.info(`Messaging v2 listening on ${port}`);
+  await app.listen({ port: config.port, host: '0.0.0.0' });
+  app.log.info(`Messaging v2 listening on ${config.port}`);
 }
 
 build().catch((e) => {

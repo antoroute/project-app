@@ -18,6 +18,7 @@ Le propriétaire souhaite conserver « Trust Circle » dans le titre parce que c
 - « Trust Circle » peut rester une signature de produit et désigner les cercles de confiance dans l'interface ; ce n'est plus la marque autonome.
 - Les domaines prioritaires proposés sont `circlehaven.app` et `circlehaven.fr`.
 - La racine proposée pour les identifiants techniques est `app.circlehaven`, uniquement après réservation effective de `circlehaven.app`.
+- Les domaines existants sous `*.kavalek.fr` restent provisoirement utilisables pour les services réseau. Ils ne deviennent ni la marque publique ni la racine définitive des package IDs, et le staging isolé n'est pas exposé publiquement par cette décision.
 - Le dépôt et le code historiques ne sont pas renommés dans cette ADR. Le renommage sera réalisé avec une migration dédiée après les vérifications et réservations.
 
 ## Options considérées
@@ -32,6 +33,7 @@ Le propriétaire souhaite conserver « Trust Circle » dans le titre parce que c
 - Le titre tient dans la limite actuelle de 30 caractères des stores Apple et Google Play.
 - `circlehaven.com` est déjà enregistré ; la stratégie Web ne doit pas en dépendre.
 - `circlehaven.app` et `circlehaven.fr` paraissaient non enregistrés au contrôle du 2026-08-24, sans garantie tant qu'ils ne sont pas réservés.
+- L'utilisation temporaire de `*.kavalek.fr` reporte le coût et la migration de domaine, mais impose de conserver les URLs, deep links et configurations remplaçables par environnement.
 - Une association américaine utilise « Circle Haven » et un ancien projet de bande dessinée a utilisé « CircleHaven ». Ces usages sont éloignés de la messagerie, mais doivent être inclus dans la recherche juridique.
 - Le nom ne doit pas être présenté comme juridiquement disponible tant que les recherches INPI, EUIPO et WIPO ne sont pas finalisées.
 

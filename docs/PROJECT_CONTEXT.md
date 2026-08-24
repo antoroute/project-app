@@ -8,7 +8,7 @@ Instantané de code audité : branche `main`, commit `1988bf6`
 
 **CircleHaven — Trust Circle** est une messagerie privée destinée d'abord aux familles et groupes d'amis. Sa promesse centrale est une conversation de cercle simple, fiable et chiffrée de bout en bout, sans lecture du contenu des messages par l'opérateur du service.
 
-Le propriétaire a choisi **CircleHaven** comme marque et **CircleHaven — Trust Circle** comme nom public le 2026-08-24. « Trust Circle » seul reste uniquement le nom historique du dépôt. La décision et les collisions résiduelles sont documentées dans `product/NAME_DECISION.md` et `adr/ADR-0004-nom-produit.md`. La vérification formelle de la marque, les réservations et le renommage technique restent requis.
+Le propriétaire a choisi **CircleHaven** comme marque et **CircleHaven — Trust Circle** comme nom public le 2026-08-24. « Trust Circle » seul reste uniquement le nom historique du dépôt. La décision et les collisions résiduelles sont documentées dans `product/NAME_DECISION.md` et `adr/ADR-0004-nom-produit.md`. La vérification formelle de la marque, les réservations et le renommage technique restent requis. Dans l'intervalle, les services réseau conservent les sous-domaines contrôlés `*.kavalek.fr` ; ils restent une configuration provisoire et remplaçable, sans incidence sur le nom public.
 
 ## Cible de publication
 
