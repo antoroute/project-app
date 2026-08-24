@@ -1,7 +1,7 @@
 # Roadmap de développement vers la V1
 
 Statut : plan directeur initial
-Dernière mise à jour : 2026-08-23
+Dernière mise à jour : 2026-08-24
 
 ## Mode d'emploi
 
@@ -15,7 +15,7 @@ Objectif : connaître la cible et rendre tout travail ultérieur récupérable.
 
 | ID | Tâche | Dépend de | Statut |
 |---|---|---|---|
-| TC-001 | Valider le nom, les stores, marques et domaines | — | Prête |
+| TC-001 | Valider le nom, les stores, marques et domaines | — | En cours — Trust Circle écarté, choix propriétaire requis |
 | TC-002 | Inventorier la VM de production en lecture seule | accès assaini | Terminée — écarts ouverts |
 | TC-003 | Créer une sauvegarde chiffrée et prouver la restauration | TC-002 | Terminée — données historiques abandonnées |
 | TC-004 | Créer un staging totalement séparé | TC-002, TC-003 | Terminée — backend local |
