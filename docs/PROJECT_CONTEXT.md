@@ -2,7 +2,7 @@
 
 Statut : référence de travail
 Dernière mise à jour : 2026-08-24
-Instantané de code audité : branche `main`, commit `1988bf6`
+Instantané fonctionnel documenté : branche `main`, commit `25d0f65`
 
 ## Mission
 
@@ -24,13 +24,13 @@ Le propriétaire a choisi **CircleHaven** comme marque et **CircleHaven — Trus
 - Données : PostgreSQL ; présence de Redis dans l'infrastructure, sans intégration applicative démontrée.
 - Déploiement : Docker Compose et Nginx sur un LXC Docker partagé. Les stacks historiques ont été supprimées par décision du propriétaire. Un backend staging neuf, nommé `trust-circle-staging`, est opérationnel uniquement sur le loopback du LXC ; voir `docs/operations/STAGING_INVENTORY.md`.
 - Contrat d'API existant : `docs/openapi/openapi-v2.yaml`, à réaligner avec le code avant de le considérer comme contractuel.
-- Cryptographie actuelle : X25519, HKDF-SHA256, AES-256-GCM et Ed25519 côté Flutter, protocole maison V2 à remplacer ou formaliser avant publication.
+- Cryptographie actuelle : X25519, HKDF-SHA256, AES-256-GCM et Ed25519 côté Flutter, protocole maison V2 décrit dans `docs/security/CRYPTOGRAPHY_V2.md` et à remplacer ou formaliser avant publication.
 
 ## Niveau de préparation
 
 Le projet est un prototype fonctionnel, pas une version publiable. Les builds TypeScript ont réussi lors de l'audit initial. Flutter/Dart n'étaient pas installés dans l'environnement d'audit ; aucun build client n'a donc été validé. Il n'existe ni suite de tests significative ni CI.
 
-Les principaux bloqueurs restants sont : autorisations backend contournables, cycle de vie multi-appareil incomplet, stockage local insuffisamment protégé, protocole cryptographique non spécifié/audité, fiabilité hors ligne fragile, compatibilité desktop incomplète, configuration de release non préparée et absence de processus de migration/sauvegarde/restauration éprouvé. La confusion entre access et refresh tokens a été fermée par `TC-102`. L'inventaire Docker détaillé est dans `docs/operations/PRODUCTION_INVENTORY.md`.
+Les principaux bloqueurs restants sont : autorisations backend contournables, affichage possible d'un message avant vérification Ed25519, cycle de vie multi-appareil incomplet, stockage local insuffisamment protégé, protocole cryptographique non audité, fiabilité hors ligne fragile, compatibilité desktop incomplète, configuration de release non préparée et absence de migrations versionnées. La confusion entre access et refresh tokens a été fermée par `TC-102`, et l'identité d'envoi est désormais dérivée du JWT par `TC-103`. L'inventaire Docker détaillé est dans `docs/operations/PRODUCTION_INVENTORY.md`.
 
 ## Ordre de travail
 
@@ -43,6 +43,8 @@ Les principaux bloqueurs restants sont : autorisations backend contournables, cy
 7. Automatiser tests/CI, réaliser les audits puis préparer les stores.
 
 La roadmap détaillée se trouve dans `docs/roadmap/ROADMAP.md`.
+
+Pour reprendre rapidement le projet, lire ensuite `docs/architecture/FUNCTIONAL_REFERENCE.md`, `docs/security/CRYPTOGRAPHY_V2.md` et `docs/architecture/TRACEABILITY.md`. Ces documents distinguent explicitement comportement observé, cible et écart.
 
 ## Décisions et limites actuelles
 

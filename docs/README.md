@@ -5,6 +5,9 @@ Cette documentation est la source de contexte pour le produit, l'architecture, l
 ## Point d'entrée
 
 - [Contexte condensé](PROJECT_CONTEXT.md)
+- [Fonctionnement complet observé](architecture/FUNCTIONAL_REFERENCE.md)
+- [Cryptographie V2 détaillée](security/CRYPTOGRAPHY_V2.md)
+- [Traçabilité documentation/code/tâches](architecture/TRACEABILITY.md)
 - [Audit initial](audit/AUDIT-2026-08-23.md)
 - [Roadmap](roadmap/ROADMAP.md)
 - [Tâches](tasks/README.md)
@@ -13,8 +16,8 @@ Cette documentation est la source de contexte pour le produit, l'architecture, l
 ## Références par domaine
 
 - Produit : [vision](product/PRODUCT.md), [périmètre V1](product/V1_SCOPE.md), [décisions V1](product/V1_DECISIONS.md), [décision de nom](product/NAME_DECISION.md)
-- Architecture : [système](architecture/SYSTEM.md), [modèle de données](architecture/DATA_MODEL.md), [compatibilité plateformes](architecture/PLATFORM_COMPATIBILITY.md)
-- Sécurité : [menaces](security/THREAT_MODEL.md), [invariants](security/SECURITY_INVARIANTS.md), [protocole cryptographique](security/CRYPTO_PROTOCOL.md)
+- Architecture : [système](architecture/SYSTEM.md), [fonctionnement observé](architecture/FUNCTIONAL_REFERENCE.md), [traçabilité](architecture/TRACEABILITY.md), [modèle de données](architecture/DATA_MODEL.md), [compatibilité plateformes](architecture/PLATFORM_COMPATIBILITY.md)
+- Sécurité : [menaces](security/THREAT_MODEL.md), [invariants](security/SECURITY_INVARIANTS.md), [vue du protocole](security/CRYPTO_PROTOCOL.md), [spécification V2 observée](security/CRYPTOGRAPHY_V2.md)
 - Décisions : [registre ADR](adr/README.md)
 - API : [contrats](api/README.md)
 - Exploitation : [inventaire historique](operations/PRODUCTION_INVENTORY.md), [inventaire staging](operations/STAGING_INVENTORY.md), [archive du code initial](operations/CODE_ARCHIVE.md), [environnements](operations/ENVIRONMENTS.md), [déploiement](operations/DEPLOYMENT.md), [sauvegarde/restauration](operations/BACKUP_RESTORE.md), [incidents](operations/INCIDENT_RESPONSE.md)

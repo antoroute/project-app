@@ -1,11 +1,13 @@
 # Protocole cryptographique
 
-Statut : V2 observée, V3 à décider
-Dernière mise à jour : 2026-08-23
+Statut : synthèse V2 observée, V3 à décider
+Dernière mise à jour : 2026-08-24
+
+Ce document donne l'orientation de sécurité. La description champ par champ du code actuel, des clés, octets signés, caches et métadonnées est dans [`CRYPTOGRAPHY_V2.md`](CRYPTOGRAPHY_V2.md).
 
 ## État V2 observé
 
-Le client emploie X25519 pour établir des secrets avec les clés publiques d'appareils, HKDF-SHA256 pour dériver des clés, AES-256-GCM pour le contenu/enveloppement et Ed25519 pour signer. Une clé éphémère d'expéditeur est produite par message et des clés de message sont enveloppées pour les appareils destinataires.
+Le client emploie X25519 pour établir des secrets avec les clés publiques statiques des appareils, HKDF-SHA256 pour dériver des clés, AES-256-GCM pour le contenu et l'enveloppement, et Ed25519 pour signer. Une paire X25519 éphémère est produite par message et une clé de message aléatoire est enveloppée séparément pour chaque appareil destinataire.
 
 Cette liste d'algorithmes ne suffit pas à démontrer un protocole sûr. La sérialisation canonique, le domaine signé, l'approbation des clés, la rotation, l'historique, la révocation, la protection contre rejeu et le traitement multi-appareil doivent être spécifiés ensemble.
 
@@ -15,7 +17,10 @@ Cette liste d'algorithmes ne suffit pas à démontrer un protocole sûr. La sér
 - Aucune post-compromise security démontrée ne renouvelle automatiquement la confiance après compromission.
 - Le format est lié à l'implémentation Dart et certaines conversions sont ambiguës entre texte et octets.
 - La vérification peut intervenir après l'affichage dans le flux client actuel.
+- Le chemin normal peut retourner le texte clair malgré une signature fausse ; le chemin rapide saute explicitement la vérification. `TC-114` doit imposer la vérification avant affichage, cache ou notification sans ajouter d'aller-retour réseau nominal.
+- Les octets signés sont une concaténation sans séparateurs ni longueurs ; le sel HKDF n'est pas signé et aucune AAD n'est fournie à AES-GCM.
 - Le cycle de confiance d'un nouvel appareil est incomplet.
+- La clé maître du cache persistant de clés de message est dérivée de façon prévisible de l'horloge, sans aléa cryptographique ; la base SQLite locale n'est pas réellement chiffrée.
 - Aucun ensemble de vecteurs de test interopérables ni audit indépendant n'est présent.
 
 ## Exigences pour V3
@@ -35,3 +40,5 @@ Cette liste d'algorithmes ne suffit pas à démontrer un protocole sûr. La sér
 `ADR-0003` compare l'adoption d'un standard de messagerie de groupe, notamment MLS via une bibliothèque mûre, avec un protocole interne V3 minimal. Le choix dépendra de la maturité des bibliothèques Flutter/desktop, de l'interopérabilité, du coût de migration et de la capacité à auditer/maintenir la solution.
 
 Tant que cette décision n'est pas clôturée, ne pas étendre le protocole V2 à de nouveaux types de contenu et ne pas publier de revendication de sécurité avancée.
+
+Le format V2 historique ne doit pas être modifié silencieusement. Tout durcissement immédiat doit rester lisible de manière versionnée, et toute donnée non authentifiable doit être rejetée plutôt que présentée comme fiable.

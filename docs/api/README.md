@@ -1,5 +1,7 @@
 # Contrats API
 
+L'inventaire des routes et événements **observés dans le code** se trouve dans [`FUNCTIONAL_REFERENCE.md`](../architecture/FUNCTIONAL_REFERENCE.md). Il fait foi pour comprendre le prototype tant que l'OpenAPI ci-dessous n'a pas été réconcilié et rendu contractuel.
+
 Statut : contrat existant à réconcilier
 Dernière mise à jour : 2026-08-23
 

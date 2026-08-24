@@ -12,12 +12,14 @@ Les fiches transforment la roadmap en unités confiables pour un développement 
 - [TC-006 — Matrice plateformes](TC-006-matrice-plateformes.md)
 - [TC-007 — Socle documentaire IA](TC-007-socle-documentaire.md)
 - [TC-008 — Menaces et invariants](TC-008-menaces-invariants.md)
+- [TC-009 — Documentation fonctionnelle et cryptographique](TC-009-documentation-fonctionnelle-crypto.md)
 
 ## Index Phase 1
 
 - [TC-101 — Configuration critique](TC-101-configuration-critique.md)
 - [TC-102 — JWT access/refresh](TC-102-jwt-access-refresh.md)
 - [TC-103 — Identité dérivée côté serveur](TC-103-identite-serveur.md)
+- [TC-114 — Vérification avant utilisation](TC-114-verification-avant-utilisation.md)
 
 ## Format obligatoire des nouvelles fiches
 

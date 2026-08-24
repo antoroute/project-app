@@ -1,7 +1,7 @@
 # Architecture système
 
 Statut : état observé et cible V1 provisoire
-Dernière mise à jour : 2026-08-23
+Dernière mise à jour : 2026-08-24
 
 ## Vue logique
 
@@ -18,18 +18,18 @@ flowchart LR
     RP --> M
 ```
 
-Le schéma est logique. Le routage, les réseaux, versions d'images et volumes réellement présents sur la VM doivent être établis par `TC-002`.
+Le schéma est logique. L'inventaire réel du LXC et du staging est conservé dans `docs/operations/`; le client utilise encore des URL historiques codées en dur et n'est pas connecté au staging local par défaut.
 
 ## Composants actuels
 
 | Composant | Responsabilité | État |
 |---|---|---|
 | Client Flutter | UI, identité d'appareil, chiffrement/déchiffrement, cache et synchronisation | Prototype mobile, desktop incomplet |
-| Auth Fastify | comptes, mots de passe, JWT, refresh tokens | Fonctionnel mais séparation de jetons et secrets à corriger |
+| Auth Fastify | comptes, mots de passe, JWT, refresh tokens | Access Ed25519 et refresh HS256 séparés par `TC-102` ; cycle de compte incomplet |
 | Messaging Fastify | cercles, membres, conversations, clés publiques, messages et temps réel | Fonctionnel mais contrôles ACL incomplets |
 | PostgreSQL | identités, appartenances, clés publiques, enveloppes chiffrées, sessions | Initialisé par script, sans migrations versionnées |
-| Redis | prévu pour présence/pub-sub | Utilité non démontrée dans le code audité |
-| Nginx/proxy externe | terminaison/routage HTTP(S) | état de production inconnu |
+| Redis | prévu pour présence/pub-sub | Non utilisé par l'application ; présence en mémoire du processus |
+| Nginx/proxy externe | terminaison/routage HTTP(S) | Staging loopback sans exposition publique ; TLS restreint reporté à `TC-113` |
 | Site public | acquisition, téléchargements, légal, support | à créer |
 
 ## Frontières de confiance
@@ -56,6 +56,12 @@ Le schéma est logique. Le routage, les réseaux, versions d'images et volumes r
 Conserver deux services déployables pour éviter une réécriture prématurée, mais partager un paquet de contrats/type JWT et des règles d'autorisation testées. PostgreSQL reste la source durable. Redis est retiré tant qu'une instance messaging suffit ; il ne revient que pour un besoin de mise à l'échelle démontré avec l'adaptateur Socket.IO approprié.
 
 La configuration publique (URL, environnement, version minimum) doit être distincte des secrets serveur. Un client public ne contient aucun secret d'authentification commun.
+
+## Références d'implémentation
+
+- [`FUNCTIONAL_REFERENCE.md`](FUNCTIONAL_REFERENCE.md) décrit les parcours actuels, routes, événements, stockages et écarts à la cible.
+- [`TRACEABILITY.md`](TRACEABILITY.md) relie chaque responsabilité à ses fichiers et tâches.
+- [`CRYPTOGRAPHY_V2.md`](../security/CRYPTOGRAPHY_V2.md) spécifie le protocole effectivement observé, y compris ses limites critiques.
 
 ## Qualités obligatoires
 

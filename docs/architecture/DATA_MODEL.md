@@ -1,7 +1,7 @@
 # Modèle de données
 
 Statut : photographie V2 et contraintes cibles
-Dernière mise à jour : 2026-08-23
+Dernière mise à jour : 2026-08-24
 
 ## Modèle observé
 
@@ -16,7 +16,9 @@ Le script `infrastructure/postgres/init.sql` définit :
 - `refresh_tokens` : sessions renouvelables ;
 - `notifications` : événements applicatifs utilisateur.
 
-Le schéma réellement déployé peut différer. Seul l'inventaire `TC-002`, puis une migration de référence, permettront de le confirmer.
+Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. Le schéma historique ou tout futur déploiement peut néanmoins différer tant qu'une baseline de migrations et une table de version n'existent pas (`TC-201`).
+
+La circulation de ces données par parcours est décrite dans [`FUNCTIONAL_REFERENCE.md`](FUNCTIONAL_REFERENCE.md), et les fichiers responsables dans [`TRACEABILITY.md`](TRACEABILITY.md).
 
 ## Problèmes structurels à résoudre
 

@@ -23,6 +23,7 @@ Objectif : connaître la cible et rendre tout travail ultérieur récupérable.
 | TC-006 | Décider les versions OS minimales et la matrice appareils | TC-005 | Terminée — matrice acceptée, preuves reportées aux plateformes |
 | TC-007 | Créer le contexte, les ADR, prompts et conventions IA | — | Terminée |
 | TC-008 | Établir le modèle de menace et les invariants initiaux | TC-007 | Terminée — baseline |
+| TC-009 | Documenter le fonctionnement complet et la cryptographie actuelle | TC-007, TC-008 | Terminée |
 
 Porte de sortie : nom décidé, V1 acceptée, inventaire production assaini, sort des données historiques décidé, staging isolé et décisions plateformes enregistrées.
 
@@ -45,7 +46,8 @@ Objectif : empêcher l'usurpation, l'accès croisé et l'enregistrement illégit
 | TC-109 | Retirer le faux secret partagé de l'application publique | TC-101 | À faire |
 | TC-110 | Mettre à jour les dépendances vulnérables avec tests | TC-111 | À faire |
 | TC-111 | Créer les tests négatifs auth/ACL/keys et PostgreSQL d'intégration | TC-004 | À faire |
-| TC-112 | Revue de sécurité de fermeture P1 | TC-101 à TC-111 | À faire |
+| TC-114 | Interdire affichage, cache et notification avant authentification du message | TC-103 | Prête |
+| TC-112 | Revue de sécurité de fermeture P1 | TC-101 à TC-111, TC-114 | À faire |
 | TC-113 | Exposer le staging par TLS et accès restreint après fermeture P1 | TC-112 | À faire |
 
 Porte de sortie : tests d'usurpation et accès croisé tous négatifs, aucun secret par défaut/embarqué, aucune vulnérabilité critique/haute exploitable acceptée silencieusement.
