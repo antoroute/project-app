@@ -29,6 +29,9 @@ run_id=$(date -u +%Y%m%d%H%M%S)
 email="tc-smoke-${run_id}@example.invalid"
 username="smoke_${run_id}"
 password=$(openssl rand -hex 16)
+secondary_email="tc-smoke-secondary-${run_id}@example.invalid"
+secondary_username="smoke_secondary_${run_id}"
+secondary_password=$(openssl rand -hex 16)
 
 assert_status() {
   local expected=$1
@@ -68,6 +71,18 @@ login_response=$(curl --silent --show-error \
   "$base_url/auth/login")
 access_token=$(jq -er '.access' <<<"$login_response")
 refresh_token=$(jq -er '.refresh' <<<"$login_response")
+authenticated_user_id=$(jq -er '.user.id' <<<"$login_response")
+
+secondary_register_payload=$(jq -nc \
+  --arg email "$secondary_email" \
+  --arg username "$secondary_username" \
+  --arg password "$secondary_password" \
+  '{email:$email,username:$username,password:$password}')
+secondary_register_response=$(curl --silent --show-error \
+  -H 'content-type: application/json' \
+  --data "$secondary_register_payload" \
+  "$base_url/auth/register")
+secondary_user_id=$(jq -er '.id' <<<"$secondary_register_response")
 
 assert_status 401 "$base_url/auth/refresh" \
   -X POST \
@@ -109,7 +124,35 @@ group_response=$(curl --silent --show-error \
   -H 'x-client-version: 2.0.0' \
   --data "$group_payload" \
   "$base_url/api/groups")
-jq -e '.groupId | type == "string"' >/dev/null <<<"$group_response"
+group_id=$(jq -er '.groupId | select(type == "string")' <<<"$group_response")
+
+# L'identité de l'expéditeur fait partie de l'enveloppe signée, mais ne fait
+# jamais autorité : le serveur doit refuser B lorsque le token appartient à A.
+forged_message_payload=$(jq -nc \
+  --arg group_id "$group_id" \
+  --arg conv_id "$(cat /proc/sys/kernel/random/uuid)" \
+  --arg message_id "$(cat /proc/sys/kernel/random/uuid)" \
+  --arg sender_id "$secondary_user_id" \
+  --arg recipient_id "$authenticated_user_id" \
+  --argjson sent_at "$(date +%s)" \
+  '{
+    v: 2,
+    alg: {kem:"X25519",kdf:"HKDF-SHA256",aead:"AES-256-GCM",sig:"Ed25519"},
+    groupId:$group_id,
+    convId:$conv_id,
+    messageId:$message_id,
+    sentAt:$sent_at,
+    sender:{userId:$sender_id,deviceId:"forged-device",eph_pub:"AA==",key_version:1},
+    recipients:[{userId:$recipient_id,deviceId:"recipient-device",wrap:"AA==",nonce:"AA=="}],
+    iv:"AA==",ciphertext:"AA==",sig:"AA==",salt:"AA=="
+  }')
+assert_status 403 "$base_url/api/messages" \
+  -X POST \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data "$forged_message_payload"
 
 groups_response=$(curl --silent --show-error \
   -H "authorization: Bearer $access_token" \
@@ -142,4 +185,5 @@ assert_status 401 "$base_url/auth/refresh" \
   -H "authorization: Bearer $refresh_token" \
   -H "x-app-secret: $app_secret"
 
-echo "Smoke tests passed: health, login, strict access/refresh separation, refresh revocation, app-secret rejection, group write/read and Socket.IO handshake."
+unset password secondary_password access_token refreshed_access_token refresh_token
+echo "Smoke tests passed: health, login, strict access/refresh separation, refresh revocation, forged sender rejection, app-secret rejection, group write/read and Socket.IO handshake."

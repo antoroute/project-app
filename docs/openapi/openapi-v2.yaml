@@ -61,7 +61,10 @@ components:
           type: object
           required: [userId, deviceId, eph_pub, key_version]
           properties:
-            userId: { type: string, format: uuid }
+            userId:
+              type: string
+              format: uuid
+              description: Doit correspondre au sujet du bearer access token ; toute divergence est refusée.
             deviceId: { type: string }
             eph_pub: { type: string, description: Base64(32B X25519) }
             key_version: { type: integer }
@@ -312,3 +315,5 @@ paths:
                 type: object
                 properties:
                   id: { type: string, format: uuid }
+        "403":
+          description: Expéditeur divergent du sujet authentifié ou ACL refusée.

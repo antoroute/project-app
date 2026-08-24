@@ -4,6 +4,8 @@
 import { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 
+import { authenticatedUserId } from '../security/jwt.js';
+
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
 
@@ -17,7 +19,7 @@ export default async function routes(app: FastifyInstance) {
       }) 
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { name, groupSigningPubKey, groupKEMPubKey } = req.body as any;
 
     const g = await app.db.one(
@@ -55,7 +57,7 @@ export default async function routes(app: FastifyInstance) {
 
   // GET /api/groups  : groupes dont je suis membre
   app.get('/api/groups', async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const rows = await app.db.any(
       `SELECT g.id, g.name, g.creator_id, g.created_at as "createdAt"
          FROM groups g
@@ -73,7 +75,7 @@ export default async function routes(app: FastifyInstance) {
       params: Type.Object({ id: Type.String({ format: 'uuid' }) })
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { id: groupId } = req.params as any;
 
     // Vérifie que l'utilisateur est membre du groupe
@@ -113,7 +115,7 @@ export default async function routes(app: FastifyInstance) {
       params: Type.Object({ id: Type.String({ format: 'uuid' }) })
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { id: groupId } = req.params as any;
 
     // Vérifie que l'utilisateur est membre du groupe
@@ -158,7 +160,7 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { id: groupId } = req.params as any;
     const { deviceId, pk_sig, pk_kem, groupSigningPubKey, groupKEMPubKey } = req.body as any;
 
@@ -185,7 +187,7 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const approverId = (req.user as any).sub;
+    const approverId = authenticatedUserId(req);
     const { id: groupId, rid } = req.params as any;
 
     // Vérifie que l'approver est membre du groupe
@@ -295,7 +297,7 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { id: groupId } = req.params as any;
     const { groupSigningPubKey, groupKEMPubKey, deviceId, deviceSigPubKey, deviceKemPubKey } = req.body as any;
 
@@ -346,7 +348,7 @@ export default async function routes(app: FastifyInstance) {
       params: Type.Object({ id: Type.String({ format: 'uuid' }) })
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { id: groupId } = req.params as any;
 
     // Vérifie que l'utilisateur est membre du groupe
@@ -393,7 +395,7 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const voterId = (req.user as any).sub;
+    const voterId = authenticatedUserId(req);
     const { id: groupId, reqId } = req.params as any;
     const { vote } = req.body as any;
 
@@ -440,7 +442,7 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const approverId = (req.user as any).sub;
+    const approverId = authenticatedUserId(req);
     const { id: groupId, reqId } = req.params as any;
     const { action } = req.body as any;
 
@@ -537,7 +539,7 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const approverId = (req.user as any).sub;
+    const approverId = authenticatedUserId(req);
     const { id: groupId, rid } = req.params as any;
 
     const a = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [approverId, groupId]);

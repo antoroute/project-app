@@ -1,5 +1,5 @@
 import fastifyJwt from '@fastify/jwt';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 export const JWT_ISSUER = 'trust-circle-auth';
 export const JWT_ACCESS_AUDIENCE = 'trust-circle-api';
@@ -58,4 +58,8 @@ export function assertAccessClaims(payload: unknown): AccessTokenClaims {
 
 export function verifyAccessToken(app: FastifyInstance, token: string): AccessTokenClaims {
   return assertAccessClaims(app.jwt.verify(token));
+}
+
+export function authenticatedUserId(request: FastifyRequest): string {
+  return assertAccessClaims(request.user).sub;
 }

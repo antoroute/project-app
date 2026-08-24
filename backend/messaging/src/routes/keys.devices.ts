@@ -4,6 +4,8 @@
 import { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 
+import { authenticatedUserId } from '../security/jwt.js';
+
 const DeviceKey = Type.Object({
   deviceId: Type.String({ minLength: 1, maxLength: 128 }),
   pk_sig: Type.String({ contentEncoding: 'base64' }), // 32B
@@ -60,7 +62,7 @@ export default async function routes(app: FastifyInstance) {
       })) }
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { groupId } = req.params as any;
     const rows = await app.db.any(
       `SELECT user_id as "userId", device_id as "deviceId",
@@ -87,7 +89,7 @@ export default async function routes(app: FastifyInstance) {
       response: { 201: Type.Object({ ok: Type.Boolean() }) }
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { groupId } = req.params as any;
     const { deviceId, pk_sig, pk_kem, key_version } = req.body as any;
 
@@ -123,7 +125,7 @@ export default async function routes(app: FastifyInstance) {
       response: { 200: Type.Object({ ok: Type.Boolean() }) }
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { groupId, deviceId } = req.params as any;
 
     await app.db.none(

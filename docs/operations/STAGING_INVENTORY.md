@@ -1,7 +1,7 @@
 # Inventaire du staging backend
 
 Statut : opérationnel, accès local au LXC uniquement
-Dernier déploiement : 2026-08-24 (`TC-102`)
+Dernier déploiement : 2026-08-24 (`TC-102`, Ed25519)
 Environnement : LXC106, stack Compose `trust-circle-staging`
 
 ## Résumé
@@ -12,8 +12,8 @@ Le staging backend est une installation neuve et isolée des anciennes ressource
 
 | Élément | Valeur assainie |
 |---|---|
-| Commit source | `301de4a5f14acb3131b37274ba3060e2116d5a15` |
-| Release | `/opt/trust-circle-staging/releases/301de4a5f14acb3131b37274ba3060e2116d5a15` |
+| Commit source | `e7be1b027923a7868cca3145694e9bcc27217332` |
+| Release | `/opt/trust-circle-staging/releases/e7be1b027923a7868cca3145694e9bcc27217332` |
 | Pointeur actif | `/opt/trust-circle-staging/current` |
 | Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
 | Source Compose | `deploy/staging/compose.yml` |
@@ -25,8 +25,8 @@ Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affich
 
 | Service | Image | Preuve | État final |
 |---|---|---|---|
-| Auth | `trust-circle-staging-auth:staging-301de4a5f14a` | image ID `57f2ad8e4d2d`, label revision complet | sain |
-| Messaging | `trust-circle-staging-messaging:staging-301de4a5f14a` | image ID `ae292b8b34bf`, label revision complet | sain |
+| Auth | `trust-circle-staging-auth:staging-e7be1b027923` | image ID `04d6d4424277`, label revision complet | sain |
+| Messaging | `trust-circle-staging-messaging:staging-e7be1b027923` | image ID `1e70de65e700`, label revision complet | sain |
 | PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 | Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 
@@ -97,7 +97,15 @@ Le redéploiement `TC-102` du 2026-08-24 a ensuite validé :
 5. refus HTTP 401 d'un JWT au format historique malgré la conservation de la matière de clé access ;
 6. healthchecks des quatre services et smoke test complet après redéploiement.
 
-La clé access existante a été conservée sous son nouveau nom ; une clé refresh indépendante a été ajoutée. Toutes les anciennes sessions sont néanmoins invalides à cause du nouveau contrat de claims et de la séparation de clé refresh. La configuration privée antérieure et la release `dcf4977dde085f8d24a661952369281232b8ec00` restent disponibles pour rollback du staging.
+Le durcissement asymétrique final de `TC-102` a en plus validé :
+
+1. génération sans affichage d'une paire Ed25519 dédiée au staging ;
+2. présence de la clé privée, de la clé publique et du secret refresh dans Auth, contre la seule clé publique dans Messaging ;
+3. impossibilité effective de signer un access token depuis le conteneur Messaging ;
+4. coût moyen dans le conteneur Auth de 0,0773 ms par signature et 0,1499 ms par vérification sur 2 000 opérations, sous le budget de 2 ms ;
+5. healthchecks des quatre services et smoke test strict access/refresh après remplacement des conteneurs.
+
+La paire access a été renouvelée, ce qui invalide volontairement les access tokens antérieurs. La configuration privée immédiatement antérieure est conservée en mode `0600` sous `staging.env.before-e7be1b027923`, et les releases précédentes restent disponibles pour rollback du staging.
 
 ## Limites assumées
 

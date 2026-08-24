@@ -2,7 +2,12 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import bcrypt from 'bcrypt';
 
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../security/jwt.js';
+import {
+  authenticatedUserId,
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+} from '../security/jwt.js';
 
 const RegisterBody = Type.Object({
   email: Type.String({ format: 'email' }),
@@ -90,7 +95,7 @@ export default async function routes(app: FastifyInstance) {
   });
 
   app.get('/me', { onRequest: [app.authenticate] }, async (req: FastifyRequest, reply: FastifyReply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const user = await app.db.one(`SELECT id, email, username, created_at FROM users WHERE id=$1`, [userId]);
     return user;
   });

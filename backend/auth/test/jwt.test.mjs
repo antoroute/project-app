@@ -10,6 +10,7 @@ import {
   JWT_ISSUER,
   JWT_REFRESH_AUDIENCE,
   JWT_TOKEN_VERSION,
+  authenticatedUserId,
   registerJwt,
   signAccessToken,
   signRefreshToken,
@@ -71,6 +72,8 @@ test('issues strict Ed25519 access and independent HS256 refresh tokens', async 
   assert.notEqual(accessClaims.jti, refreshClaims.jti);
   assert.equal(decodedAccess.header.alg, 'EdDSA');
   assert.equal(decodedAccess.header.typ, 'JWT');
+  assert.equal(authenticatedUserId({ user: accessClaims }), USER_ID);
+  assert.throws(() => authenticatedUserId({ user: { sub: USER_ID } }), /Invalid token claims/);
 });
 
 test('rejects refresh as access and access as refresh', async (t) => {

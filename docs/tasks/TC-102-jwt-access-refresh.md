@@ -1,6 +1,6 @@
 # TC-102 — Séparer access/refresh JWT et valider toutes les claims
 
-Statut : En cours — durcissement asymétrique demandé après revue propriétaire
+Statut : Terminée
 Priorité : P0 sécurité
 Décision : mainteneur, avec revue sécurité
 Dépendances : TC-101
@@ -78,13 +78,14 @@ Le déploiement invalide volontairement tous les refresh tokens antérieurs, car
 
 ## Résultat du 2026-08-24
 
-- Commit applicatif déployé sur LXC106 : `301de4a5f14acb3131b37274ba3060e2116d5a15`.
-- Auth reçoit `JWT_ACCESS_SECRET` et `JWT_REFRESH_SECRET` ; Messaging reçoit uniquement `JWT_ACCESS_SECRET`. La valeur access du staging a été conservée sous son nouveau nom et une clé refresh indépendante a été générée sans affichage.
-- Les validateurs imposent HS256, header `typ=JWT`, issuer/audience, claims obligatoires, durées maximales, type d'usage et version `1`.
-- Les refresh tokens sont empreintés avec SHA-256 dans PostgreSQL ; les lignes bcrypt historiques ne peuvent plus correspondre.
-- `npm ci`, `npm test` et `npm run build` réussis : 14 tests Auth et 12 tests Messaging, dont Socket.IO et tous les cas négatifs prévus.
+- Commit applicatif final déployé sur LXC106 : `e7be1b027923a7868cca3145694e9bcc27217332`.
+- Les access tokens sont signés en EdDSA/Ed25519. Auth reçoit la clé privée, la clé publique et le secret refresh ; Messaging reçoit uniquement la clé publique. Une vérification exécutée dans le conteneur Messaging confirme que sa capacité de signature est indisponible.
+- Les refresh tokens restent signés en HS256 avec un secret détenu uniquement par Auth et sont empreintés avec SHA-256 dans PostgreSQL ; les lignes bcrypt historiques ne peuvent plus correspondre.
+- Les validateurs imposent algorithme, header `typ=JWT`, issuer/audience, claims obligatoires, durées maximales, type d'usage et version `1`.
+- `npm test` réussit avec 17 tests Auth et 14 tests Messaging, dont configuration des clés Ed25519, Socket.IO, usages croisés et cas négatifs. Les tests de performance imposent une moyenne inférieure à 2 ms.
+- Sur le staging contraint, 2 000 opérations donnent 0,0773 ms par signature et 0,1499 ms par vérification en moyenne. La vérification reste locale et n'ajoute aucun appel réseau ni étape utilisateur.
 - OpenAPI valide syntaxiquement, scripts shell valides et Compose validé avec `config --quiet` sur LXC106.
 - Les quatre conteneurs sont sains. Le smoke test réel prouve access→refresh refusé, refresh→Auth/Messaging refusé, refresh valide accepté, access→logout refusé, révocation puis réutilisation refusée.
-- Un JWT historique signé avec la clé access conservée mais les anciennes claims `project-app`/`messaging` est refusé avec HTTP 401.
+- La paire access du staging a été régénérée sans affichage de valeur, donc les access tokens antérieurs au déploiement sont volontairement invalides. La configuration précédente en mode `0600` et l'ancienne release sont conservées pour rollback.
 
-Risque résiduel : HS256 impose de partager la clé access entre Auth et Messaging, donc les deux services peuvent techniquement signer un access token. Cette limite est documentée dans `TOKEN_CONTRACT.md`; une migration asymétrique future nécessitera une ADR. La rotation à usage unique et les familles de sessions restent dans `TC-403`.
+Risque résiduel accepté : la rotation à usage unique et les familles de sessions restent dans `TC-403`. Le risque qu'une compromission de Messaging permette de forger des access tokens est fermé par la distribution asymétrique des clés.

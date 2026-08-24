@@ -10,6 +10,7 @@ import {
   JWT_ACCESS_AUDIENCE,
   JWT_ISSUER,
   JWT_TOKEN_VERSION,
+  authenticatedUserId,
   registerAccessJwt,
   verifyAccessToken,
 } from '../dist/security/jwt.js';
@@ -61,6 +62,8 @@ test('accepts a strict Ed25519 access token but cannot sign one', async (t) => {
   assert.equal(claims.sub, USER_ID);
   assert.equal(claims.iss, JWT_ISSUER);
   assert.equal(claims.aud, JWT_ACCESS_AUDIENCE);
+  assert.equal(authenticatedUserId({ user: claims }), USER_ID);
+  assert.throws(() => authenticatedUserId({ user: { sub: USER_ID } }), /Invalid token claims/);
   assert.throws(() => app.jwt.sign(payload()), /unable to sign/);
 });
 

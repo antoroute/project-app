@@ -4,6 +4,8 @@
 import { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 
+import { authenticatedUserId } from '../security/jwt.js';
+
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
 
@@ -17,7 +19,7 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { groupId, type, memberIds } = req.body as any;
 
     const conv = await app.db.one(
@@ -72,7 +74,7 @@ export default async function routes(app: FastifyInstance) {
 
   // GET /api/conversations : liste de l'utilisateur
   app.get('/api/conversations', async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const rows = await app.db.any(
       `SELECT c.id, c.group_id as "groupId", c.type, c.creator_id as "creatorId", c.created_at as "createdAt"
          FROM conversations c
@@ -88,7 +90,7 @@ export default async function routes(app: FastifyInstance) {
   app.get('/api/conversations/:id', {
     schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
 
     // ACL: être membre de la conversation
@@ -140,7 +142,7 @@ export default async function routes(app: FastifyInstance) {
   app.post('/api/conversations/:id/read', {
     schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
 
     // ACL implicite: être membre
@@ -163,7 +165,7 @@ export default async function routes(app: FastifyInstance) {
   app.get('/api/conversations/:id/readers', {
     schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) }
   }, async (req, reply) => {
-    const userId = (req.user as any).sub;
+    const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
 
     // ACL: membre

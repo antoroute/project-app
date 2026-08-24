@@ -6,6 +6,8 @@ import { FastifyInstance } from 'fastify';
 import { SendMessageV2Schema, SendMessageV2Reply } from '../schemas/messageV2.schema.js';
 import { Type } from '@sinclair/typebox';
 
+import { authenticatedUserId } from '../security/jwt.js';
+
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
 
@@ -14,9 +16,16 @@ export default async function routes(app: FastifyInstance) {
     schema: { body: SendMessageV2Schema, response: { 201: SendMessageV2Reply } }
   }, async (req, reply) => {
     const b = req.body as any;
+    const senderUserId = authenticatedUserId(req);
+
+    // sender.userId appartient au domaine signé E2EE : une divergence ne peut
+    // pas être corrigée silencieusement sans invalider l'enveloppe.
+    if (b.sender.userId !== senderUserId) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
 
     // ACL: vérifie appartenance et devices actifs
-    const allowed = await app.services.acl.canSend(b.sender.userId, b.sender.deviceId, b.groupId, b.convId, b.recipients);
+    const allowed = await app.services.acl.canSend(senderUserId, b.sender.deviceId, b.groupId, b.convId, b.recipients);
     if (!allowed) return reply.code(403).send({ error: 'forbidden' });
 
     try {
@@ -29,7 +38,7 @@ export default async function routes(app: FastifyInstance) {
                decode($7,'base64'), decode($8,'base64'), decode($9,'base64'), $10::jsonb, decode($11,'base64'), decode($12,'base64'))
         RETURNING id
       `, [
-        b.convId, b.sender.userId, b.sender.deviceId,
+        b.convId, senderUserId, b.sender.deviceId,
         JSON.stringify(b.alg),
         b.messageId, new Date(b.sentAt * 1000).toISOString(),
         b.sender.eph_pub, b.iv, b.ciphertext,
@@ -41,7 +50,7 @@ export default async function routes(app: FastifyInstance) {
       // SÉCURITÉ: Émettre un ping avec convId et groupId (identifiants, pas de contenu sensible)
       // Les clients devront récupérer les messages via l'API après avoir reçu le ping
       // Le convId et groupId sont nécessaires pour identifier quelle conversation a reçu le message
-      app.io.to(`conv:${b.convId}`).except(`user:${b.sender.userId}`).emit('message:new', {
+      app.io.to(`conv:${b.convId}`).except(`user:${senderUserId}`).emit('message:new', {
         type: 'message:new',
         convId: b.convId,
         groupId: b.groupId,
@@ -50,7 +59,7 @@ export default async function routes(app: FastifyInstance) {
       app.log.info({ 
         convId: b.convId, 
         messageId: b.messageId, 
-        senderId: b.sender.userId,
+        senderId: senderUserId,
         event: 'message_ping_sent'
       }, 'Message ping sent to conversation (excluding sender, no sensitive data)');
 
@@ -77,7 +86,7 @@ export default async function routes(app: FastifyInstance) {
   }, async (req, reply) => {
     const { id } = req.params as any;
     try {
-      const userId = (req.user as any).sub;
+      const userId = authenticatedUserId(req);
       const { cursor, limit = 50 } = req.query as any;
 
       // ACL: vérifier que l'utilisateur est membre de la conversation

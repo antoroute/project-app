@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import fastifyJwt from '@fastify/jwt';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 export const JWT_ISSUER = 'trust-circle-auth';
 export const JWT_ACCESS_AUDIENCE = 'trust-circle-api';
@@ -116,4 +116,8 @@ export function verifyRefreshToken(app: FastifyInstance, token: string): TokenCl
 
 export function assertAccessClaims(payload: unknown): TokenClaims {
   return assertClaims(payload, 'access');
+}
+
+export function authenticatedUserId(request: FastifyRequest): string {
+  return assertAccessClaims(request.user).sub;
 }
