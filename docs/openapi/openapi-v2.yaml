@@ -34,7 +34,7 @@ components:
 
     AccountDevice:
       type: object
-      required: [deviceId, identityPublicKey, identityKeyVersion, platform, deviceName, status, proofVerifiedAt, createdAt, updatedAt]
+      required: [deviceId, identityPublicKey, identityKeyVersion, platform, deviceName, status, proofVerifiedAt, activatedAt, revokedAt, createdAt, updatedAt]
       properties:
         deviceId: { type: string, format: uuid }
         identityPublicKey: { type: string, description: Base64 canonique de la clé Ed25519 brute de 32 octets }
@@ -44,6 +44,7 @@ components:
         status: { type: string, enum: [pending, active, revoked] }
         proofVerifiedAt: { type: string, format: date-time }
         activatedAt: { type: [string, "null"], format: date-time }
+        revokedAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -57,6 +58,27 @@ components:
         transcript: { type: string, description: Base64 des 163 octets exacts à signer }
         expiresAt: { type: string, format: date-time }
         algorithm: { type: string, enum: [Ed25519] }
+
+    DeviceApprovalChallenge:
+      type: object
+      required: [challengeId, approverDeviceId, targetDeviceId, decision, transcript, expiresAt, algorithm, target]
+      properties:
+        challengeId: { type: string, format: uuid }
+        approverDeviceId: { type: string, format: uuid }
+        targetDeviceId: { type: string, format: uuid }
+        decision: { type: string, enum: [approve, reject] }
+        transcript: { type: string, description: Base64 des 216 octets exacts à signer }
+        expiresAt: { type: string, format: date-time }
+        algorithm: { type: string, enum: [Ed25519] }
+        target:
+          type: object
+          required: [deviceId, identityPublicKey, identityKeyVersion, platform, deviceName]
+          properties:
+            deviceId: { type: string, format: uuid }
+            identityPublicKey: { type: string, description: Base64 canonique de la clé Ed25519 brute de 32 octets }
+            identityKeyVersion: { type: integer, minimum: 1 }
+            platform: { type: string, enum: [android, ios, windows, macos, unknown] }
+            deviceName: { type: string }
 
     RecipientWrap:
       type: object
@@ -193,9 +215,78 @@ paths:
                   deviceId: { type: string, format: uuid }
                   status: { type: string, enum: [pending, active] }
                   bootstrap: { type: boolean }
-        "403": { description: Signature invalide, bootstrap non autorisé ou appareil révoqué }
+        "403": { description: "Signature invalide, bootstrap non autorisé ou appareil révoqué" }
         "404": { description: Challenge absent pour le sujet }
         "409": { description: Challenge consommé ou identité en conflit }
+        "410": { description: Challenge expiré }
+
+  /api/devices/{targetDeviceId}/approvals/challenge:
+    post:
+      tags: [devices]
+      summary: Créer une décision d'approbation ou de refus à signer
+      parameters:
+        - in: path
+          name: targetDeviceId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [approverDeviceId, decision]
+              properties:
+                approverDeviceId: { type: string, format: uuid }
+                decision: { type: string, enum: [approve, reject] }
+      responses:
+        "201":
+          description: Transcription créée pour 5 minutes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceApprovalChallenge' }
+        "403": { description: L'appareil approbateur n'est pas actif }
+        "404": { description: Cible absente du compte courant }
+        "409": { description: La cible n'est plus en attente }
+        "429": { description: Limite de challenges atteinte }
+
+  /api/devices/approvals/{challengeId}/decision:
+    post:
+      tags: [devices]
+      summary: Appliquer une décision signée par l'appareil actif
+      parameters:
+        - in: path
+          name: challengeId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [signature]
+              properties:
+                signature: { type: string, minLength: 88, maxLength: 88, description: Base64 canonique de 64 octets Ed25519 }
+      responses:
+        "200":
+          description: Décision appliquée atomiquement
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [targetDeviceId, approverDeviceId, decision, status]
+                properties:
+                  targetDeviceId: { type: string, format: uuid }
+                  approverDeviceId: { type: string, format: uuid }
+                  decision: { type: string, enum: [approve, reject] }
+                  status: { type: string, enum: [active, revoked] }
+        "400": { description: Encodage de signature non canonique }
+        "403": { description: Signature invalide ou approbateur inactif }
+        "404": { description: Challenge absent pour le compte courant }
+        "409": { description: Challenge consommé ou identité/état modifié }
         "410": { description: Challenge expiré }
 
   /auth/register:

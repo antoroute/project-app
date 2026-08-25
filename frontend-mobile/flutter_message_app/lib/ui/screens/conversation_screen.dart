@@ -8,7 +8,6 @@ import '../../core/providers/auth_provider.dart';
 import '../../core/providers/conversation_provider.dart';
 import '../../core/models/message.dart';
 import '../../core/crypto/message_cipher_v2.dart';
-import '../../core/services/session_device_service.dart';
 import '../../core/services/performance_benchmark.dart';
 import '../../core/services/navigation_tracker_service.dart';
 import '../../core/services/notification_badge_service.dart';
@@ -539,11 +538,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
 
     try {
-      final currentUserId = context.read<AuthProvider>().userId;
-      if (currentUserId == null) return;
-
-      final myDeviceId = await SessionDeviceService.instance
-          .getOrCreateDeviceId(currentUserId);
+      final auth = context.read<AuthProvider>();
+      final currentUserId = auth.userId;
+      final myDeviceId = auth.currentDeviceId;
+      if (!auth.canUseMessaging ||
+          currentUserId == null ||
+          myDeviceId == null) {
+        return;
+      }
       final groupId = _conversationProvider.groupIdForConversation(
         message.conversationId,
       );

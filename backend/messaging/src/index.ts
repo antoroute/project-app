@@ -20,6 +20,7 @@ import type { AppDatabase } from './plugins/db.js';
 // Routes 
 import keysDevicesRoutes from './routes/keys.devices.js';
 import accountDeviceRoutes from './routes/account.devices.js';
+import accountDeviceApprovalRoutes from './routes/account.deviceApprovals.js';
 import messagesV2Routes from './routes/messages.v2.js';
 import conversationsRoutes from './routes/conversations.js';
 import groupsRoutes from './routes/groups.js';
@@ -74,6 +75,7 @@ async function build() {
   // Routes REST
   await app.register(keysDevicesRoutes);
   await app.register(accountDeviceRoutes);
+  await app.register(accountDeviceApprovalRoutes);
   await app.register(messagesV2Routes);
   await app.register(conversationsRoutes);
   await app.register(groupsRoutes);

@@ -17,7 +17,7 @@ import 'core/services/notification_badge_service.dart';
 import 'core/services/persistent_message_key_cache.dart';
 import 'core/crypto/key_manager_final.dart';
 import 'core/crypto/crypto_isolate_service.dart';
-import 'ui/screens/home_screen.dart';
+import 'ui/screens/device_trust_gate_screen.dart';
 import 'ui/screens/login_screen.dart';
 import 'ui/themes/app_theme.dart';
 
@@ -113,7 +113,7 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
         
         if (context.mounted) {
           final auth = context.read<AuthProvider>();
-          if (auth.isAuthenticated) {
+          if (auth.canUseMessaging) {
             // Vérifier la connectivité de manière asynchrone
             NetworkMonitorService().hasInternetConnection().then((hasNetwork) {
               if (hasNetwork) {
@@ -163,7 +163,7 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
   void didChangeDependencies() {
     super.didChangeDependencies();
     final auth = context.watch<AuthProvider>();
-      if (auth.isAuthenticated && !_socketInitialized) {
+      if (auth.canUseMessaging && !_socketInitialized) {
         _socketInitialized = true;
         
         // Initialiser les services
@@ -174,6 +174,11 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
         
         // Démarrer le nettoyage périodique
         PersistentMessageKeyCache.instance.startPeriodicCleanup();
+      } else if (!auth.canUseMessaging && _socketInitialized) {
+        _socketInitialized = false;
+        WebSocketHeartbeatService().stop();
+        WebSocketService.instance.disconnect();
+        PersistentMessageKeyCache.instance.stopPeriodicCleanup();
       }
   }
   
@@ -228,7 +233,9 @@ class _SecureChatAppState extends State<SecureChatApp> with WidgetsBindingObserv
           title: 'Secure Chat',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.theme,
-          home: auth.isAuthenticated ? const HomeScreen() : const LoginScreen(),
+          home: auth.isAuthenticated
+              ? const DeviceTrustGateScreen()
+              : const LoginScreen(),
         );
       },
     );

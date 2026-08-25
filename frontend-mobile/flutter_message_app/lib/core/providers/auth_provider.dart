@@ -11,25 +11,47 @@ import 'package:flutter_message_app/core/services/biometric_service.dart';
 import 'package:flutter_message_app/core/services/message_key_cache.dart';
 import 'package:flutter_message_app/core/services/persistent_message_key_cache.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
+import 'package:flutter_message_app/core/services/account_device_trust_service.dart';
+import 'package:flutter_message_app/core/models/account_device.dart';
+import 'package:flutter_message_app/core/crypto/account_device_identity_service.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 
 // pointycastle removed in v2
 
 /// Fournit le JWT et gère la mise à jour via biométrie.
 class AuthProvider extends ChangeNotifier {
+  AuthProvider({DeviceTrustTransport? deviceTrustTransport}) {
+    _deviceTrustService = AccountDeviceTrustService(
+      transport:
+          deviceTrustTransport ??
+          HttpDeviceTrustTransport(headers: getAuthHeaders),
+    );
+  }
+
   final FlutterSecureStorage _storage = const FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
   );
 
   final BiometricService _biometric = BiometricService();
+  late final AccountDeviceTrustService _deviceTrustService;
   String? _token;
+  DeviceTrustState _deviceTrustState = DeviceTrustState.unauthenticated;
+  AccountDevice? _currentAccountDevice;
+  String? _deviceTrustError;
 
   /// Retourne le JWT courant ou null si non connecté.
   String? get token => _token;
 
   /// Indique si l’utilisateur est authentifié.
   bool get isAuthenticated => _token != null;
+
+  DeviceTrustState get deviceTrustState => _deviceTrustState;
+  AccountDevice? get currentAccountDevice => _currentAccountDevice;
+  String? get currentDeviceId => _currentAccountDevice?.deviceId;
+  String? get deviceTrustError => _deviceTrustError;
+  bool get canUseMessaging =>
+      isAuthenticated && _deviceTrustState == DeviceTrustState.active;
 
   final Uri _loginUri = Uri.parse('https://auth.kavalek.fr/auth/login');
   final Uri _refreshUri = Uri.parse('https://auth.kavalek.fr/auth/refresh');
@@ -57,6 +79,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _clearDeviceSecurityState() async {
     await SessionDeviceService.instance.clearMemoryCache();
+    await AccountDeviceIdentityService.instance.clearMemoryCache();
     await KeyManagerFinal.instance.clearMemoryCaches();
     MessageKeyCache.instance.clear();
     await PersistentMessageKeyCache.instance.clear();
@@ -112,8 +135,7 @@ class AuthProvider extends ChangeNotifier {
     await _storage.write(key: 'accessToken', value: accessToken);
     await _storage.write(key: 'refreshToken', value: refreshToken);
     _token = accessToken;
-
-    notifyListeners();
+    await _resolveDeviceTrust(explicitEnrollment: true, password: password);
   }
 
   /// Inscription v2: enregistre l'utilisateur via /auth/register
@@ -144,6 +166,86 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
     _token = stored;
+    await _resolveDeviceTrust(explicitEnrollment: false);
+  }
+
+  Future<void> _resolveDeviceTrust({
+    required bool explicitEnrollment,
+    String? password,
+    bool announceChecking = true,
+  }) async {
+    final accountId = userId;
+    if (accountId == null) {
+      _deviceTrustState = DeviceTrustState.error;
+      _deviceTrustError = 'invalid_authenticated_account';
+      notifyListeners();
+      return;
+    }
+    if (announceChecking) {
+      _deviceTrustState = DeviceTrustState.checking;
+    }
+    _deviceTrustError = null;
+    if (announceChecking) notifyListeners();
+    try {
+      final result = await _deviceTrustService.enrollOrRefresh(
+        accountId: accountId,
+        explicitEnrollment: explicitEnrollment,
+        password: password,
+      );
+      _deviceTrustState = result.state;
+      _currentAccountDevice = result.device;
+    } on DeviceTrustException catch (error) {
+      _deviceTrustState = DeviceTrustState.error;
+      _deviceTrustError = error.code;
+      _currentAccountDevice = null;
+    } on AccountDeviceIdentityException catch (error) {
+      _deviceTrustState = DeviceTrustState.error;
+      _deviceTrustError = error.code;
+      _currentAccountDevice = null;
+    } catch (_) {
+      _deviceTrustState = DeviceTrustState.error;
+      _deviceTrustError = 'device_trust_unavailable';
+      _currentAccountDevice = null;
+    }
+    notifyListeners();
+  }
+
+  Future<void> refreshDeviceTrust({bool showChecking = true}) async {
+    await _resolveDeviceTrust(
+      explicitEnrollment: false,
+      announceChecking: showChecking,
+    );
+  }
+
+  Future<void> enrollCurrentDevice(String password) async {
+    await _resolveDeviceTrust(explicitEnrollment: true, password: password);
+  }
+
+  Future<List<AccountDevice>> fetchAccountDevices() async {
+    if (!canUseMessaging) {
+      throw const DeviceTrustException('active_device_required');
+    }
+    return _deviceTrustService.fetchDevices();
+  }
+
+  Future<void> decidePendingDevice({
+    required AccountDevice target,
+    required DeviceApprovalDecision decision,
+  }) async {
+    final accountId = userId;
+    final approverDeviceId = currentDeviceId;
+    if (!canUseMessaging || accountId == null || approverDeviceId == null) {
+      throw const DeviceTrustException('active_device_required');
+    }
+    final result = await _deviceTrustService.decide(
+      accountId: accountId,
+      approverDeviceId: approverDeviceId,
+      target: target,
+      decision: decision,
+    );
+    _deviceTrustState = result.state;
+    _currentAccountDevice = result.device;
+    _deviceTrustError = null;
     notifyListeners();
   }
 
@@ -219,7 +321,11 @@ class AuthProvider extends ChangeNotifier {
       // Mettre à jour le token en mémoire et en storage
       _token = newAccessToken;
       await _storage.write(key: 'accessToken', value: newAccessToken);
-      notifyListeners();
+      if (_deviceTrustState != DeviceTrustState.active) {
+        await _resolveDeviceTrust(explicitEnrollment: false);
+      } else {
+        notifyListeners();
+      }
       debugPrint('🔐 [Auth] Token rafraîchi avec succès');
       return true;
     } catch (e) {
@@ -248,6 +354,9 @@ class AuthProvider extends ChangeNotifier {
   /// Supprime le token et le refreshToken de la storage.
   Future<void> logout() async {
     _token = null;
+    _deviceTrustState = DeviceTrustState.unauthenticated;
+    _currentAccountDevice = null;
+    _deviceTrustError = null;
     await _storage.delete(key: 'accessToken');
     await _storage.delete(key: 'refreshToken');
     await _clearDeviceSecurityState();

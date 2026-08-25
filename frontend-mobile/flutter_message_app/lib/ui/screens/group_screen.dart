@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/providers/group_provider.dart';
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
-import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'package:flutter_message_app/ui/screens/qr_scan_screen.dart';
 import 'package:flutter_message_app/ui/screens/group_nav_screen.dart';
@@ -33,11 +32,11 @@ class _GroupScreenState extends State<GroupScreen> {
     setState(() => _loading = true);
     try {
       // 🚀 NOUVEAU: Générer les clés du groupe avec KeyManagerV2 (basé sur le nom du groupe)
-      final userId = context.read<AuthProvider>().userId;
-      if (userId == null) throw StateError('Utilisateur non authentifié');
-      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId(
-        userId,
-      );
+      final auth = context.read<AuthProvider>();
+      final deviceId = auth.currentDeviceId;
+      if (!auth.canUseMessaging || deviceId == null) {
+        throw StateError('Appareil actif requis');
+      }
       final groupName = _groupNameController.text.trim();
 
       // Utiliser le nom du groupe comme identifiant temporaire pour générer les clés groupe
@@ -82,11 +81,11 @@ class _GroupScreenState extends State<GroupScreen> {
     final String groupId = _groupIdController.text.trim();
     try {
       // 🚀 NOUVEAU: Générer les clés du groupe avec KeyManagerV2 (basé sur l'ID du groupe)
-      final userId = context.read<AuthProvider>().userId;
-      if (userId == null) throw StateError('Utilisateur non authentifié');
-      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId(
-        userId,
-      );
+      final auth = context.read<AuthProvider>();
+      final deviceId = auth.currentDeviceId;
+      if (!auth.canUseMessaging || deviceId == null) {
+        throw StateError('Appareil actif requis');
+      }
 
       // Utiliser l'ID du groupe pour générer les clés groupe
       await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);

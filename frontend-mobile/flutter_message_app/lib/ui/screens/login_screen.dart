@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
-import 'home_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -27,14 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = Provider.of<AuthProvider>(context, listen: false);
       
-      // Si déjà authentifié (par exemple après tryAutoLogin), aller directement à HomeScreen
-      if (auth.isAuthenticated && mounted) {
-        _goHome();
-        return;
-      }
-      
-      // Sinon, essayer la reconnexion biométrique
-      _tryBiometricLogin();
+      if (!auth.isAuthenticated) _tryBiometricLogin();
     });
   }
   
@@ -46,9 +38,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (hasRefresh && canBio) {
       try {
         final bool ok = await auth.loginWithBiometrics();
-        if (ok && mounted) {
-          _goHome();
-        } else if (mounted) {
+        if (!ok && mounted) {
           // Afficher un message d'erreur si la biométrie échoue
           SnackbarService.showError(
             context, 
@@ -66,13 +56,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _goHome() {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
-    );
-  }
-
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
@@ -83,11 +66,10 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text.trim(),
       );
       SnackbarService.showSuccess(context, 'Connexion réussie !');
-      _goHome();
     } catch (e) {
       SnackbarService.showError(context, 'Erreur de connexion : $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

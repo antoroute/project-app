@@ -554,6 +554,10 @@ export default async function accountDeviceRoutes(app: FastifyInstance) {
                 Type.String({ format: 'date-time' }),
                 Type.Null(),
               ]),
+              revokedAt: Type.Union([
+                Type.String({ format: 'date-time' }),
+                Type.Null(),
+              ]),
               createdAt: Type.String({ format: 'date-time' }),
               updatedAt: Type.String({ format: 'date-time' }),
             }),
@@ -566,7 +570,7 @@ export default async function accountDeviceRoutes(app: FastifyInstance) {
       const rows = await app.db.any(
         `SELECT device_id, identity_public_key, identity_key_version,
                 platform, device_name, status, proof_verified_at,
-                activated_at, created_at, updated_at
+                activated_at, revoked_at, created_at, updated_at
            FROM account_devices
           WHERE user_id = $1
           ORDER BY created_at ASC`,
@@ -583,6 +587,7 @@ export default async function accountDeviceRoutes(app: FastifyInstance) {
         status: row.status,
         proofVerifiedAt: isoTimestamp(row.proof_verified_at)!,
         activatedAt: isoTimestamp(row.activated_at),
+        revokedAt: isoTimestamp(row.revoked_at),
         createdAt: isoTimestamp(row.created_at)!,
         updatedAt: isoTimestamp(row.updated_at)!,
       }));

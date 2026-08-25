@@ -13,6 +13,7 @@ import '../../core/services/notification_badge_service.dart';
 import 'group_nav_screen.dart';
 import 'group_screen.dart';
 import 'login_screen.dart';
+import 'account_devices_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -144,6 +145,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.devices),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AccountDevicesScreen()),
+            ),
+            tooltip: 'Appareils du compte',
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,

@@ -8,7 +8,6 @@ import 'package:flutter_message_app/core/services/api_service.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'package:flutter_message_app/core/services/websocket_service.dart';
 import 'package:flutter_message_app/core/services/key_directory_service.dart';
-import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/notification_service.dart';
 import 'package:flutter_message_app/core/services/notification_badge_service.dart';
 import 'package:flutter_message_app/core/services/global_presence_service.dart';
@@ -143,11 +142,11 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   Future<String> _currentDeviceId() async {
-    final userId = _authProvider.userId;
-    if (userId == null) {
-      throw StateError('authenticated user is required for device identity');
+    final deviceId = _authProvider.currentDeviceId;
+    if (!_authProvider.canUseMessaging || deviceId == null) {
+      throw StateError('an active account device is required');
     }
-    return SessionDeviceService.instance.getOrCreateDeviceId(userId);
+    return deviceId;
   }
 
   void _handleAuthIdentityChange() {

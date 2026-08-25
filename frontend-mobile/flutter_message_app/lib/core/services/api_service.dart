@@ -272,6 +272,10 @@ class ApiService {
     required String pkKemB64,
     int keyVersion = 1,
   }) async {
+    if (!_authProvider.canUseMessaging ||
+        _authProvider.currentDeviceId != deviceId) {
+      throw StateError('an active current account device is required');
+    }
     final headers = await _buildHeaders();
     final uri = Uri.parse('$_baseUrl/keys/group/$groupId/devices');
     final payload = jsonEncode({

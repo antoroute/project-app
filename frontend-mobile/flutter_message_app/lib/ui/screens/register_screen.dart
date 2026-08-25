@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
-import 'home_screen.dart';
 import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -56,10 +55,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _passwordController.text.trim(),
       );
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
+      Navigator.popUntil(context, (route) => route.isFirst);
       SnackbarService.showSuccess(
         context,
         'Compte créé et connecté avec succès',

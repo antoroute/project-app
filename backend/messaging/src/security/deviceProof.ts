@@ -118,7 +118,7 @@ export function createDeviceChallengeMaterial(
   return { ...input, transcript: buildDeviceProofTranscript(input) };
 }
 
-export function verifyDeviceProof(
+export function verifyEd25519Signature(
   identityPublicKey: Buffer,
   transcript: Buffer,
   signature: Buffer,
@@ -136,4 +136,12 @@ export function verifyDeviceProof(
   } catch {
     return false;
   }
+}
+
+export function verifyDeviceProof(
+  identityPublicKey: Buffer,
+  transcript: Buffer,
+  signature: Buffer,
+): boolean {
+  return verifyEd25519Signature(identityPublicKey, transcript, signature);
 }

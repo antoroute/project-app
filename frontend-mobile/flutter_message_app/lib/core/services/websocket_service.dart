@@ -72,6 +72,12 @@ class WebSocketService {
   Future<void> connect(BuildContext context) async {
     // ✅ NOUVEAU: Sauvegarder la référence à AuthProvider
     _authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (!_authProvider!.canUseMessaging) {
+      debugPrint('🔒 [WebSocket] Connexion bloquée: appareil du compte non actif');
+      disconnect();
+      return;
+    }
+    _shouldReconnect = true;
     
     // ✅ NOUVEAU: Configurer l'écoute du réseau si pas déjà fait
     _setupNetworkListener();
@@ -87,6 +93,11 @@ class WebSocketService {
     
     if (_authProvider == null) {
       debugPrint('⚠️ [WebSocket] AuthProvider non disponible pour la connexion');
+      return;
+    }
+    if (!_authProvider!.canUseMessaging) {
+      debugPrint('🔒 [WebSocket] Reconnexion bloquée: appareil du compte non actif');
+      disconnect();
       return;
     }
     

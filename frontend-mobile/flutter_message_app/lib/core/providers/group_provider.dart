@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/models/group_info.dart';
@@ -5,7 +7,6 @@ import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/providers/conversation_provider.dart';
 import 'package:flutter_message_app/core/services/api_service.dart';
 import 'package:flutter_message_app/core/services/websocket_service.dart';
-import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/notification_badge_service.dart';
 import 'package:flutter_message_app/core/services/persistent_message_key_cache.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
@@ -22,6 +23,7 @@ class GroupProvider extends ChangeNotifier {
   bool _groupsLoaded = false;
   DateTime? _lastGroupsLoad;
   static const Duration _groupsCacheDuration = Duration(seconds: 10);
+  final Set<String> _provisionedForSession = <String>{};
 
   /// Expose la liste des groupes.
   List<GroupInfo> get groups => _groups;
@@ -58,11 +60,11 @@ class GroupProvider extends ChangeNotifier {
   }
 
   Future<String> _currentDeviceId() async {
-    final userId = _authProvider.userId;
-    if (userId == null) {
-      throw StateError('authenticated user is required for device identity');
+    final deviceId = _authProvider.currentDeviceId;
+    if (!_authProvider.canUseMessaging || deviceId == null) {
+      throw StateError('an active account device is required');
     }
-    return SessionDeviceService.instance.getOrCreateDeviceId(userId);
+    return deviceId;
   }
 
   Map<String, dynamic>? get groupDetail => _groupDetail;
@@ -154,9 +156,41 @@ class GroupProvider extends ChangeNotifier {
       _lastGroupsLoad = now;
 
       notifyListeners();
+
+      // L'affichage des groupes reste immédiat. La publication des clés propres
+      // à un appareil nouvellement activé se fait ensuite en arrière-plan.
+      unawaited(_provisionCurrentDeviceForGroups());
     } catch (e) {
       debugPrint('❌ GroupProvider.fetchUserGroups error: $e');
       rethrow;
+    }
+  }
+
+  Future<void> _provisionCurrentDeviceForGroups() async {
+    final deviceId = _authProvider.currentDeviceId;
+    if (!_authProvider.canUseMessaging || deviceId == null) return;
+
+    for (final group in _groups) {
+      final marker = '$deviceId:${group.groupId}';
+      if (!_provisionedForSession.add(marker)) continue;
+      try {
+        await KeyManagerFinal.instance.ensureKeysFor(group.groupId, deviceId);
+        final publicKeys = await KeyManagerFinal.instance.publicKeysBase64(
+          group.groupId,
+          deviceId,
+        );
+        await _apiService.publishGroupDeviceKey(
+          groupId: group.groupId,
+          deviceId: deviceId,
+          pkSigB64: publicKeys['pk_sig']!,
+          pkKemB64: publicKeys['pk_kem']!,
+        );
+      } catch (error) {
+        _provisionedForSession.remove(marker);
+        debugPrint(
+          '⚠️ Publication différée de clé impossible pour ${group.groupId}: $error',
+        );
+      }
     }
   }
 

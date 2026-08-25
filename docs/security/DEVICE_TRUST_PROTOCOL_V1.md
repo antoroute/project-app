@@ -1,6 +1,6 @@
 # Protocole de confiance des appareils V1
 
-Statut : contrat du registre backend, lot B de `TC-106`
+Statut : contrat du registre backend et de l'approbation, lots B/C de `TC-106`
 Dernière mise à jour : 2026-08-25
 Décision : option A de l'ADR-0005
 
@@ -19,7 +19,7 @@ Chaque compte utilisé sur une installation possède :
 - un nom d'affichage et une plateforme parmi `android|ios|windows|macos|unknown` ;
 - un état serveur `pending|active|revoked`.
 
-Le premier appareil **prouvé et réautorisé par mot de passe** d'un compte sans aucun historique d'activation devient `active`. Dès qu'une ligne du compte possède ou a possédé `activated_at`, aucun autre bootstrap n'est possible, même si tous les appareils actifs sont ensuite révoqués. Les appareils suivants restent `pending` jusqu'au protocole d'approbation du lot C.
+Le premier appareil **prouvé et réautorisé par mot de passe** d'un compte sans aucun historique d'activation devient `active`. Dès qu'une ligne du compte possède ou a possédé `activated_at`, aucun autre bootstrap n'est possible, même si tous les appareils actifs sont ensuite révoqués. Les appareils suivants restent `pending` jusqu'à une décision signée par un appareil `active` du même compte.
 
 ## Autorisation initiale de bootstrap
 
@@ -96,6 +96,87 @@ Y2lyY2xlaGF2ZW4vYWNjb3VudC1kZXZpY2UtcmVnaXN0cmF0aW9uL3YxABEREREREUERgREREREREREi
 
 Ce vecteur est figé dans `backend/messaging/test/device-proof-crypto.test.mjs`.
 
+## Approbation ou refus par un appareil actif
+
+L'approbation utilise un domaine et une transcription distincts de la preuve de
+possession. Un appareil `pending` ne peut ni approuver ni refuser un autre
+appareil. L'appareil actif choisit explicitement une décision `approve` ou
+`reject`, puis demande :
+
+```http
+POST /api/devices/{targetDeviceId}/approvals/challenge
+```
+
+avec son propre `approverDeviceId` et la décision. Le serveur relit et fige dans
+le challenge les deux clés publiques et leurs versions. Le client affiche le nom,
+la plateforme et une empreinte courte de la clé cible avant confirmation, mais
+l'empreinte n'est qu'une aide visuelle : la signature porte sur la clé complète.
+
+### Transcription binaire d'approbation V1
+
+Longueur totale : **216 octets**.
+
+| Offset | Taille | Valeur |
+|---:|---:|---|
+| 0 | 39 | ASCII `circlehaven/account-device-approval/v1` suivi de `00` |
+| 39 | 16 | UUID du challenge, octets réseau après retrait des tirets |
+| 55 | 16 | UUID du sujet JWT |
+| 71 | 16 | UUID de l'appareil approbateur |
+| 87 | 4 | version de sa clé d'identité, entier non signé big-endian |
+| 91 | 32 | sa clé publique Ed25519 brute |
+| 123 | 16 | UUID de l'appareil cible |
+| 139 | 4 | version de la clé d'identité cible, entier non signé big-endian |
+| 143 | 32 | clé publique Ed25519 brute de la cible |
+| 175 | 1 | décision : `01` pour approuver, `02` pour refuser |
+| 176 | 32 | nonce aléatoire du challenge |
+| 208 | 8 | expiration Unix en secondes, entier non signé big-endian |
+
+L'appareil actif signe exactement le champ `transcript` Base64 retourné par le
+serveur, sans le reconstruire depuis du JSON, puis transmet la signature Ed25519
+de 64 octets en Base64 canonique à :
+
+```http
+POST /api/devices/approvals/{challengeId}/decision
+```
+
+Une approbation valide fait passer la cible de `pending` à `active`. Un refus
+valide la fait passer de `pending` à `revoked`; le même identifiant ne peut alors
+pas être réinscrit silencieusement.
+
+### Vecteur d'approbation
+
+Entrées : challenge `11111111-1111-4111-8111-111111111111`, compte
+`22222222-2222-4222-8222-222222222222`, approbateur
+`33333333-3333-4333-8333-333333333333` version 7 avec clé `00` à `1f`, cible
+`44444444-4444-4444-8444-444444444444` version 9 avec clé `20` à `3f`, décision
+`approve`, nonce `a0` à `bf` et expiration `2000000000`.
+
+```text
+Y2lyY2xlaGF2ZW4vYWNjb3VudC1kZXZpY2UtYXBwcm92YWwvdjEAERERERERQRGBERERERERESIiIiIiIkIigiIiIiIiIiIzMzMzMzNDM4MzMzMzMzMzAAAABwABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fRERERERERESERERERERERAAAAAkgISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+PwGgoaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2+vwAAAAB3NZQA
+```
+
+Ce vecteur est figé dans
+`backend/messaging/test/device-approval-crypto.test.mjs`.
+
+### Concurrence et consommation des décisions
+
+- le challenge expire après 5 minutes et une signature bien encodée, valide ou
+  non, le consomme ;
+- compte, deux appareils, deux clés et versions, décision, nonce et expiration
+  sont tous authentifiés par la signature ;
+- le serveur revalide sous verrou que l'approbateur est toujours `active`, que
+  sa clé n'a pas changé et que la cible est toujours `pending` avec la même clé ;
+- les transitions sont `SERIALIZABLE` et verrouillent la ligne du compte : deux
+  décisions concurrentes ont un seul gagnant ;
+- la décision gagnante rend tous les autres challenges ouverts pour la même
+  cible caducs ;
+- les mêmes bornes anti-abus s'appliquent : 8 challenges ouverts, 20 créations
+  par compte et 6 par cible sur 10 minutes.
+
+L'activation ne transfère aucun secret ni message historique. Le nouvel appareil
+publie ensuite de nouvelles clés propres à chacun de ses cercles et ne devient
+destinataire que des futurs messages.
+
 ## Consommation, concurrence et anti-abus
 
 - Un challenge expire après 5 minutes.
@@ -118,6 +199,10 @@ Ce vecteur est figé dans `backend/messaging/test/device-proof-crypto.test.mjs`.
 
 ## Limites temporaires
 
-Le lot B n'active pas encore l'approbation signée par un appareil existant et ne lie pas encore les publications `group_device_keys` au statut du registre. Ce choix expand/contract maintient la compatibilité du prototype pendant le développement du client. Il ne faut donc pas considérer l'invariant 10 entièrement fermé avant les lots C et D.
+Le lot C fournit l'approbation signée, mais la liaison obligatoire des
+publications `group_device_keys` au statut du registre et la révocation globale
+relèvent du lot D. Ce choix expand/contract maintient la compatibilité du
+prototype pendant le développement du client. Il ne faut donc pas considérer
+les invariants 10 et 12 entièrement fermés avant ce lot.
 
 La preuve n'ajoute aucun aller-retour au chargement des conversations ou des messages : elle est exécutée uniquement lors de l'enrôlement d'un appareil.

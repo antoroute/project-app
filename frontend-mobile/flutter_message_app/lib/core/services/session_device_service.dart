@@ -32,6 +32,23 @@ class SessionDeviceService {
 
   String _deviceIdKey(String userId) => 'device_id_v2:account:$userId';
 
+  /// Charge un identifiant existant sans jamais en créer un implicitement.
+  Future<String?> loadDeviceId(String userId) async {
+    if (!_userIdPattern.hasMatch(userId)) {
+      throw ArgumentError.value(userId, 'userId', 'invalid account identifier');
+    }
+    final cached = _cachedDeviceIds[userId];
+    if (cached != null) return cached;
+
+    final existing = await _storage.read(_deviceIdKey(userId));
+    if (existing == null) return null;
+    if (!_userIdPattern.hasMatch(existing)) {
+      throw StateError('stored device identifier is invalid');
+    }
+    _cachedDeviceIds[userId] = existing;
+    return existing;
+  }
+
   Future<String> getOrCreateDeviceId(String userId) async {
     if (!_userIdPattern.hasMatch(userId)) {
       throw ArgumentError.value(userId, 'userId', 'invalid account identifier');
