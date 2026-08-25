@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import bcrypt from 'bcrypt';
+import { createHash, randomBytes } from 'node:crypto';
 
 import {
   authenticatedUserId,
@@ -19,6 +20,13 @@ const LoginBody = Type.Object({
   email: Type.String({ format: 'email' }),
   password: Type.String({ minLength: 8 })
 });
+
+const DeviceBootstrapGrantBody = Type.Object(
+  { password: Type.String({ minLength: 8, maxLength: 1024 }) },
+  { additionalProperties: false },
+);
+
+const DEVICE_BOOTSTRAP_GRANT_TTL_SECONDS = 5 * 60;
 
 function bearerToken(header: string | undefined): string | null {
   const match = header?.match(/^Bearer ([^\s]+)$/);
@@ -98,6 +106,71 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const user = await app.db.one(`SELECT id, email, username, created_at FROM users WHERE id=$1`, [userId]);
     return user;
+  });
+
+  app.post('/device-bootstrap-grant', {
+    onRequest: [app.authenticate],
+    config: { rateLimit: { max: 5, timeWindow: '10 minutes' } },
+    schema: {
+      body: DeviceBootstrapGrantBody,
+      response: {
+        201: Type.Object({
+          grant: Type.String({ minLength: 43, maxLength: 43 }),
+          expiresAt: Type.String({ format: 'date-time' }),
+        }),
+      },
+    },
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const userId = authenticatedUserId(req);
+    const { password } = req.body as { password: string };
+    const user = await app.db.one(
+      'SELECT password FROM users WHERE id = $1',
+      [userId],
+    ).catch(() => null);
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return reply.code(401).send({ error: 'invalid_credentials' });
+    }
+
+    const grant = randomBytes(32).toString('base64url');
+    const grantHash = createHash('sha256').update(grant, 'ascii').digest();
+    const expiresAtUnixSeconds =
+      Math.floor(Date.now() / 1000) + DEVICE_BOOTSTRAP_GRANT_TTL_SECONDS;
+
+    let createdGrant;
+    try {
+      createdGrant = await app.db.one(
+        `WITH account_lock AS MATERIALIZED (
+           SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+         ), cleanup AS (
+         DELETE FROM device_bootstrap_grants
+          WHERE user_id = $1
+            AND COALESCE(consumed_at, expires_at) < NOW() - INTERVAL '7 days'
+         ), recent AS (
+           SELECT COUNT(*)::int AS count
+             FROM device_bootstrap_grants, account_lock
+            WHERE user_id = $1
+              AND created_at > NOW() - INTERVAL '10 minutes'
+         )
+         INSERT INTO device_bootstrap_grants(user_id, token_hash, expires_at)
+         SELECT $1,$2,to_timestamp($3)
+           FROM recent
+          WHERE recent.count < 5
+         RETURNING id`,
+        [userId, grantHash, expiresAtUnixSeconds],
+      );
+    } catch (error) {
+      if ((error as Error).message !== 'No rows') throw error;
+      createdGrant = null;
+    }
+    if (!createdGrant) {
+      return reply.code(429).send({ error: 'too_many_bootstrap_grants' });
+    }
+
+    reply.code(201);
+    return {
+      grant,
+      expiresAt: new Date(expiresAtUnixSeconds * 1000).toISOString(),
+    };
   });
 
   app.post('/logout', {}, async (req: FastifyRequest, reply: FastifyReply) => {

@@ -17,7 +17,7 @@ Cette documentation est la source de contexte pour le produit, l'architecture, l
 
 - Produit : [vision](product/PRODUCT.md), [périmètre V1](product/V1_SCOPE.md), [décisions V1](product/V1_DECISIONS.md), [décision de nom](product/NAME_DECISION.md)
 - Architecture : [système](architecture/SYSTEM.md), [fonctionnement observé](architecture/FUNCTIONAL_REFERENCE.md), [traçabilité](architecture/TRACEABILITY.md), [modèle de données](architecture/DATA_MODEL.md), [compatibilité plateformes](architecture/PLATFORM_COMPATIBILITY.md)
-- Sécurité : [menaces](security/THREAT_MODEL.md), [invariants](security/SECURITY_INVARIANTS.md), [vue du protocole](security/CRYPTO_PROTOCOL.md), [spécification V2 observée](security/CRYPTOGRAPHY_V2.md)
+- Sécurité : [menaces](security/THREAT_MODEL.md), [invariants](security/SECURITY_INVARIANTS.md), [vue du protocole](security/CRYPTO_PROTOCOL.md), [spécification V2 observée](security/CRYPTOGRAPHY_V2.md), [preuve de confiance des appareils V1](security/DEVICE_TRUST_PROTOCOL_V1.md)
 - Décisions : [registre ADR](adr/README.md)
 - API : [contrats](api/README.md)
 - Exploitation : [inventaire historique](operations/PRODUCTION_INVENTORY.md), [inventaire staging](operations/STAGING_INVENTORY.md), [archive du code initial](operations/CODE_ARCHIVE.md), [environnements](operations/ENVIRONMENTS.md), [déploiement](operations/DEPLOYMENT.md), [sauvegarde/restauration](operations/BACKUP_RESTORE.md), [incidents](operations/INCIDENT_RESPONSE.md)

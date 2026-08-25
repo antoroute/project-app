@@ -32,6 +32,32 @@ components:
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time, nullable: true }
 
+    AccountDevice:
+      type: object
+      required: [deviceId, identityPublicKey, identityKeyVersion, platform, deviceName, status, proofVerifiedAt, createdAt, updatedAt]
+      properties:
+        deviceId: { type: string, format: uuid }
+        identityPublicKey: { type: string, description: Base64 canonique de la clé Ed25519 brute de 32 octets }
+        identityKeyVersion: { type: integer, minimum: 1 }
+        platform: { type: string, enum: [android, ios, windows, macos, unknown] }
+        deviceName: { type: string, minLength: 1, maxLength: 64 }
+        status: { type: string, enum: [pending, active, revoked] }
+        proofVerifiedAt: { type: string, format: date-time }
+        activatedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    DeviceRegistrationChallenge:
+      type: object
+      required: [challengeId, deviceId, challenge, transcript, expiresAt, algorithm]
+      properties:
+        challengeId: { type: string, format: uuid }
+        deviceId: { type: string, format: uuid }
+        challenge: { type: string, description: Base64 canonique du nonce CSPRNG de 32 octets }
+        transcript: { type: string, description: Base64 des 163 octets exacts à signer }
+        expiresAt: { type: string, format: date-time }
+        algorithm: { type: string, enum: [Ed25519] }
+
     RecipientWrap:
       type: object
       required: [userId, deviceId, wrap, nonce]
@@ -95,6 +121,83 @@ components:
         createdAt: { type: string, format: date-time }
 
 paths:
+  /api/devices:
+    get:
+      tags: [devices]
+      summary: Lister les identités d'appareil du sujet authentifié
+      responses:
+        "200":
+          description: Registre du compte courant
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AccountDevice' }
+
+  /api/devices/registrations/challenge:
+    post:
+      tags: [devices]
+      summary: Créer une transcription de preuve Ed25519 à usage unique
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [deviceId, identityPublicKey, platform, deviceName]
+              properties:
+                deviceId: { type: string, format: uuid }
+                identityPublicKey: { type: string, minLength: 44, maxLength: 44 }
+                platform: { type: string, enum: [android, ios, windows, macos, unknown] }
+                deviceName: { type: string, minLength: 1, maxLength: 64 }
+                bootstrapGrant: { type: string, minLength: 43, maxLength: 43, description: Requis si cette preuve doit réaliser le tout premier bootstrap }
+      responses:
+        "201":
+          description: Challenge créé pour 5 minutes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceRegistrationChallenge' }
+        "403": { description: Identifiant d'appareil révoqué ou grant de bootstrap invalide }
+        "409": { description: Identité différente déjà liée à cet UUID d'appareil }
+        "429": { description: Limite de challenges atteinte }
+
+  /api/devices/registrations/{challengeId}/proof:
+    post:
+      tags: [devices]
+      summary: Prouver la possession de la clé privée d'identité
+      parameters:
+        - in: path
+          name: challengeId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [signature]
+              properties:
+                signature: { type: string, minLength: 88, maxLength: 88, description: Base64 canonique de 64 octets Ed25519 }
+      responses:
+        "201":
+          description: Preuve valide ; premier appareil actif, suivants en attente
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deviceId, status, bootstrap]
+                properties:
+                  deviceId: { type: string, format: uuid }
+                  status: { type: string, enum: [pending, active] }
+                  bootstrap: { type: boolean }
+        "403": { description: Signature invalide, bootstrap non autorisé ou appareil révoqué }
+        "404": { description: Challenge absent pour le sujet }
+        "409": { description: Challenge consommé ou identité en conflit }
+        "410": { description: Challenge expiré }
+
   /auth/register:
     post:
       tags: [auth]
@@ -164,6 +267,34 @@ paths:
       responses:
         "200": { description: Refresh token révoqué ou session déjà absente }
         "401": { description: Token fourni invalide ou destiné à un autre usage }
+
+  /auth/device-bootstrap-grant:
+    post:
+      tags: [auth, devices]
+      summary: Réautoriser par mot de passe le bootstrap du premier appareil
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { type: string, minLength: 8, maxLength: 1024 }
+      responses:
+        "201":
+          description: Grant opaque valable 5 minutes, valeur brute non stockée
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grant, expiresAt]
+                properties:
+                  grant: { type: string, minLength: 43, maxLength: 43, description: Base64URL canonique sans padding de 32 octets CSPRNG }
+                  expiresAt: { type: string, format: date-time }
+        "401": { description: Access token ou mot de passe invalide }
+        "429": { description: Limite de réautorisations atteinte }
 
   /groups:
     post:

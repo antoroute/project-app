@@ -527,4 +527,11 @@ assert_status 401 "$base_url/auth/refresh" \
   -H "authorization: Bearer $refresh_token" \
   -H "x-app-secret: $app_secret"
 
-echo "Smoke tests passed: health, tokens, identity, atomic conversation/message/read, concurrent join/decision/key races, owner/admin ACL, role isolation and Socket.IO handshake."
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+docker compose \
+  --project-name trust-circle-staging \
+  --env-file "$env_file" \
+  -f "$script_dir/compose.yml" \
+  exec -T messaging node dist/tools/deviceTrustStagingSmoke.js
+
+echo "Smoke tests passed: health, tokens, identity, device trust, atomic conversation/message/read, concurrent join/decision/key races, owner/admin ACL, role isolation and Socket.IO handshake."

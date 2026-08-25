@@ -5,6 +5,8 @@ Dernière mise à jour : 2026-08-25
 
 Ce document donne l'orientation de sécurité. La description champ par champ du code actuel, des clés, octets signés, caches et métadonnées est dans [`CRYPTOGRAPHY_V2.md`](CRYPTOGRAPHY_V2.md).
 
+La preuve d'identité d'appareil au niveau du compte est un protocole distinct, documenté octet par octet dans [`DEVICE_TRUST_PROTOCOL_V1.md`](DEVICE_TRUST_PROTOCOL_V1.md). Elle ne modifie pas les enveloppes de message V2.
+
 ## État V2 observé
 
 Le client emploie X25519 pour établir des secrets avec les clés publiques statiques des appareils, HKDF-SHA256 pour dériver des clés, AES-256-GCM pour le contenu et l'enveloppement, et Ed25519 pour signer. Une paire X25519 éphémère est produite par message et une clé de message aléatoire est enveloppée séparément pour chaque appareil destinataire.

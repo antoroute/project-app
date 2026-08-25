@@ -25,9 +25,9 @@ Le schéma est logique. L'inventaire réel du LXC et du staging est conservé da
 | Composant | Responsabilité | État |
 |---|---|---|
 | Client Flutter | UI, identité d'appareil, chiffrement/déchiffrement, cache et synchronisation | Prototype mobile, desktop incomplet |
-| Auth Fastify | comptes, mots de passe, JWT, refresh tokens | Access Ed25519 et refresh HS256 séparés par `TC-102` ; cycle de compte incomplet |
-| Messaging Fastify | cercles, membres, conversations, clés publiques, messages et temps réel | Fonctionnel mais contrôles ACL incomplets |
-| PostgreSQL | identités, appartenances, clés publiques, enveloppes chiffrées, sessions | Initialisé par script, sans migrations versionnées |
+| Auth Fastify | comptes, mots de passe, JWT, refresh tokens et réautorisation du premier appareil | Access Ed25519 et refresh HS256 séparés ; grant de bootstrap opaque et court par `TC-106` |
+| Messaging Fastify | registre d'appareils, cercles, membres, conversations, clés publiques, messages et temps réel | Preuve d'appareil présente ; approbation/révocation globales encore incomplètes |
+| PostgreSQL | identités, appartenances, clés publiques, enveloppes chiffrées, sessions | Initialisé par script ; trois migrations réversibles versionnées mais encore appliquées manuellement |
 | Redis | prévu pour présence/pub-sub | Non utilisé par l'application ; présence en mémoire du processus |
 | Nginx/proxy externe | terminaison/routage HTTP(S) | Staging loopback sans exposition publique ; TLS restreint reporté à `TC-113` |
 | Site public | acquisition, téléchargements, légal, support | à créer |

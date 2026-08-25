@@ -1,7 +1,8 @@
 # ADR-0005 — Ancrage de confiance des appareils
 
-Statut : Proposée, décision propriétaire requise
+Statut : Acceptée — option A
 Date : 2026-08-25
+Décision propriétaire : 2026-08-25
 Tâche : `TC-106`
 
 ## Contexte
@@ -40,9 +41,9 @@ Avantage : aucune construction intermédiaire.
 
 Risques : les invariants 10 à 12 restent ouverts pendant toute la Phase 1 et une clé peut toujours être substituée/enregistrée avec un simple access token. Cette option bloque la fermeture de sécurité et la bêta.
 
-## Décision recommandée
+## Décision
 
-Retenir l'option A. Les signatures de preuve et d'approbation utiliseront des transcriptions binaires versionnées, préfixées par un domaine et fournies telles quelles par le serveur au client. Le détail octet par octet, les expirations, limites et vecteurs seront figés dans le lot B avant implémentation.
+L'option A est retenue. Les signatures de preuve et d'approbation utilisent des transcriptions binaires versionnées, préfixées par un domaine et fournies telles quelles par le serveur au client. Le format de preuve de possession du lot B est figé dans [`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md). Le format distinct d'approbation sera spécifié dans le lot C avant implémentation.
 
 Le bootstrap du premier appareil ne constitue pas une récupération. Si un appareil actif a déjà existé puis a été perdu/révoqué, seul le parcours renforcé de récupération peut créer une nouvelle identité.
 

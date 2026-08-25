@@ -8,6 +8,7 @@ Dernière mise à jour : 2026-08-25
 Le script `infrastructure/postgres/init.sql` définit :
 
 - `users` : compte, e-mail, hash de mot de passe, nom ;
+- `device_bootstrap_grants`, `account_devices`, `device_registration_challenges` : autorisation de réauthentification hachée, identité Ed25519 de compte/appareil, état de confiance et preuves de possession à usage unique ;
 - `groups`, `user_groups` : cercle, appartenance et rôle `admin|member` ; l'unique propriétaire reste `groups.creator_id` ;
 - `join_requests`, `join_request_votes` : demandes et votes d'entrée ;
 - `group_keys`, `group_device_keys` : clés publiques par cercle/utilisateur/appareil ;
@@ -16,15 +17,15 @@ Le script `infrastructure/postgres/init.sql` définit :
 - `refresh_tokens` : sessions renouvelables ;
 - `notifications` : événements applicatifs utilisateur.
 
-Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. `TC-104` ajoute le premier couple SQL montant/descendant pour le rôle. `TC-105` ajoute le second : un index unique partiel sur `(group_id, user_id)` lorsque `join_requests.status = 'pending'`. Il interdit plusieurs demandes simultanément en attente sans empêcher l'historique accepté/rejeté. Ces scripts restent à reprendre dans l'outil et la baseline qui seront choisis par `TC-201`.
+Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. `TC-104` ajoute le premier couple SQL montant/descendant pour le rôle. `TC-105` ajoute le second : un index unique partiel sur `(group_id, user_id)` lorsque `join_requests.status = 'pending'`. `TC-106` ajoute le troisième couple pour le registre de compte et les challenges. Ces scripts restent à reprendre dans l'outil et la baseline qui seront choisis par `TC-201`.
 
 La circulation de ces données par parcours est décrite dans [`FUNCTIONAL_REFERENCE.md`](FUNCTIONAL_REFERENCE.md), et les fichiers responsables dans [`TRACEABILITY.md`](TRACEABILITY.md).
 
 ## Problèmes structurels à résoudre
 
-- Pas encore d'outil, de registre appliqué ni de baseline globale de migrations ; les changements `TC-104` et `TC-105` possèdent des scripts SQL versionnés mais sont encore appliqués manuellement.
+- Pas encore d'outil, de registre appliqué ni de baseline globale de migrations ; les changements `TC-104`, `TC-105` et `TC-106` possèdent des scripts SQL versionnés mais sont encore appliqués manuellement.
 - Le stockage des rôles est explicite, mais le transfert de propriété et l'interface complète de gestion restent à concevoir.
-- Cycle de vie des appareils incomplet : preuve d'approbation, révocation, rotation et rattachement au compte.
+- Le rattachement au compte et la preuve de possession sont implémentés par le lot B de `TC-106` ; approbation, révocation globale et rotation restent à faire.
 - Horodatages mêlant `timestamp` et `timestamptz`.
 - Énumérations métier parfois représentées par texte libre.
 - Messages sans séquence serveur/cursor robuste pour la synchronisation.

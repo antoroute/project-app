@@ -53,6 +53,11 @@ bash deploy/staging/smoke-test.sh \
   /opt/trust-circle-staging/shared/staging.env
 ```
 
+Le smoke test lance aussi, dans le conteneur Messaging, le parcours réel de
+confiance d'appareil : réauthentification du bootstrap, preuve Ed25519,
+rejet du rejeu, second appareil `pending` et isolation du registre. Il ne
+journalise aucun mot de passe, token, grant ou matériel privé.
+
 Ne jamais exécuter `docker compose config` sans `--quiet` dans une sortie partagée : la configuration résolue contient des secrets.
 
 ## Inspection sûre

@@ -8,7 +8,7 @@ Une ADR capture une décision durable, ses alternatives et ses conséquences. Le
 | [ADR-0002](ADR-0002-perimetre-v1.md) | Périmètre fonctionnel V1 | Acceptée |
 | [ADR-0003](ADR-0003-protocole-crypto-v3.md) | Standard cryptographique V3 | Proposée |
 | [ADR-0004](ADR-0004-nom-produit.md) | Nom public CircleHaven — Trust Circle | Acceptée |
-| [ADR-0005](ADR-0005-confiance-appareil-compte.md) | Ancrage de confiance des appareils | Proposée |
+| [ADR-0005](ADR-0005-confiance-appareil-compte.md) | Ancrage de confiance des appareils | Acceptée |
 
 ## Format
 

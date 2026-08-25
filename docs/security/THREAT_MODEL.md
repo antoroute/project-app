@@ -1,7 +1,7 @@
 # Modèle de menace
 
 Statut : baseline V1, document vivant
-Dernière mise à jour : 2026-08-23
+Dernière mise à jour : 2026-08-25
 
 ## Périmètre et objectifs
 
@@ -58,6 +58,8 @@ Il ne promet pas l'anonymat, la résistance à un appareil déjà compromis, la 
 8. Envoi répété après timeout et redémarrage du client.
 9. Exfiltration de PostgreSQL et des sauvegardes sans appareils clients.
 10. Notification et rapport de crash inspectés pour vérifier l'absence de contenu.
+11. Une session volée tente d'enrôler un appareil sans posséder la clé privée annoncée.
+12. Deux appareils tentent simultanément le bootstrap initial ou rejouent le même challenge.
 
 ## Risques résiduels à communiquer
 

@@ -145,6 +145,19 @@ Depuis `TC-104`, `groups.creator_id` détermine l'unique propriétaire et `user_
 
 `SessionDeviceService` valide l'UUID du sujet, crée un UUID propre à ce compte et le stocke sous `device_id_v2:account:<userId>`. L'ancien `device_id_v1` global n'est pas réutilisé implicitement. Le cache mémoire des identifiants est purgé à la déconnexion ou au changement de compte.
 
+### Registre de confiance du compte
+
+Le lot B de `TC-106` ajoute dans Messaging un registre distinct des clés de cercle :
+
+1. pour un premier appareil, Auth revérifie le mot de passe et remet un grant opaque de 5 minutes dont seule l'empreinte est stockée ;
+2. le client demande un challenge authentifié avec son UUID, sa clé publique Ed25519 d'identité, sa plateforme, son nom et ce grant initial ;
+3. le serveur renvoie un nonce CSPRNG et les 163 octets exacts à signer ;
+4. le client signe localement puis transmet uniquement la signature ;
+5. Messaging consomme le challenge à la première tentative et vérifie Ed25519 ;
+6. le premier appareil réautorisé et prouvé devient `active`, les suivants restent `pending`.
+
+Les transitions sont sérialisées en verrouillant la ligne du compte. Un autre sujet JWT ne peut pas consulter ou consommer le challenge. `GET /api/devices` ne retourne que le registre du sujet. La spécification complète et le vecteur sont dans [`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md).
+
 ### Paire par cercle
 
 Pour chaque couple `groupId/deviceId`, `KeyManagerFinal` génère :
@@ -168,7 +181,7 @@ Les seeds privés et clés publiques sont stockés via `flutter_secure_storage`.
 - Messaging refuse qu'un appareil révoqué republie simplement les mêmes clés et vérifie le statut actif lors d'un envoi. Publication et révocation partagent des contrôles verrouillés ; l'upsert conditionnel ne peut jamais réactiver une ligne `revoked`, même en concurrence.
 - Les caches locaux tentent d'invalider les entrées associées.
 
-Écarts : le cloisonnement local par compte est réalisé, mais il n'existe encore ni registre de compte, ni preuve de possession, ni approbation par un appareil actif, ni notification de changement de clé (`TC-106`, lots B à D). Une révocation n'efface pas les messages ou clés déjà obtenus par l'appareil.
+Écarts : le cloisonnement local, le registre de compte et la preuve de possession backend sont réalisés, mais le client n'exécute pas encore ce parcours. Il n'existe encore ni approbation par un appareil actif, ni liaison obligatoire aux clés de cercle, ni notification de changement de clé (`TC-106`, lots C et D). Une révocation n'efface pas les messages ou clés déjà obtenus par l'appareil.
 
 ## Conversations
 

@@ -1,6 +1,6 @@
 # TC-106 — Sécuriser le cycle de confiance des appareils
 
-Statut : En cours — lot A terminé, décision ADR-0005 requise avant le lot B
+Statut : En cours — lot A terminé, lot B en validation
 Priorité : P0 sécurité et identité cryptographique
 Décision : propriétaire pour l'architecture d'approbation, mainteneur pour l'implémentation
 Dépendances : TC-104, TC-105
@@ -35,6 +35,8 @@ Le backend accepte une clé publique du sujet JWT sans preuve que le client poss
 - Registre d'appareils au niveau du compte, états `pending|active|revoked` et clés d'identité publiques.
 - Challenge aléatoire à usage unique, expirant, lié au compte/appareil/clé et signé par le nouvel appareil.
 - Bootstrap borné du premier appareil ; les appareils suivants restent `pending`.
+
+Implémentation : registre `account_devices`, challenges à usage unique, transcription binaire V1, preuve Ed25519 et liste des appareils du sujet. Le détail normatif est dans `docs/security/DEVICE_TRUST_PROTOCOL_V1.md`.
 
 ### Lot C — Approbation et expérience multi-appareil
 
@@ -96,16 +98,30 @@ Preuves locales du 2026-08-25 : formatage des fichiers Dart touchés ; `dart ana
 - Une révocation concurrente gagne toujours sur publication/rotation et bloque les nouveaux messages.
 - Smoke tests réels sur `trust-circle-staging`, avec sauvegarde et rollback avant migration.
 
+## Critères d'acceptation du lot B
+
+- [x] L'option A est acceptée dans l'ADR-0005 et séparée du protocole de messages V3.
+- [x] Le schéma montant et descendant du registre/challenges est versionné.
+- [x] Le challenge est CSPRNG, expire après 5 minutes et lie compte, appareil, clé et expiration.
+- [x] La signature Ed25519 porte sur une transcription binaire documentée et testée par vecteur figé.
+- [x] Une signature invalide, un rejeu, une expiration ou un autre compte n'active aucun appareil.
+- [x] Deux preuves concurrentes ne peuvent produire qu'un seul bootstrap actif.
+- [x] Une session sans clé privée ne peut pas inscrire un appareil prouvé.
+- [x] Un access token volé ne peut pas bootstrap une clé choisie sans réauthentification par mot de passe.
+- [x] Les créations sont bornées par compte, appareil et nombre de challenges actifs.
+- [ ] La migration montée/descente et les routes sont validées sur PostgreSQL staging après sauvegarde.
+- [ ] Les healthchecks, smoke tests et vérifications SQL staging réussissent après déploiement.
+
 ## Migration et compatibilité
 
 Le lot A conserve les données locales historiques mais cesse de les sélectionner. Il ne les supprime pas automatiquement : une future migration explicite devra prouver à quel compte elles appartiennent ou les laisser inaccessibles. Cela peut imposer une nouvelle inscription d'appareil aux utilisateurs du prototype, acceptable avant publication et préférable à un rattachement silencieux au mauvais compte.
 
 Les lots backend utiliseront des migrations expand/contract compatibles avec la release précédente. Aucune donnée réelle n'est supprimée automatiquement.
 
-## Risques résiduels pendant le lot A
+## Risques résiduels pendant les lots A et B
 
-Tant que les lots B à D ne sont pas terminés, le backend continue d'accepter les publications historiques sans preuve ni approbation. Le lot A ferme le croisement local et la régénération silencieuse mais ne satisfait donc pas encore entièrement les invariants 10 et 12.
+Tant que les lots C et D ne sont pas terminés, le backend continue d'accepter les publications historiques `group_device_keys` sans exiger le nouveau registre. Le lot B prouve et enregistre l'identité de compte, mais l'approbation des appareils suivants, la liaison aux clés de cercle et la révocation globale ne satisfont donc pas encore entièrement les invariants 10 et 12.
 
-## Décision humaine nécessaire
+## Décision humaine
 
-Choisir l'architecture d'approbation dans `ADR-0005`. L'option recommandée est une identité d'appareil au niveau du compte, distincte des clés de chiffrement propres à chaque cercle. Elle donne un seul parcours d'approbation pour Android/Windows/iOS et évite de demander une approbation séparée dans chaque cercle.
+Le propriétaire a accepté l'option A de l'ADR-0005 le 2026-08-25 : une identité Ed25519 au niveau du compte, distincte des clés de chiffrement propres à chaque cercle.

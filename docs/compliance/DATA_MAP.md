@@ -1,7 +1,7 @@
 # Cartographie des données
 
 Statut : brouillon technique, à compléter avec conseil juridique
-Dernière mise à jour : 2026-08-23
+Dernière mise à jour : 2026-08-25
 
 | Catégorie | Exemples | Localisation | Lisible serveur | Finalité | Rétention cible |
 |---|---|---|---|---|---|
@@ -9,6 +9,7 @@ Dernière mise à jour : 2026-08-23
 | Session | hash refresh, appareil, dates/IP si journalisées | PostgreSQL/logs | oui | authentification/sécurité | à définir, minimale |
 | Graphe social | cercles, membres, rôles, conversations | PostgreSQL messaging | oui | fournir le service | durée du compte/cercle + règles à définir |
 | Clés publiques | identité/appareil, versions, révocation | PostgreSQL + clients | oui, publiques | acheminer/vérifier E2EE | historique de sécurité à définir |
+| Enrôlement appareil | nom, plateforme, clé publique, état, empreinte de grant, challenge et résultat | PostgreSQL partagé | oui, sauf secrets bruts absents | réauthentification, preuve de possession et sécurité du compte | grants/challenges : 7 jours après consommation/expiration ; registre : historique de sécurité à définir |
 | Contenu message | texte en clair | appareils destinataires | non attendu | communication | local jusqu'à suppression/retrait du compte |
 | Enveloppe E2EE | ciphertext, wraps, signature, horodatage | PostgreSQL + clients | opaque sauf métadonnées | livraison/synchronisation | 90 jours serveur, sauf suppression antérieure |
 | Notifications | type, état, payload minimal | PostgreSQL/push | oui si présent | alerter sans contenu | courte, à définir |

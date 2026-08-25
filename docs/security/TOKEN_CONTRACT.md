@@ -1,7 +1,7 @@
 # Contrat des jetons d'authentification
 
 Statut : contrat initial appliqué par `TC-102`
-Dernière mise à jour : 2026-08-24
+Dernière mise à jour : 2026-08-25
 
 ## Séparation des usages
 
@@ -17,6 +17,12 @@ Dernière mise à jour : 2026-08-24
 | Stockage serveur | aucun | empreinte SHA-256 dans `refresh_tokens.token_hash` |
 
 Les clés sont obligatoires et générées par CSPRNG. La clé privée access est encodée dans `JWT_ACCESS_PRIVATE_KEY_B64` et n'est injectée que dans Auth. `JWT_ACCESS_PUBLIC_KEY_B64` est injectée dans Auth et Messaging ; elle permet de vérifier mais pas de signer. `APP_SECRET` est indépendant et temporaire jusqu'à `TC-109`.
+
+## Grant opaque de bootstrap d'appareil
+
+Le grant utilisé pour autoriser le tout premier appareil n'est pas un troisième JWT et ne peut appeler aucune route métier. Après access token valide et nouvelle comparaison bcrypt du mot de passe, Auth génère 32 octets CSPRNG, les retourne une seule fois en Base64URL et ne conserve que `SHA-256(ASCII(grant))` pendant 5 minutes dans `device_bootstrap_grants`.
+
+Messaging accepte cette valeur uniquement comme paramètre d'un challenge de preuve d'appareil. Le grant n'est consommé que si une preuve Ed25519 valide est sur le point de réaliser le premier bootstrap. Un access token volé seul ne permet donc pas de choisir et activer la première clé d'identité.
 
 ## Header et claims obligatoires
 

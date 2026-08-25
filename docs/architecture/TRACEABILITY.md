@@ -1,7 +1,7 @@
 # Matrice de traçabilité fonctionnelle et sécurité
 
 Dernière mise à jour : 2026-08-25
-Code observé : branche `main`, changement `TC-106` lot A
+Code observé : branche `main`, changement `TC-106` lot B
 
 Cette matrice aide à retrouver rapidement le code réellement responsable d'un comportement. Elle n'atteste ni la qualité ni la sécurité d'une fonction : consulter la référence fonctionnelle, les invariants et les tâches liées avant toute modification.
 
@@ -46,6 +46,7 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 |---|---|---|---|
 | démarrage/configuration | [`index.ts`](../../backend/auth/src/index.ts), [`config.ts`](../../backend/auth/src/config.ts) | variables d'environnement | `TC-101`, `TC-108` |
 | routes compte/session | [`auth.ts`](../../backend/auth/src/routes/auth.ts) | `users`, `refresh_tokens` | `TC-102`, `TC-401` à `TC-408` |
+| réautorisation du premier appareil | [`auth.ts`](../../backend/auth/src/routes/auth.ts) | `device_bootstrap_grants`, empreinte SHA-256 | `TC-106` lot B |
 | JWT access/refresh | [`jwt.ts`](../../backend/auth/src/security/jwt.ts) | Ed25519/HS256 | `TC-102` terminé |
 | faux secret d'application | [`validateAppSecret.ts`](../../backend/auth/src/middlewares/validateAppSecret.ts) | en-tête client | `TC-109` |
 | version minimale | [`enforceVersion.ts`](../../backend/auth/src/middlewares/enforceVersion.ts) | en-têtes | `TC-107` |
@@ -59,6 +60,7 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | configuration | [`config.ts`](../../backend/messaging/src/config.ts) | variables d'environnement | `TC-101`, `TC-108` |
 | validation JWT HTTP/socket | [`jwt.ts`](../../backend/messaging/src/security/jwt.ts), [`socketAuth.ts`](../../backend/messaging/src/middlewares/socketAuth.ts) | JWT access public-key-only | `TC-102` terminé |
 | transactions PostgreSQL | [`db.ts`](../../backend/messaging/src/plugins/db.ts) | connexion réservée, commit/rollback, retry borné | `TC-105` terminé |
+| registre et preuve d'identité d'appareil | [`account.devices.ts`](../../backend/messaging/src/routes/account.devices.ts), [`deviceProof.ts`](../../backend/messaging/src/security/deviceProof.ts) | `account_devices`, challenges, Ed25519 | `TC-106` lot B ; client/approbation lots C-D |
 | cercles/adhésion | [`groups.ts`](../../backend/messaging/src/routes/groups.ts) | `groups`, `user_groups`, demandes/rôles | `TC-104`/`TC-105` terminés, `TC-107` |
 | appareils et clés publiques | [`keys.devices.ts`](../../backend/messaging/src/routes/keys.devices.ts) | `group_device_keys` | atomicité `TC-105` terminée ; cycle de confiance `TC-106`, validation `TC-107` |
 | conversations | [`conversations.ts`](../../backend/messaging/src/routes/conversations.ts) | `conversations`, `conversation_users` | `TC-104`/`TC-105` terminés, `TC-107` |
@@ -75,6 +77,9 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | `groups`, `user_groups` | cercles et adhésions | élevée | `TC-104`, `TC-201` |
 | `group_keys` | clé publique historique de cercle | moyenne | migration V3 |
 | `group_device_keys` | clés publiques et état des appareils | élevée | `TC-106`, Phase 3 |
+| `device_bootstrap_grants` | empreinte d'autorisation courte, expiration et consommation | très élevée | `TC-106` lot B ; secret brut jamais stocké |
+| `account_devices` | clé publique d'identité, plateforme, nom et état de confiance | élevée | `TC-106` lots B-D |
+| `device_registration_challenges` | nonce, transcription, expiration et résultat de preuve | élevée | `TC-106` lot B ; rétention 7 jours |
 | `join_requests`, `join_request_votes` | demandes et décisions | élevée | `TC-104`, `TC-607` |
 | `conversations`, `conversation_users` | conversations et participants | élevée | ACL et atomicité `TC-104`/`TC-105` terminées |
 | `messages` | enveloppes E2EE et métadonnées | très élevée | Phases 3 et 5 |
@@ -91,6 +96,7 @@ Le modèle exact observé et ses incohérences sont détaillés dans [`DATA_MODE
 | connaître les règles non négociables | [`SECURITY_INVARIANTS.md`](../security/SECURITY_INVARIANTS.md) |
 | comprendre les adversaires et impacts | [`THREAT_MODEL.md`](../security/THREAT_MODEL.md) |
 | connaître la cible cryptographique | [`ADR-0003-protocole-crypto-v3.md`](../adr/ADR-0003-protocole-crypto-v3.md) |
+| comprendre la preuve d'appareil | [`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md) |
 | sélectionner la prochaine tâche | [`ROADMAP.md`](../roadmap/ROADMAP.md) |
 
 ## Règle de maintenance
