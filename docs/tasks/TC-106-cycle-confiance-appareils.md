@@ -1,6 +1,6 @@
 # TC-106 — Sécuriser le cycle de confiance des appareils
 
-Statut : En cours — lots A et B terminés, lot C suivant
+Statut : En cours — lots A, B et C terminés, lot D suivant
 Priorité : P0 sécurité et identité cryptographique
 Décision : propriétaire pour l'architecture d'approbation, mainteneur pour l'implémentation
 Dépendances : TC-104, TC-105
@@ -132,15 +132,60 @@ smoke final couvre bootstrap par mot de passe, signature réelle, rejeu,
 appareil suivant `pending`, refus avec access token seul et isolation du
 registre. Les contrôles SQL finaux ne relèvent aucune violation de contrainte.
 
+## Critères d'acceptation du lot C
+
+- [x] Une identité Ed25519 de compte/appareil distincte des clés de cercle est créée uniquement lors d'un enrôlement explicite et chargée fail-closed.
+- [x] Un auto-login ne génère ni UUID ni clé privée manquants silencieusement.
+- [x] Un appareil `pending` ne démarre ni accueil, ni WebSocket, ni conversation, ni publication de clé de cercle.
+- [x] Un appareil actif voit nom, plateforme, statut et empreinte courte de la clé complète avant sa décision.
+- [x] Approbation et refus utilisent une transcription binaire distincte de 216 octets, documentée et testée par vecteur figé.
+- [x] Compte, approbateur, cible, clés, versions, décision, nonce et expiration sont tous liés par Ed25519.
+- [x] Signature invalide, rejeu, expiration, changement d'identité, approbateur non actif et autre compte n'activent pas la cible.
+- [x] Deux décisions concurrentes ont exactement un gagnant ; un refus signé révoque la cible.
+- [x] L'activation ne transfère aucun ancien secret : les paires par cercle sont créées/publiées en arrière-plan uniquement pour les futurs messages.
+- [x] Migration montante/descendante, sauvegarde/restauration, smoke réel et cohérence SQL sont validés sur staging.
+
+## Résultat du lot C
+
+Les commits `2877be0951ad6ced0869dfe593872ae6da3f8fb5` et
+`0a6e7a0062c0c8fd8ca57f2dd78a15989a4b27a4` implémentent le contrat, les
+routes, le client et le smoke reproductible. Le client vérifie les champs
+binaires reçus avant toute signature, utilise une barrière d'état
+`requiresEnrollment|pending|active|revoked|error` et limite le polling à
+l'écran d'attente toutes les huit secondes. La liste d'appareils permet à
+l'appareil actif d'approuver ou refuser après confirmation de l'empreinte.
+
+Preuves locales du 2026-08-25 : 20 tests Auth, 65 tests Messaging et 31 tests
+Flutter réussis ; analyse Flutter sans erreur ni avertissement bloquant (85
+informations historiques) ; bundle OpenAPI généré et `git diff --check`
+réussi. Les tests dédiés couvrent vecteur binaire, altérations, rejeu,
+expiration, isolation de compte, état approbateur, refus et concurrence.
+
+Preuves staging : sauvegarde privée
+`pre-tc106-lotc-20260825T193057Z.dump`, mode `0600`, 46 785 octets, SHA-256
+`524b1b463d77d5bba99e884fce7369f067fbacbbae7f911d1185f07f3adc3e89` ;
+restauration isolée, montée `1 table/2 index/14 contraintes`, descente et
+suppression de la base de test réussies. La release finale est
+`0a6e7a0062c0c8fd8ca57f2dd78a15989a4b27a4` : quatre services sains, zéro
+redémarrage et zéro log Auth/Messaging `error|fatal`. Le smoke réel couvre
+preuve, approbation, rejeu, refus et registre final `active,active,revoked`,
+ainsi que les anciens parcours. Les quatre contrôles SQL finaux valent zéro.
+
 ## Migration et compatibilité
 
 Le lot A conserve les données locales historiques mais cesse de les sélectionner. Il ne les supprime pas automatiquement : une future migration explicite devra prouver à quel compte elles appartiennent ou les laisser inaccessibles. Cela peut imposer une nouvelle inscription d'appareil aux utilisateurs du prototype, acceptable avant publication et préférable à un rattachement silencieux au mauvais compte.
 
 Les lots backend utiliseront des migrations expand/contract compatibles avec la release précédente. Aucune donnée réelle n'est supprimée automatiquement.
 
-## Risques résiduels avant les lots C et D
+## Risques résiduels avant le lot D
 
-Tant que les lots C et D ne sont pas terminés, le backend continue d'accepter les publications historiques `group_device_keys` sans exiger le nouveau registre. Le lot B prouve et enregistre l'identité de compte, mais l'approbation des appareils suivants, la liaison aux clés de cercle et la révocation globale ne satisfont donc pas encore entièrement les invariants 10 et 12.
+Le backend continue d'accepter les publications historiques
+`group_device_keys` sans imposer partout le statut du nouveau registre. La
+barrière Flutter ferme le chemin nominal, mais un client modifié muni d'un
+access token peut encore appeler directement ces anciennes routes. La liaison
+serveur aux clés de cercle, la rotation versionnée, la révocation globale et
+l'invalidation déterministe doivent donc être fermées par le lot D avant de
+considérer les invariants 10 et 12 entièrement satisfaits.
 
 ## Décision humaine
 

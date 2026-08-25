@@ -2,7 +2,7 @@
 
 Statut : description du code existant, **pas** spécification d'un protocole approuvé
 Dernière mise à jour : 2026-08-25
-Code observé : branche `main`, changement `TC-106` lot A
+Code observé : branche `main`, changement `TC-106` lot C
 Implémentation principale : `lib/core/crypto/message_cipher_v2.dart`
 
 ## Objet
@@ -31,7 +31,8 @@ Cette description ne protège pas contre un client compromis, un appareil déver
 
 | Usage | Primitive observée | Paramètres |
 |---|---|---|
-| identité de signature d'appareil | Ed25519 | graine privée 32 octets |
+| identité de confiance compte/appareil | Ed25519 | graine privée 32 octets, une paire par compte local |
+| signature E2EE d'appareil par cercle | Ed25519 | graine privée 32 octets, une paire par cercle/appareil |
 | échange de secret | X25519 | clé statique du destinataire, clé éphémère par message |
 | dérivation | HKDF-SHA-256 | sortie 32 octets, sel propre au message |
 | chiffrement du contenu | AES-256-GCM | clé 32 octets, nonce 12 octets, tag 16 octets |
@@ -47,7 +48,11 @@ Les appels aléatoires du chiffrement des messages et la clé maître du cache d
 
 `SessionDeviceService` valide l'UUID du sujet authentifié puis crée un UUID sous `device_id_v2:account:<userId>` dans `flutter_secure_storage`. La mémoire est également indexée par compte et purgée à la déconnexion ou au changement de sujet.
 
-L'ancien `device_id_v1`, global à l'installation, n'est ni lu ni migré automatiquement : son rattachement à un compte ne peut pas être démontré. Chaque compte utilisé sur une installation reçoit ainsi sa propre identité locale. Le registre et l'approbation serveur restent à implémenter dans les lots suivants de `TC-106`.
+L'ancien `device_id_v1`, global à l'installation, n'est ni lu ni migré automatiquement : son rattachement à un compte ne peut pas être démontré. Chaque compte utilisé sur une installation reçoit ainsi son propre identifiant local.
+
+`AccountDeviceIdentityService` conserve séparément une graine et une clé publique Ed25519 sous `account_device_identity_v1:account:<userId>:ed25519_seed|ed25519_public`. Cette identité de confiance n'est pas une paire E2EE de cercle. Sa création est réservée à l'enrôlement explicite ; un auto-login charge le matériel existant et échoue si celui-ci est absent, partiel, mal encodé, d'une taille autre que 32 octets ou si la clé publique ne correspond pas à la graine.
+
+Les lots B/C de `TC-106` enregistrent la clé publique après preuve de possession, puis lient l'approbation ou le refus par un appareil actif à une seconde transcription signée. Les formats exacts, domaines, tailles et vecteurs sont spécifiés dans [`DEVICE_TRUST_PROTOCOL_V1.md`](DEVICE_TRUST_PROTOCOL_V1.md). La liaison serveur systématique entre ce registre de confiance et les clés E2EE de cercle relève encore du lot D.
 
 ### Paires de clés E2EE
 
@@ -227,7 +232,8 @@ La réactivité est préservée par l'annuaire et les clés de message en cache 
 
 | Élément | Emplacement | Durée observée | État de sécurité |
 |---|---|---:|---|
-| graines privées Ed25519/X25519 | `flutter_secure_storage` | installation | stockage OS, sélection par `deviceId` propre au compte ; registre serveur incomplet |
+| graine d'identité Ed25519 compte/appareil | `flutter_secure_storage` | enrôlement du compte sur l'installation | création explicite, chargement fail-closed ; registre, preuve et approbation présents |
+| graines privées E2EE Ed25519/X25519 | `flutter_secure_storage` | installation | stockage OS, sélection par `deviceId` propre au compte et par cercle ; liaison serveur au registre encore incomplète |
 | jetons d'accès/refresh | `flutter_secure_storage` | session/30 jours | biométrie autour du refresh à valider par plateforme |
 | clé de message en mémoire | RAM | TTL 24 h, max. 1 000 | index utilisateur/appareil/message ; clés accessibles au processus |
 | clé de message persistante | SQLite, chiffrée AES-GCM | TTL 7 jours | index utilisateur/appareil/message ; clé maître CSPRNG propre au compte |
@@ -276,14 +282,16 @@ Le backend applique l'identité JWT à l'expéditeur depuis `TC-103`, mais il ne
 
 ## Cycle d'un nouvel appareil
 
-Comportement attendu du modèle par appareil :
+Comportement actuellement implémenté dans le parcours nominal :
 
-1. l'appareil crée localement ses paires privées ;
-2. il publie uniquement ses clés publiques ;
-3. les futurs messages incluent une encapsulation pour cet appareil après validation ;
-4. les anciens messages sans encapsulation pour cet appareil restent indéchiffrables.
+1. lors d'un enrôlement explicite, l'appareil crée son UUID et son identité Ed25519 de confiance propres au compte ;
+2. il prouve la possession de cette clé sur la transcription serveur de 163 octets ; le premier appareil réautorisé par mot de passe devient `active`, les suivants restent `pending` ;
+3. un appareil actif approuve ou refuse la cible en signant la transcription distincte de 216 octets ;
+4. tant que la cible n'est pas `active`, le client bloque l'accueil, le WebSocket, les conversations et la publication des clés de cercle ;
+5. après activation, le client crée et publie en arrière-plan une paire E2EE distincte pour chaque cercle ;
+6. les futurs messages incluent une encapsulation pour ce nouvel appareil, tandis que les anciens messages sans encapsulation restent indéchiffrables.
 
-L'étape d'approbation et la preuve cryptographique de possession ne sont pas encore complètes. Voir `TC-106`, `TC-303` et `TC-304`.
+Cette barrière est actuellement imposée par le client Flutter. Un client modifié muni d'un access token peut encore appeler les anciennes routes de `group_device_keys` sans que toutes vérifient le registre de compte ; cette liaison autoritative, la rotation et la révocation globale sont le périmètre restant du lot D de `TC-106`. Voir aussi `TC-303` et `TC-304`.
 
 ## Cas particulier de la création d'un cercle
 

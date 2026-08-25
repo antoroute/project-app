@@ -2,7 +2,7 @@
 
 Statut : référence de travail
 Dernière mise à jour : 2026-08-25
-Instantané fonctionnel documenté : branche `main`, changement `TC-106` lot A
+Instantané fonctionnel documenté : branche `main`, changement `TC-106` lot C
 
 ## Mission
 
@@ -28,9 +28,9 @@ Le propriétaire a choisi **CircleHaven** comme marque et **CircleHaven — Trus
 
 ## Niveau de préparation
 
-Le projet est un prototype fonctionnel, pas une version publiable. Les builds TypeScript et les suites locales Auth/Messaging réussissent. Un SDK Flutter 3.47.1 temporaire a permis de faire passer 24 tests ciblés de sécurité/cryptographie et de confirmer l'absence d'erreur ou avertissement bloquant dans l'analyse statique ; les builds release et tests sur appareils restent à réaliser. La couverture automatisée demeure partielle et aucune CI n'est encore en place.
+Le projet est un prototype fonctionnel, pas une version publiable. Les builds TypeScript et les suites locales Auth/Messaging réussissent. Un SDK Flutter 3.47.1 temporaire a permis de faire passer 31 tests ciblés de sécurité/cryptographie et de confirmer l'absence d'erreur ou avertissement bloquant dans l'analyse statique ; les builds release et tests sur appareils restent à réaliser. La couverture automatisée demeure partielle et aucune CI n'est encore en place.
 
-Les principaux bloqueurs restants sont : approbation/révocation multi-appareil incomplètes, stockage SQLite insuffisamment protégé, protocole cryptographique non audité, fiabilité hors ligne fragile, compatibilité desktop incomplète, configuration de release non préparée et absence d'un véritable outil de migrations. La confusion entre access et refresh tokens a été fermée par `TC-102`, l'identité d'envoi est dérivée du JWT par `TC-103`, les autorisations cercle/conversation/rôle sont centralisées par `TC-104`, et `TC-105` rend atomiques les contrôles et écritures Messaging critiques avec événements post-commit. Le lot A de `TC-106` isole les identités et caches locaux par compte ; son lot B ajoute le registre backend et la preuve Ed25519 à usage unique selon l'ADR-0005 acceptée. Le client, l'approbation et la propagation restent dans les lots C/D. `TC-114` impose désormais l'authentification du message avant tout usage du texte — sous réserve des mesures finales Android/Windows. L'inventaire Docker détaillé est dans `docs/operations/PRODUCTION_INVENTORY.md`.
+Les principaux bloqueurs restants sont : rotation/révocation globale multi-appareil incomplètes, stockage SQLite insuffisamment protégé, protocole cryptographique non audité, fiabilité hors ligne fragile, compatibilité desktop incomplète, configuration de release non préparée et absence d'un véritable outil de migrations. La confusion entre access et refresh tokens a été fermée par `TC-102`, l'identité d'envoi est dérivée du JWT par `TC-103`, les autorisations cercle/conversation/rôle sont centralisées par `TC-104`, et `TC-105` rend atomiques les contrôles et écritures Messaging critiques avec événements post-commit. Les lots A/B/C de `TC-106` isolent l'identité locale, prouvent sa possession, puis permettent l'approbation ou le refus signé d'un nouvel appareil avec une barrière client avant accès aux messages. La propagation autoritative et la révocation globale restent dans le lot D. `TC-114` impose désormais l'authentification du message avant tout usage du texte — sous réserve des mesures finales Android/Windows. L'inventaire Docker détaillé est dans `docs/operations/PRODUCTION_INVENTORY.md`.
 
 ## Ordre de travail
 

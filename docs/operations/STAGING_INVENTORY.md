@@ -1,7 +1,7 @@
 # Inventaire du staging backend
 
 Statut : opérationnel, accès local au LXC uniquement
-Dernier déploiement : 2026-08-25 (`TC-106`, lot B)
+Dernier déploiement : 2026-08-25 (`TC-106`, lot C)
 Environnement : LXC106, stack Compose `trust-circle-staging`
 
 ## Résumé
@@ -12,8 +12,8 @@ Le staging backend est une installation neuve et isolée des anciennes ressource
 
 | Élément | Valeur assainie |
 |---|---|
-| Commit source | `6450722344286341da0f9826dc080c35b6dc7f2d` |
-| Release | `/opt/trust-circle-staging/releases/6450722344286341da0f9826dc080c35b6dc7f2d` |
+| Commit source | `0a6e7a0062c0c8fd8ca57f2dd78a15989a4b27a4` |
+| Release | `/opt/trust-circle-staging/releases/0a6e7a0062c0c8fd8ca57f2dd78a15989a4b27a4` |
 | Pointeur actif | `/opt/trust-circle-staging/current` |
 | Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
 | Source Compose | `deploy/staging/compose.yml` |
@@ -25,8 +25,8 @@ Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affich
 
 | Service | Image | Preuve | État final |
 |---|---|---|---|
-| Auth | `trust-circle-staging-auth:staging-645072234428` | image ID `ae2aa00e3e0a`, label revision complet | sain, 0 redémarrage |
-| Messaging | `trust-circle-staging-messaging:staging-645072234428` | image ID `83355b710f4c`, label revision complet | sain, 0 redémarrage |
+| Auth | `trust-circle-staging-auth:staging-0a6e7a0062c0` | image ID `b458595cc63b`, label revision complet | sain, 0 redémarrage |
+| Messaging | `trust-circle-staging-messaging:staging-0a6e7a0062c0` | image ID `e1f74b9c43b5`, label revision complet | sain, 0 redémarrage |
 | PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 | Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 
@@ -58,9 +58,9 @@ PostgreSQL utilise un volume inscriptible, des limites de ressources, un healthc
 
 - Base PostgreSQL 16 neuve.
 - `infrastructure/postgres/init.sql` monté en lecture seule pour la première initialisation.
-- 15 tables publiques observées ; `user_groups.role` reste contraint à `admin` ou `member`, et le propriétaire reste dérivé de `groups.creator_id`.
+- 16 tables publiques observées ; `user_groups.role` reste contraint à `admin` ou `member`, et le propriétaire reste dérivé de `groups.creator_id`.
 - Données uniquement synthétiques, créées par les smoke tests.
-- Trois migrations SQL réversibles sont conservées dans `infrastructure/postgres/migrations/` et appliquées manuellement pour `TC-104` à `TC-106`. La troisième ajoute `device_bootstrap_grants`, `account_devices` et `device_registration_challenges`, avec trois index dédiés. Le choix et l'automatisation d'un véritable outil de migration restent suivis par `TC-201`.
+- Quatre migrations SQL réversibles sont conservées dans `infrastructure/postgres/migrations/` et appliquées manuellement pour `TC-104` à `TC-106`. Les troisième et quatrième ajoutent le registre/preuve puis les challenges d'approbation, avec cinq index dédiés au total. Le choix et l'automatisation d'un véritable outil de migration restent suivis par `TC-201`.
 
 ## Validations exécutées
 
@@ -155,6 +155,32 @@ Les configurations antérieures sont conservées en mode `0600` sous
 release `abf6b51abf2967b7ddd0d43020690b0fc4872e8c` reste disponible pour
 rollback applicatif et ne dépend d'aucune table ajoutée ; la migration
 descendante a été exercée sur la restauration isolée avant la migration réelle.
+
+Le redéploiement du lot C de `TC-106` du 2026-08-25 a ensuite validé :
+
+1. sauvegarde PostgreSQL préalable vérifiée
+   `pre-tc106-lotc-20260825T193057Z.dump`, mode `0600`, 46 785 octets et
+   SHA-256 `524b1b463d77d5bba99e884fce7369f067fbacbbae7f911d1185f07f3adc3e89` ;
+2. restauration dans `tc106_lotc_migration_test`, montée de
+   `device_approval_challenges` avec une table, deux index et quatorze
+   contraintes, descente complète, conservation de la baseline et suppression
+   de la base isolée ;
+3. migration additive de la base réelle, puis build et déploiement du commit
+   `0a6e7a0062c0c8fd8ca57f2dd78a15989a4b27a4`, avec labels de révision
+   correspondants ;
+4. quatre healthchecks sains, zéro redémarrage et zéro ligne `error|fatal`
+   Auth/Messaging dans la fenêtre post-déploiement ;
+5. smoke historique complet puis parcours réel : bootstrap, preuve Ed25519,
+   appareil suivant `pending`, approbation signée, rejeu refusé, troisième
+   appareil refusé par signature et registre final `active,active,revoked` ;
+6. cohérence SQL finale : zéro taille/état incohérent, zéro challenge ouvert
+   visant une cible non `pending`, zéro résultat hors vocabulaire et aucune base
+   de migration résiduelle.
+
+La configuration précédente est conservée en mode `0600` sous
+`staging.env.before-0a6e7a0062c0`. La release
+`6450722344286341da0f9826dc080c35b6dc7f2d` reste disponible pour rollback
+applicatif et ignore sans erreur la table additive du lot C.
 
 ## Limites assumées
 

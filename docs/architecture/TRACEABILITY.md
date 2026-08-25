@@ -1,7 +1,7 @@
 # Matrice de traçabilité fonctionnelle et sécurité
 
 Dernière mise à jour : 2026-08-25
-Code observé : branche `main`, changement `TC-106` lot B
+Code observé : branche `main`, changement `TC-106` lot C
 
 Cette matrice aide à retrouver rapidement le code réellement responsable d'un comportement. Elle n'atteste ni la qualité ni la sécurité d'une fonction : consulter la référence fonctionnelle, les invariants et les tâches liées avant toute modification.
 
@@ -12,7 +12,8 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | démarrage et injection | [`main.dart`](../../frontend-mobile/flutter_message_app/lib/main.dart) | secure storage, SQLite, Socket.IO | `TC-601`, `TC-602` |
 | configuration des URL et en-têtes | [`constants.dart`](../../frontend-mobile/flutter_message_app/lib/config/constants.dart), [`api_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/api_service.dart) | HTTPS | `TC-109`, configuration release |
 | inscription, connexion, refresh, sortie | [`auth_provider.dart`](../../frontend-mobile/flutter_message_app/lib/core/providers/auth_provider.dart), [`biometric_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/biometric_service.dart) | secure storage, Auth API | `TC-401` à `TC-408` ; logout distant manquant |
-| identifiant d'appareil | [`session_device_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/session_device_service.dart) | secure storage, espace propre au compte | `TC-106` lot A terminé ; registre `TC-106` lots B-D |
+| identifiant et identité de compte/appareil | [`session_device_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/session_device_service.dart), [`account_device_identity_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/account_device_identity_service.dart) | secure storage, UUID et seed Ed25519 propres au compte | `TC-106` lots A/C terminés ; rotation lot D |
+| confiance et barrière d'appareil | [`account_device_trust_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/account_device_trust_service.dart), [`auth_provider.dart`](../../frontend-mobile/flutter_message_app/lib/core/providers/auth_provider.dart), [`device_trust_gate_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/device_trust_gate_screen.dart) | Auth/Messaging API, état mémoire | `TC-106` lot C terminé ; révocation lot D |
 | génération et stockage des clés | [`key_manager_final.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/key_manager_final.dart), [`secure_string_store.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/secure_string_store.dart) | secure storage, chargement fail-closed | `TC-106` lot A terminé, `TC-303`, `TC-306` |
 | annuaire de clés publiques | [`key_directory_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/key_directory_service.dart) | Messaging API, cache mémoire | `TC-106`, `TC-303` |
 | enveloppe E2EE V2 | [`message_cipher_v2.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/message_cipher_v2.dart), [`message_envelope_verifier.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/message_envelope_verifier.dart), [`message_v2.dart`](../../frontend-mobile/flutter_message_app/lib/core/models/message_v2.dart) | JSON V2 | `TC-114`, `TC-301` à `TC-312` |
@@ -37,7 +38,8 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | cercles | [`group_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/group_screen.dart), [`group_nav_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/group_nav_screen.dart), [`group_detail_info_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/group_detail_info_screen.dart) | création, liste, détail et membres partiels |
 | adhésion | [`qr_scan_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/qr_scan_screen.dart), [`join_requests_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/join_requests_screen.dart) | identifiant brut et décision créateur/legacy |
 | conversations | [`group_conversation_list.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/group_conversation_list.dart), [`conversation_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/conversation_screen.dart) | texte V2, présence, frappe, lecture |
-| appareils | [`my_devices_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/my_devices_screen.dart) | liste/révocation partielles |
+| appareils du compte | [`account_devices_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/account_devices_screen.dart), [`device_trust_gate_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/device_trust_gate_screen.dart) | attente, liste, empreinte, approbation/refus signés |
+| appareils historiques par cercle | [`my_devices_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/my_devices_screen.dart) | liste/révocation partielles, à réunifier au lot D |
 | calendrier/carte | [`group_calendar_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/group_calendar_screen.dart), [`group_map_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/group_map_screen.dart) | factices, hors V1 |
 
 ## Backend Auth
@@ -60,7 +62,8 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | configuration | [`config.ts`](../../backend/messaging/src/config.ts) | variables d'environnement | `TC-101`, `TC-108` |
 | validation JWT HTTP/socket | [`jwt.ts`](../../backend/messaging/src/security/jwt.ts), [`socketAuth.ts`](../../backend/messaging/src/middlewares/socketAuth.ts) | JWT access public-key-only | `TC-102` terminé |
 | transactions PostgreSQL | [`db.ts`](../../backend/messaging/src/plugins/db.ts) | connexion réservée, commit/rollback, retry borné | `TC-105` terminé |
-| registre et preuve d'identité d'appareil | [`account.devices.ts`](../../backend/messaging/src/routes/account.devices.ts), [`deviceProof.ts`](../../backend/messaging/src/security/deviceProof.ts) | `account_devices`, challenges, Ed25519 | `TC-106` lot B ; client/approbation lots C-D |
+| registre et preuve d'identité d'appareil | [`account.devices.ts`](../../backend/messaging/src/routes/account.devices.ts), [`deviceProof.ts`](../../backend/messaging/src/security/deviceProof.ts) | `account_devices`, challenges, Ed25519 | `TC-106` lot B terminé |
+| approbation/refus d'appareil | [`account.deviceApprovals.ts`](../../backend/messaging/src/routes/account.deviceApprovals.ts), [`deviceApproval.ts`](../../backend/messaging/src/security/deviceApproval.ts) | `device_approval_challenges`, transcription 216 octets | `TC-106` lot C terminé ; propagation lot D |
 | cercles/adhésion | [`groups.ts`](../../backend/messaging/src/routes/groups.ts) | `groups`, `user_groups`, demandes/rôles | `TC-104`/`TC-105` terminés, `TC-107` |
 | appareils et clés publiques | [`keys.devices.ts`](../../backend/messaging/src/routes/keys.devices.ts) | `group_device_keys` | atomicité `TC-105` terminée ; cycle de confiance `TC-106`, validation `TC-107` |
 | conversations | [`conversations.ts`](../../backend/messaging/src/routes/conversations.ts) | `conversations`, `conversation_users` | `TC-104`/`TC-105` terminés, `TC-107` |
@@ -80,6 +83,7 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | `device_bootstrap_grants` | empreinte d'autorisation courte, expiration et consommation | très élevée | `TC-106` lot B ; secret brut jamais stocké |
 | `account_devices` | clé publique d'identité, plateforme, nom et état de confiance | élevée | `TC-106` lots B-D |
 | `device_registration_challenges` | nonce, transcription, expiration et résultat de preuve | élevée | `TC-106` lot B ; rétention 7 jours |
+| `device_approval_challenges` | deux identités/version, décision, transcription et résultat | élevée | `TC-106` lot C ; rétention 7 jours |
 | `join_requests`, `join_request_votes` | demandes et décisions | élevée | `TC-104`, `TC-607` |
 | `conversations`, `conversation_users` | conversations et participants | élevée | ACL et atomicité `TC-104`/`TC-105` terminées |
 | `messages` | enveloppes E2EE et métadonnées | très élevée | Phases 3 et 5 |

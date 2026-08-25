@@ -1,7 +1,7 @@
 # Architecture système
 
 Statut : état observé et cible V1 provisoire
-Dernière mise à jour : 2026-08-24
+Dernière mise à jour : 2026-08-25
 
 ## Vue logique
 
@@ -26,8 +26,8 @@ Le schéma est logique. L'inventaire réel du LXC et du staging est conservé da
 |---|---|---|
 | Client Flutter | UI, identité d'appareil, chiffrement/déchiffrement, cache et synchronisation | Prototype mobile, desktop incomplet |
 | Auth Fastify | comptes, mots de passe, JWT, refresh tokens et réautorisation du premier appareil | Access Ed25519 et refresh HS256 séparés ; grant de bootstrap opaque et court par `TC-106` |
-| Messaging Fastify | registre d'appareils, cercles, membres, conversations, clés publiques, messages et temps réel | Preuve d'appareil présente ; approbation/révocation globales encore incomplètes |
-| PostgreSQL | identités, appartenances, clés publiques, enveloppes chiffrées, sessions | Initialisé par script ; trois migrations réversibles versionnées mais encore appliquées manuellement |
+| Messaging Fastify | registre d'appareils, cercles, membres, conversations, clés publiques, messages et temps réel | Preuve et approbation signée présentes ; révocation globale encore incomplète |
+| PostgreSQL | identités, appartenances, clés publiques, enveloppes chiffrées, sessions | Initialisé par script ; quatre migrations réversibles versionnées mais encore appliquées manuellement |
 | Redis | prévu pour présence/pub-sub | Non utilisé par l'application ; présence en mémoire du processus |
 | Nginx/proxy externe | terminaison/routage HTTP(S) | Staging loopback sans exposition publique ; TLS restreint reporté à `TC-113` |
 | Site public | acquisition, téléchargements, légal, support | à créer |

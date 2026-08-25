@@ -43,7 +43,7 @@ Risques : les invariants 10 à 12 restent ouverts pendant toute la Phase 1 et un
 
 ## Décision
 
-L'option A est retenue. Les signatures de preuve et d'approbation utilisent des transcriptions binaires versionnées, préfixées par un domaine et fournies telles quelles par le serveur au client. Le format de preuve de possession du lot B est figé dans [`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md). Le format distinct d'approbation sera spécifié dans le lot C avant implémentation.
+L'option A est retenue. Les signatures de preuve et d'approbation utilisent des transcriptions binaires versionnées, préfixées par des domaines distincts et fournies telles quelles par le serveur au client. Les formats de preuve de possession du lot B et d'approbation du lot C sont figés avec leurs vecteurs dans [`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md).
 
 Le bootstrap du premier appareil ne constitue pas une récupération. Si un appareil actif a déjà existé puis a été perdu/révoqué, seul le parcours renforcé de récupération peut créer une nouvelle identité.
 
