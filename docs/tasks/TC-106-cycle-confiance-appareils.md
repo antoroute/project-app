@@ -1,6 +1,6 @@
 # TC-106 — Sécuriser le cycle de confiance des appareils
 
-Statut : En cours — lot A terminé, lot B en validation
+Statut : En cours — lots A et B terminés, lot C suivant
 Priorité : P0 sécurité et identité cryptographique
 Décision : propriétaire pour l'architecture d'approbation, mainteneur pour l'implémentation
 Dépendances : TC-104, TC-105
@@ -109,8 +109,28 @@ Preuves locales du 2026-08-25 : formatage des fichiers Dart touchés ; `dart ana
 - [x] Une session sans clé privée ne peut pas inscrire un appareil prouvé.
 - [x] Un access token volé ne peut pas bootstrap une clé choisie sans réauthentification par mot de passe.
 - [x] Les créations sont bornées par compte, appareil et nombre de challenges actifs.
-- [ ] La migration montée/descente et les routes sont validées sur PostgreSQL staging après sauvegarde.
-- [ ] Les healthchecks, smoke tests et vérifications SQL staging réussissent après déploiement.
+- [x] La migration montée/descente et les routes sont validées sur PostgreSQL staging après sauvegarde.
+- [x] Les healthchecks, smoke tests et vérifications SQL staging réussissent après déploiement.
+
+## Résultat du lot B
+
+Le registre backend est déployé sur le staging au commit
+`6450722344286341da0f9826dc080c35b6dc7f2d`. Auth délivre après comparaison
+bcrypt un grant opaque de cinq minutes, stocké uniquement sous forme hachée.
+Messaging exige ensuite la preuve Ed25519 sur la transcription binaire V1,
+active une seule identité initiale et place les suivantes en attente.
+
+Preuves du 2026-08-25 : 20 tests Auth et 54 tests Messaging réussis ; OpenAPI
+et script de smoke validés ; sauvegarde privée
+`pre-tc106-20260825T140433Z.dump` vérifiée avec SHA-256
+`dd5297a507ddbce9e02cddff305eafbd2a7a53ab336ca9d19188bd24d5dbb01c` ;
+restauration isolée, migration montante `3 tables/3 index`, migration
+descendante et suppression de la base de test réussies. Le premier smoke test
+a détecté une ambiguïté de type PostgreSQL `uuid/text`, corrigée dans le commit
+final avant validation. Les quatre conteneurs sont sains sans redémarrage ; le
+smoke final couvre bootstrap par mot de passe, signature réelle, rejeu,
+appareil suivant `pending`, refus avec access token seul et isolation du
+registre. Les contrôles SQL finaux ne relèvent aucune violation de contrainte.
 
 ## Migration et compatibilité
 
@@ -118,7 +138,7 @@ Le lot A conserve les données locales historiques mais cesse de les sélectionn
 
 Les lots backend utiliseront des migrations expand/contract compatibles avec la release précédente. Aucune donnée réelle n'est supprimée automatiquement.
 
-## Risques résiduels pendant les lots A et B
+## Risques résiduels avant les lots C et D
 
 Tant que les lots C et D ne sont pas terminés, le backend continue d'accepter les publications historiques `group_device_keys` sans exiger le nouveau registre. Le lot B prouve et enregistre l'identité de compte, mais l'approbation des appareils suivants, la liaison aux clés de cercle et la révocation globale ne satisfont donc pas encore entièrement les invariants 10 et 12.
 
