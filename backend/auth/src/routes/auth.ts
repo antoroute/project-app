@@ -140,19 +140,21 @@ export default async function routes(app: FastifyInstance) {
     try {
       createdGrant = await app.db.one(
         `WITH account_lock AS MATERIALIZED (
-           SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+           SELECT pg_advisory_xact_lock(
+             hashtextextended(($1::uuid)::text, 0)
+           )
          ), cleanup AS (
          DELETE FROM device_bootstrap_grants
-          WHERE user_id = $1
+          WHERE user_id = $1::uuid
             AND COALESCE(consumed_at, expires_at) < NOW() - INTERVAL '7 days'
          ), recent AS (
            SELECT COUNT(*)::int AS count
              FROM device_bootstrap_grants, account_lock
-            WHERE user_id = $1
+            WHERE user_id = $1::uuid
               AND created_at > NOW() - INTERVAL '10 minutes'
          )
          INSERT INTO device_bootstrap_grants(user_id, token_hash, expires_at)
-         SELECT $1,$2,to_timestamp($3)
+         SELECT $1::uuid,$2,to_timestamp($3)
            FROM recent
           WHERE recent.count < 5
          RETURNING id`,

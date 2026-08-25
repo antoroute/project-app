@@ -72,6 +72,8 @@ test('une réauthentification délivre un grant court sans le stocker en clair',
   assert.ok(Date.parse(body.expiresAt) > Date.now());
   assert.equal(writes.length, 1);
   assert.match(writes[0].query, /INSERT INTO device_bootstrap_grants/);
+  assert.match(writes[0].query, /user_id = \$1::uuid/);
+  assert.match(writes[0].query, /SELECT \$1::uuid,\$2,to_timestamp\(\$3\)/);
   assert.equal(writes[0].params[0], ACCOUNT);
   assert.ok(Buffer.isBuffer(writes[0].params[1]));
   assert.equal(writes[0].params[1].length, 32);
