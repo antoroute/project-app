@@ -240,7 +240,7 @@ paths:
       summary: Demander à rejoindre un cercle
       responses:
         "201": { description: Demande créée. }
-        "409": { description: Déjà membre. }
+        "409": { description: Déjà membre ou demande en attente déjà existante. }
     get:
       tags: [groups]
       summary: Lister les demandes (propriétaire ou administrateur)

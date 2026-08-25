@@ -1,7 +1,7 @@
 # Inventaire du staging backend
 
 Statut : opérationnel, accès local au LXC uniquement
-Dernier déploiement : 2026-08-25 (`TC-104`)
+Dernier déploiement : 2026-08-25 (`TC-105`)
 Environnement : LXC106, stack Compose `trust-circle-staging`
 
 ## Résumé
@@ -12,8 +12,8 @@ Le staging backend est une installation neuve et isolée des anciennes ressource
 
 | Élément | Valeur assainie |
 |---|---|
-| Commit source | `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f` |
-| Release | `/opt/trust-circle-staging/releases/f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f` |
+| Commit source | `abf6b51abf2967b7ddd0d43020690b0fc4872e8c` |
+| Release | `/opt/trust-circle-staging/releases/abf6b51abf2967b7ddd0d43020690b0fc4872e8c` |
 | Pointeur actif | `/opt/trust-circle-staging/current` |
 | Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
 | Source Compose | `deploy/staging/compose.yml` |
@@ -25,8 +25,8 @@ Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affich
 
 | Service | Image | Preuve | État final |
 |---|---|---|---|
-| Auth | `trust-circle-staging-auth:staging-f0e1baa7db2c` | image ID `a190c4e59656`, label revision complet | sain, 0 redémarrage |
-| Messaging | `trust-circle-staging-messaging:staging-f0e1baa7db2c` | image ID `235c9caf10de`, label revision complet | sain, 0 redémarrage |
+| Auth | `trust-circle-staging-auth:staging-abf6b51abf29` | image ID `9659a0b15405`, label revision complet | sain, 0 redémarrage |
+| Messaging | `trust-circle-staging-messaging:staging-abf6b51abf29` | image ID `aa998f170f2a`, label revision complet | sain, 0 redémarrage |
 | PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 | Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 
@@ -60,7 +60,7 @@ PostgreSQL utilise un volume inscriptible, des limites de ressources, un healthc
 - `infrastructure/postgres/init.sql` monté en lecture seule pour la première initialisation.
 - 12 tables publiques observées ; `user_groups.role` contraint à `admin` ou `member`, le propriétaire restant dérivé de `groups.creator_id`.
 - Données uniquement synthétiques, créées par les smoke tests.
-- Première migration SQL réversible conservée dans `infrastructure/postgres/migrations/` et appliquée manuellement pour `TC-104`. Le choix et l'automatisation d'un véritable outil de migration restent suivis par `TC-201`.
+- Deux migrations SQL réversibles sont conservées dans `infrastructure/postgres/migrations/` et appliquées manuellement pour `TC-104` et `TC-105`. La seconde ajoute l'unique index partiel `uidx_join_requests_pending_group_user` ; aucun doublon `pending` n'existe. Le choix et l'automatisation d'un véritable outil de migration restent suivis par `TC-201`.
 
 ## Validations exécutées
 
@@ -128,11 +128,23 @@ Le redéploiement `TC-104` du 2026-08-25 a ensuite validé :
 
 La configuration précédente est conservée en mode `0600` sous `staging.env.before-f0e1baa7db2c`. La release `8ebeaa30f243a010d22070b8de20d969adedba89` reste disponible pour rollback applicatif ; la migration descendante a été exercée isolément avant le déploiement.
 
+Le redéploiement `TC-105` du 2026-08-25 a ensuite validé :
+
+1. montée et descente de `20260825_002_unique_pending_join_request` dans un schéma isolé, avec rejet du second doublon `pending` en montée et insertion de contrôle possible après descente ;
+2. absence de doublon préalable puis sauvegarde PostgreSQL vérifiée `pre-tc105-20260825T123518Z.dump`, conservée en mode `0600` dans le répertoire privé de sauvegardes ;
+3. application réelle de l'index partiel, sans suppression ni réécriture de donnée ;
+4. build et déploiement des images Auth/Messaging depuis `abf6b51abf2967b7ddd0d43020690b0fc4872e8c`, avec labels de révision correspondants ;
+5. healthchecks des quatre services, zéro redémarrage et aucun log de niveau erreur observé dans les quatre services après déploiement ;
+6. smoke test complet réussi en 2 secondes : conversation, accusé de lecture et message réels, double demande concurrente donnant `201/409`, double décision donnant `200/403`, course publication/révocation terminant avec la clé `revoked`, puis refus de republier et d'envoyer depuis cet appareil ;
+7. cohérence SQL finale : aucun cercle sans appartenance créateur, aucune conversation sans participant créateur et aucune demande acceptée sans appartenance ou clé d'appareil.
+
+La configuration précédente est conservée en mode `0600` sous `staging.env.before-abf6b51abf29`. La release `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f` reste disponible pour rollback applicatif ; l'application précédente est compatible avec l'index et la migration descendante a été exercée isolément.
+
 ## Limites assumées
 
 - Pas de domaine ni TLS : accès volontairement local jusqu'à la revue de fermeture de Phase 1.
 - Pas encore de build Flutter ciblant le staging.
-- Pas encore d'outil de migrations ni de restauration complète du nouveau volume ; la migration `TC-104` et son rollback ont seulement été exercés dans un schéma isolé.
+- Pas encore d'outil de migrations ni de restauration complète du nouveau volume ; les migrations `TC-104`/`TC-105` et leurs rollbacks ont été exercés dans un schéma isolé, mais appliqués manuellement au staging.
 - Les principaux scénarios d'autorisation croisée cercle/conversation/clé de `TC-104` sont couverts ; l'élargissement de la suite d'intégration PostgreSQL et des tests négatifs reste suivi par `TC-111`.
 - Images backend locales non publiées dans un registre ; l'image ID et les labels assurent la traçabilité locale, pas une provenance distante.
 - Le LXC reste partagé et privilégié.

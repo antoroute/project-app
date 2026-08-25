@@ -2,7 +2,7 @@
 
 Statut : comportement observé, non contractuel pour une release
 Dernière mise à jour : 2026-08-25
-Code observé : `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f`
+Code observé : `abf6b51abf2967b7ddd0d43020690b0fc4872e8c`
 Tâche : `TC-009`
 
 ## Objet et règles de lecture
@@ -48,8 +48,8 @@ Le staging actuellement validé est isolé sur le loopback du LXC106. Le client 
 | `ConversationProvider` | conversations, messages, caches, synchronisation et notifications | outbox fiable ou synchronisation durable |
 | `WebSocketService` | connexion Socket.IO, reconnexion, abonnements et callbacks | source durable des messages ; les événements sont principalement des pings |
 | Auth Fastify | inscription, login, access/refresh JWT, `/me`, logout | gestion complète du cycle de compte |
-| Messaging Fastify | REST métier, Socket.IO, présence et matrice ACL partagée | autorisations atomiques pour toutes les mutations |
-| PostgreSQL | comptes, sessions, appartenances, clés publiques et enveloppes | migrations versionnées ou séparation des privilèges par service |
+| Messaging Fastify | REST métier, Socket.IO, présence, matrice ACL et transactions critiques partagées | outbox/idempotence durable ou atomicité des futures mutations non encore écrites |
+| PostgreSQL | comptes, sessions, appartenances, clés publiques et enveloppes | outil/registre automatisé de migrations ou séparation des privilèges par service |
 | SQLite local | enveloppes, état de synchronisation et caches | base réellement chiffrée ; le fichier est actuellement ouvert avec `sqflite` standard |
 
 ## Démarrage du client
@@ -116,7 +116,7 @@ Observé :
 
 1. L'utilisateur saisit un nom.
 2. Flutter génère d'abord une paire Ed25519/X25519 sous un espace de noms basé sur le nom du cercle et transmet les clés publiques lors de la création.
-3. Messaging crée `groups`, ajoute le créateur dans `user_groups` et peut enregistrer la clé publique Ed25519 dans `group_keys`.
+3. Messaging crée `groups`, ajoute le créateur dans `user_groups` et peut enregistrer la clé publique Ed25519 dans `group_keys`, le tout dans une transaction unique.
 4. Après réception du véritable UUID du cercle, Flutter génère une autre paire sous l'espace `groupId/deviceId` et la publie dans `group_device_keys`.
 
 Les clés générées sous le nom du cercle et la table `group_keys` ne participent pas au chiffrement des messages V2 observé. Le champ X25519 de groupe transmis à la création n'est pas persisté par cette route. Cette duplication est une dette de conception, pas une seconde couche de chiffrement.
@@ -125,11 +125,11 @@ Les clés générées sous le nom du cercle et la table `group_keys` ne particip
 
 1. L'utilisateur fournit ou scanne l'UUID du cercle.
 2. Flutter obtient son `deviceId`, génère une paire Ed25519/X25519 pour ce cercle et transmet les clés publiques dans une join request.
-3. Messaging crée `join_requests` avec le sujet JWT, l'appareil et les clés publiques.
+3. Messaging crée `join_requests` avec le sujet JWT, l'appareil et les clés publiques. Un verrou de cercle et un index unique partiel garantissent au plus une demande `pending` par utilisateur et cercle, y compris en concurrence.
 4. Seuls le propriétaire et les administrateurs peuvent voir puis accepter ou refuser la demande.
 5. La route de vote historique est neutralisée et le client ne l'utilise plus.
-6. À l'acceptation, l'utilisateur rejoint `user_groups` et la clé initiale est copiée dans `group_device_keys` avec le statut `active`.
-7. Des pings `group:member_joined` et `group:joined` demandent aux clients de rafraîchir leurs données.
+6. À l'acceptation, l'utilisateur rejoint `user_groups`, la clé initiale est copiée dans `group_device_keys` avec le statut `active` et la demande change de statut dans la même transaction. Une décision concurrente perdante est refusée.
+7. Des pings `group:member_joined` et `group:joined` demandent aux clients de rafraîchir leurs données, uniquement après commit.
 
 Depuis `TC-104`, `groups.creator_id` détermine l'unique propriétaire et `user_groups.role` distingue administrateur et membre. Seul le propriétaire peut affecter ces deux rôles ; le transfert de propriété reste hors de ce parcours.
 
@@ -165,7 +165,7 @@ Les seeds privés et clés publiques sont stockés via `flutter_secure_storage`.
 ### Révocation
 
 - Un utilisateur peut mettre l'un de ses appareils à l'état `revoked` pour un cercle.
-- Messaging refuse qu'un appareil révoqué republie simplement les mêmes clés et vérifie le statut actif lors d'un envoi.
+- Messaging refuse qu'un appareil révoqué republie simplement les mêmes clés et vérifie le statut actif lors d'un envoi. Publication et révocation partagent des contrôles verrouillés ; l'upsert conditionnel ne peut jamais réactiver une ligne `revoked`, même en concurrence.
 - Les caches locaux tentent d'invalider les entrées associées.
 
 Écarts : pas de preuve de possession, d'approbation par un appareil existant, de notification de changement de clé ni de rattachement robuste au compte (`TC-106`). Une révocation n'efface pas les messages ou clés déjà obtenus par l'appareil.
@@ -181,13 +181,13 @@ Flutter transmet `groupId`, `type` et une liste de membres ciblés. Messaging :
 3. crée la conversation et ajoute les participants validés ;
 4. rejoint leurs sockets aux rooms utiles puis émet un ping `conversation:created`.
 
-Écart restant : le contrôle préalable ferme l'insertion manifestement interdite, mais la vérification et les écritures multi-étapes ne partagent pas encore une transaction (`TC-105`).
+Depuis `TC-105`, les contrôles d'appartenance verrouillés, la conversation et tous ses participants sont écrits sur la même connexion et dans la même transaction. Les rooms et le ping `conversation:created` ne sont modifiés ou émis qu'après commit ; une panne intermédiaire ne laisse aucune conversation partielle.
 
 ### Lecture et accusés
 
 - La liste des conversations est filtrée par `conversation_users` et le sujet JWT.
 - Le détail, les membres, les messages et lecteurs exigent à la fois l'appartenance à la conversation et au cercle parent via le service ACL.
-- `POST /api/conversations/:id/read` met `last_read_at` à l'heure serveur et émet `conv:read`.
+- `POST /api/conversations/:id/read` verrouille l'accès et met `last_read_at` à l'heure serveur dans une transaction, puis émet `conv:read` après commit.
 - Les indicateurs de frappe sont émis uniquement après vérification d'appartenance par Messaging.
 
 ## Envoi d'un message V2
@@ -221,7 +221,7 @@ Le serveur refuse :
 - un destinataire absent de la conversation ou dont l'appareil est inactif ;
 - un `messageId` déjà persisté.
 
-Ces contrôles ne sont pas encore transactionnels et les validations de taille/encodage restent incomplètes (`TC-105`, `TC-107`).
+Depuis `TC-105`, ces contrôles verrouillent dans une même transaction l'appartenance, la conversation et les clés actives jusqu'à l'insertion. Tous les couples destinataire/appareil sont validés par une requête PostgreSQL groupée plutôt que par une requête par appareil, puis `message:new` est émis après commit. Les validations de taille et d'encodage restent incomplètes (`TC-107`).
 
 ## Réception, affichage et notifications
 
@@ -345,7 +345,7 @@ Le fichier OpenAPI actuel ne couvre pas encore fidèlement toutes ces routes et 
 | biométrie | protège le refresh local | UX et plateformes à valider |
 | cercles | création, liste, demande, décision owner/admin, rôles | transfert de propriété et UX de gestion à finaliser |
 | QR d'adhésion | lecture d'un identifiant de cercle | format d'invitation sûr à concevoir |
-| conversations | création/liste/détail avec ACL commune | atomicité à corriger dans `TC-105` |
+| conversations | création/liste/détail atomiques avec ACL commune | idempotence et synchronisation durable à traiter en Phase 5 |
 | texte E2EE V2 | envoi/réception avec vérification avant usage | protocole V3 et validation appareils réels requis |
 | appareils | liste/publication/révocation partielle | preuve et approbation requises |
 | présence/frappe/lecture | temps réel en mémoire | confidentialité, limites et fiabilité à tester |

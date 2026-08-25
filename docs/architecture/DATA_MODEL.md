@@ -16,13 +16,13 @@ Le script `infrastructure/postgres/init.sql` définit :
 - `refresh_tokens` : sessions renouvelables ;
 - `notifications` : événements applicatifs utilisateur.
 
-Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. `TC-104` ajoute le premier couple SQL montant/descendant pour le rôle, à reprendre dans l'outil et la baseline qui seront choisis par `TC-201`.
+Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. `TC-104` ajoute le premier couple SQL montant/descendant pour le rôle. `TC-105` ajoute le second : un index unique partiel sur `(group_id, user_id)` lorsque `join_requests.status = 'pending'`. Il interdit plusieurs demandes simultanément en attente sans empêcher l'historique accepté/rejeté. Ces scripts restent à reprendre dans l'outil et la baseline qui seront choisis par `TC-201`.
 
 La circulation de ces données par parcours est décrite dans [`FUNCTIONAL_REFERENCE.md`](FUNCTIONAL_REFERENCE.md), et les fichiers responsables dans [`TRACEABILITY.md`](TRACEABILITY.md).
 
 ## Problèmes structurels à résoudre
 
-- Pas encore d'outil, de registre appliqué ni de baseline globale de migrations ; seul le changement TC-104 possède des scripts SQL versionnés.
+- Pas encore d'outil, de registre appliqué ni de baseline globale de migrations ; les changements `TC-104` et `TC-105` possèdent des scripts SQL versionnés mais sont encore appliqués manuellement.
 - Le stockage des rôles est explicite, mais le transfert de propriété et l'interface complète de gestion restent à concevoir.
 - Cycle de vie des appareils incomplet : preuve d'approbation, révocation, rotation et rattachement au compte.
 - Horodatages mêlant `timestamp` et `timestamptz`.

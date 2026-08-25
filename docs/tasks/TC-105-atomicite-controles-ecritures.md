@@ -1,6 +1,6 @@
 # TC-105 — Rendre atomiques les contrôles et écritures critiques
 
-Statut : En cours
+Statut : Terminée
 Priorité : P0 sécurité et intégrité
 Décision : mainteneur, avec preuve PostgreSQL
 Dépendances : TC-104
@@ -57,16 +57,16 @@ Les événements Socket.IO sont actuellement proches des écritures mais ne sont
 
 ## Critères d'acceptation
 
-- [ ] La primitive transactionnelle commit, rollback, libère le client et rejoue seulement les erreurs transitoires prévues.
-- [ ] Aucun cercle ou conversation partiel ne subsiste après l'échec d'une écriture intermédiaire.
-- [ ] Une demande ne peut être acceptée/rejetée qu'une fois ; appartenance, clé et statut sont atomiques.
-- [ ] Deux créations concurrentes ne produisent pas plusieurs demandes `pending` pour le même cercle/utilisateur.
-- [ ] Une clé révoquée ne peut pas redevenir active par course entre publication et révocation.
-- [ ] L'envoi verrouille l'appartenance et les clés actives jusqu'à l'insertion et valide les destinataires en une requête groupée.
-- [ ] Accusé de lecture et changement de rôle ne présentent plus de fenêtre contrôle/écriture.
-- [ ] Aucun événement Socket.IO ni changement de room n'a lieu avant le commit ou après rollback.
-- [ ] Les refus et conflits ne révèlent pas davantage l'existence d'un objet inaccessible.
-- [ ] Migration montante/descendante, tests locaux, concurrence et smoke tests réussissent sur `trust-circle-staging` uniquement.
+- [x] La primitive transactionnelle commit, rollback, libère le client et rejoue seulement les erreurs transitoires prévues.
+- [x] Aucun cercle ou conversation partiel ne subsiste après l'échec d'une écriture intermédiaire.
+- [x] Une demande ne peut être acceptée/rejetée qu'une fois ; appartenance, clé et statut sont atomiques.
+- [x] Deux créations concurrentes ne produisent pas plusieurs demandes `pending` pour le même cercle/utilisateur.
+- [x] Une clé révoquée ne peut pas redevenir active par course entre publication et révocation.
+- [x] L'envoi verrouille l'appartenance et les clés actives jusqu'à l'insertion et valide les destinataires en une requête groupée.
+- [x] Accusé de lecture et changement de rôle ne présentent plus de fenêtre contrôle/écriture.
+- [x] Aucun événement Socket.IO ni changement de room n'a lieu avant le commit ou après rollback.
+- [x] Les refus et conflits ne révèlent pas davantage l'existence d'un objet inaccessible.
+- [x] Migration montante/descendante, tests locaux, concurrence et smoke tests réussissent sur `trust-circle-staging` uniquement.
 
 ## Tests et preuves attendues
 
@@ -92,3 +92,18 @@ Le code précédent reste compatible avec l'index. En rollback applicatif, repoi
 ## Décisions humaines nécessaires
 
 Aucune. La stratégie ne change ni parcours utilisateur ni modèle de rôle. Les attentes concurrentes concernent des opérations rares d'administration ; le chemin d'envoi est au contraire réduit d'un contrôle par destinataire à une requête groupée.
+
+## Résultat et preuves
+
+Implémentation applicative : commit `abf6b51abf2967b7ddd0d43020690b0fc4872e8c`.
+
+- Auth : 17 tests réussis.
+- Messaging : 41 tests réussis et build TypeScript réussi.
+- Tests dédiés : commit/rollback/libération/retry borné, pannes injectées sans événement, ACL transactionnelle, requête groupée des destinataires et ordre commit puis émission.
+- Migration `20260825_002_unique_pending_join_request` montée puis descendue dans un schéma PostgreSQL isolé ; unicité prouvée dans le sens montant et suppression effective dans le sens descendant.
+- Sauvegarde staging vérifiée avant migration : `pre-tc105-20260825T123518Z.dump`, mode `0600`.
+- Release staging : même commit, quatre services sains, zéro redémarrage et zéro log d'erreur observé après déploiement.
+- Smoke test réel réussi en 2 secondes : conversation, lecture et message, double demande concurrente `201/409`, double décision `200/403`, publication/révocation concurrente avec état final `revoked`.
+- Vérification SQL finale : aucun doublon `pending`, index partiel présent, aucun cercle sans appartenance créateur, aucune conversation sans participant créateur et aucune demande acceptée sans appartenance ou clé d'appareil.
+
+Le staging uniquement a été modifié. La production n'a pas été touchée. Le rollback applicatif reste la release `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f` ; le script descendant de la migration a été exercé isolément.
