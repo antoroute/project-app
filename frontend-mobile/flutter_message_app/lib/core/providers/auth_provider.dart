@@ -8,6 +8,11 @@ import 'package:jwt_decoder/jwt_decoder.dart';
 // V2: RSA key management removed
 import 'package:flutter_message_app/config/constants.dart';
 import 'package:flutter_message_app/core/services/biometric_service.dart';
+import 'package:flutter_message_app/core/services/message_key_cache.dart';
+import 'package:flutter_message_app/core/services/persistent_message_key_cache.dart';
+import 'package:flutter_message_app/core/services/session_device_service.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
+
 // pointycastle removed in v2
 
 /// Fournit le JWT et gère la mise à jour via biométrie.
@@ -26,8 +31,8 @@ class AuthProvider extends ChangeNotifier {
   /// Indique si l’utilisateur est authentifié.
   bool get isAuthenticated => _token != null;
 
-  final Uri _loginUri    = Uri.parse('https://auth.kavalek.fr/auth/login');
-  final Uri _refreshUri  = Uri.parse('https://auth.kavalek.fr/auth/refresh');
+  final Uri _loginUri = Uri.parse('https://auth.kavalek.fr/auth/login');
+  final Uri _refreshUri = Uri.parse('https://auth.kavalek.fr/auth/refresh');
   final Uri _registerUri = Uri.parse('https://auth.kavalek.fr/auth/register');
 
   /// Retourne l'ID de l'utilisateur extrait du JWT (claim "id").
@@ -39,6 +44,22 @@ class AuthProvider extends ChangeNotifier {
     } catch (_) {
       return null;
     }
+  }
+
+  String? _subjectOf(String token) {
+    try {
+      final payload = JwtDecoder.decode(token);
+      return (payload['sub'] as String?) ?? (payload['id'] as String?);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _clearDeviceSecurityState() async {
+    await SessionDeviceService.instance.clearMemoryCache();
+    await KeyManagerFinal.instance.clearMemoryCaches();
+    MessageKeyCache.instance.clear();
+    await PersistentMessageKeyCache.instance.clear();
   }
 
   /// Retourne le nom d'utilisateur extrait du JWT (claim "username").
@@ -54,6 +75,7 @@ class AuthProvider extends ChangeNotifier {
 
   /// Connexion : récupère accessToken et refreshToken, les stocke.
   Future<void> login(String email, String password) async {
+    final previousUserId = userId;
     final http.Response response = await http.post(
       _loginUri,
       headers: <String, String>{
@@ -61,28 +83,36 @@ class AuthProvider extends ChangeNotifier {
         'X-Client-Version': clientVersion,
         'X-App-Secret': appSecret,
       },
-      body: jsonEncode(<String, String>{
-        'email': email,
-        'password': password,
-      }),
+      body: jsonEncode(<String, String>{'email': email, 'password': password}),
     );
 
     if (response.statusCode != 200) {
       throw Exception('Erreur login : ${response.body}');
     }
 
-    final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
-    final String? accessToken  = (data['accessToken'] as String?) ?? (data['access'] as String?);
-    final String? refreshToken = (data['refreshToken'] as String?) ?? (data['refresh'] as String?);
+    final Map<String, dynamic> data =
+        jsonDecode(response.body) as Map<String, dynamic>;
+    final String? accessToken =
+        (data['accessToken'] as String?) ?? (data['access'] as String?);
+    final String? refreshToken =
+        (data['refreshToken'] as String?) ?? (data['refresh'] as String?);
 
     if (accessToken == null || refreshToken == null) {
       throw Exception('Réponse invalide du serveur lors du login');
     }
 
+    final nextUserId = _subjectOf(accessToken);
+    if (nextUserId == null) {
+      throw Exception('Access token sans identité utilisateur valide');
+    }
+    if (previousUserId != null && previousUserId != nextUserId) {
+      await _clearDeviceSecurityState();
+    }
+
     await _storage.write(key: 'accessToken', value: accessToken);
     await _storage.write(key: 'refreshToken', value: refreshToken);
     _token = accessToken;
-    
+
     notifyListeners();
   }
 
@@ -120,12 +150,13 @@ class AuthProvider extends ChangeNotifier {
   /// Rafraîchit le token via biométrie (popup) et l'API /refresh.
   Future<bool> refreshAccessToken() async {
     try {
+      final previousUserId = userId;
       // Vérifier si la biométrie est disponible
       if (!await _biometric.canCheckBiometrics()) {
         debugPrint('🔐 [Auth] Biométrie non disponible');
         return false;
       }
-      
+
       // Demander l'authentification biométrique
       debugPrint('🔐 [Auth] Demande d\'authentification biométrique...');
       final bool authenticated = await _biometric.authenticate();
@@ -134,7 +165,7 @@ class AuthProvider extends ChangeNotifier {
         return false;
       }
       debugPrint('🔐 [Auth] Authentification biométrique réussie');
-      
+
       // Récupérer le refresh token
       final String? storedRefresh = await _storage.read(key: 'refreshToken');
       if (storedRefresh == null) {
@@ -142,7 +173,7 @@ class AuthProvider extends ChangeNotifier {
         return false;
       }
       debugPrint('🔐 [Auth] Refresh token trouvé, appel API...');
-      
+
       // Appeler l'API de refresh
       final http.Response response = await http.post(
         _refreshUri,
@@ -154,9 +185,9 @@ class AuthProvider extends ChangeNotifier {
         },
         body: '{}', // CORRECTION: Ajouter un body JSON vide
       );
-      
+
       debugPrint('🔐 [Auth] Réponse API refresh: ${response.statusCode}');
-      
+
       if (response.statusCode != 200) {
         debugPrint('🔐 [Auth] Erreur API refresh: ${response.body}');
         // Si le refresh token est invalide, le supprimer
@@ -166,22 +197,31 @@ class AuthProvider extends ChangeNotifier {
         }
         return false;
       }
-      
-      final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
-      final String? newAccessToken = (data['accessToken'] as String?) ?? (data['access'] as String?);
-      
+
+      final Map<String, dynamic> data =
+          jsonDecode(response.body) as Map<String, dynamic>;
+      final String? newAccessToken =
+          (data['accessToken'] as String?) ?? (data['access'] as String?);
+
       if (newAccessToken == null) {
         debugPrint('🔐 [Auth] Aucun access token dans la réponse');
         return false;
       }
-      
+
+      final nextUserId = _subjectOf(newAccessToken);
+      if (nextUserId == null ||
+          (previousUserId != null && previousUserId != nextUserId)) {
+        debugPrint('🔐 [Auth] Sujet inattendu dans le nouvel access token');
+        await logout();
+        return false;
+      }
+
       // Mettre à jour le token en mémoire et en storage
       _token = newAccessToken;
       await _storage.write(key: 'accessToken', value: newAccessToken);
       notifyListeners();
       debugPrint('🔐 [Auth] Token rafraîchi avec succès');
       return true;
-      
     } catch (e) {
       debugPrint('🔐 [Auth] Erreur lors du refresh: $e');
       // En cas d'erreur, nettoyer les tokens
@@ -210,6 +250,7 @@ class AuthProvider extends ChangeNotifier {
     _token = null;
     await _storage.delete(key: 'accessToken');
     await _storage.delete(key: 'refreshToken');
+    await _clearDeviceSecurityState();
     notifyListeners();
   }
 
@@ -235,13 +276,15 @@ class AuthProvider extends ChangeNotifier {
     if (!valid) {
       final bool biometricsAvailable = await canUseBiometrics();
       if (!biometricsAvailable) {
-        logout();
-        throw Exception('Token invalide et biométrie indisponible - déconnexion');
+        await logout();
+        throw Exception(
+          'Token invalide et biométrie indisponible - déconnexion',
+        );
       }
       // CORRECTION: Attendre le résultat de la reconnexion biométrique
       final bool biometricSuccess = await loginWithBiometrics();
       if (!biometricSuccess) {
-        logout();
+        await logout();
         throw Exception('Échec de la reconnexion biométrique - déconnexion');
       }
     }

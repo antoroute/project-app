@@ -542,8 +542,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
       final currentUserId = context.read<AuthProvider>().userId;
       if (currentUserId == null) return;
 
-      final myDeviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final myDeviceId = await SessionDeviceService.instance
+          .getOrCreateDeviceId(currentUserId);
       final groupId = _conversationProvider.groupIdForConversation(
         message.conversationId,
       );

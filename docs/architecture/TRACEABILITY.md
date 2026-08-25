@@ -1,7 +1,7 @@
 # Matrice de traçabilité fonctionnelle et sécurité
 
 Dernière mise à jour : 2026-08-25
-Code observé : `abf6b51abf2967b7ddd0d43020690b0fc4872e8c`
+Code observé : branche `main`, changement `TC-106` lot A
 
 Cette matrice aide à retrouver rapidement le code réellement responsable d'un comportement. Elle n'atteste ni la qualité ni la sécurité d'une fonction : consulter la référence fonctionnelle, les invariants et les tâches liées avant toute modification.
 
@@ -12,8 +12,8 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | démarrage et injection | [`main.dart`](../../frontend-mobile/flutter_message_app/lib/main.dart) | secure storage, SQLite, Socket.IO | `TC-601`, `TC-602` |
 | configuration des URL et en-têtes | [`constants.dart`](../../frontend-mobile/flutter_message_app/lib/config/constants.dart), [`api_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/api_service.dart) | HTTPS | `TC-109`, configuration release |
 | inscription, connexion, refresh, sortie | [`auth_provider.dart`](../../frontend-mobile/flutter_message_app/lib/core/providers/auth_provider.dart), [`biometric_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/biometric_service.dart) | secure storage, Auth API | `TC-401` à `TC-408` ; logout distant manquant |
-| identifiant d'appareil | [`session_device_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/session_device_service.dart) | secure storage | `TC-303`, `TC-306` |
-| génération et stockage des clés | [`key_manager_final.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/key_manager_final.dart) | secure storage | `TC-106`, `TC-303`, `TC-306` |
+| identifiant d'appareil | [`session_device_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/session_device_service.dart) | secure storage, espace propre au compte | `TC-106` lot A terminé ; registre `TC-106` lots B-D |
+| génération et stockage des clés | [`key_manager_final.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/key_manager_final.dart), [`secure_string_store.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/secure_string_store.dart) | secure storage, chargement fail-closed | `TC-106` lot A terminé, `TC-303`, `TC-306` |
 | annuaire de clés publiques | [`key_directory_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/key_directory_service.dart) | Messaging API, cache mémoire | `TC-106`, `TC-303` |
 | enveloppe E2EE V2 | [`message_cipher_v2.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/message_cipher_v2.dart), [`message_envelope_verifier.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/message_envelope_verifier.dart), [`message_v2.dart`](../../frontend-mobile/flutter_message_app/lib/core/models/message_v2.dart) | JSON V2 | `TC-114`, `TC-301` à `TC-312` |
 | calculs cryptographiques hors UI | [`crypto_isolate_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/crypto_isolate_service.dart), [`crypto_isolate_worker.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/crypto_isolate_worker.dart) | isolates Flutter | `TC-114`, tests performance |
@@ -22,8 +22,8 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | WebSocket | [`websocket_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/websocket_service.dart), [`websocket_heartbeat_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/websocket_heartbeat_service.dart) | Socket.IO | `TC-108`, `TC-505`, `TC-510` |
 | présence | [`global_presence_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/global_presence_service.dart) | Socket.IO, mémoire | `TC-510` |
 | enveloppes locales | [`local_message_storage.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/local_message_storage.dart) | SQLite non chiffré | `TC-306`, Phase 5 |
-| clés de message en mémoire | [`message_key_cache.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/message_key_cache.dart) | RAM, accès après preuve typée | `TC-114`, `TC-306` |
-| clés de message persistantes | [`persistent_message_key_cache.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/persistent_message_key_cache.dart) | secure storage + SQLite | `TC-306` ; génération de clé critique |
+| clés de message en mémoire | [`message_key_cache.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/message_key_cache.dart) | RAM, preuve typée et index compte/appareil/message | `TC-106` lot A, `TC-114`, `TC-306` |
+| clés de message persistantes | [`persistent_message_key_cache.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/persistent_message_key_cache.dart) | clé maître CSPRNG par compte + SQLite | cloisonnement `TC-106` lot A ; chiffrement SQLite `TC-306` |
 | queue hors ligne | [`message_queue_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/message_queue_service.dart) | SQLite | `TC-502` ; non intégrée au chemin d'envoi |
 | notifications locales | [`notification_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/notification_service.dart), [`in_app_notification_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/in_app_notification_service.dart) | OS/RAM | `TC-114`, `TC-509` |
 | réseau et reprise | [`network_monitor_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/network_monitor_service.dart) | connectivité | `TC-504` à `TC-508` |

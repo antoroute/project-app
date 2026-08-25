@@ -1,7 +1,7 @@
 # Protocole cryptographique
 
 Statut : synthèse V2 observée, V3 à décider
-Dernière mise à jour : 2026-08-24
+Dernière mise à jour : 2026-08-25
 
 Ce document donne l'orientation de sécurité. La description champ par champ du code actuel, des clés, octets signés, caches et métadonnées est dans [`CRYPTOGRAPHY_V2.md`](CRYPTOGRAPHY_V2.md).
 
@@ -18,8 +18,8 @@ Cette liste d'algorithmes ne suffit pas à démontrer un protocole sûr. La sér
 - Le format est lié à l'implémentation Dart et certaines conversions sont ambiguës entre texte et octets.
 - Depuis `TC-114`, signature, contexte, appareil et tags sont imposés avant affichage, cache ou notification. Les calculs Ed25519/X25519 sont déportés dans l'isolate et le chemin nominal avec annuaire en cache n'ajoute aucun aller-retour réseau.
 - Les octets signés sont une concaténation sans séparateurs ni longueurs ; le sel HKDF n'est pas signé et aucune AAD n'est fournie à AES-GCM.
-- Le cycle de confiance d'un nouvel appareil est incomplet.
-- La clé maître du cache persistant de clés de message est dérivée de façon prévisible de l'horloge, sans aléa cryptographique ; la base SQLite locale n'est pas réellement chiffrée.
+- Le cycle de confiance d'un nouvel appareil reste incomplet côté serveur. Le lot A de `TC-106` isole cependant l'identifiant, les clés et caches locaux par compte et interdit la régénération silencieuse.
+- La clé maître du cache persistant de clés de message est désormais aléatoire et propre au compte ; la base SQLite locale n'est toujours pas réellement chiffrée.
 - Aucun ensemble de vecteurs de test interopérables ni audit indépendant n'est présent.
 
 ## Exigences pour V3

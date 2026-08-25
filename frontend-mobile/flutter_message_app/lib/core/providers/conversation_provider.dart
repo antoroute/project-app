@@ -28,6 +28,7 @@ class ConversationProvider extends ChangeNotifier {
   final WebSocketService _webSocketService;
   late final KeyDirectoryService _keyDirectory;
   final AuthProvider _authProvider;
+  String? _keyCacheUserId;
 
   /// 🚀 OPTIMISATION: Limite maximale de messages en mémoire par conversation
   /// Au-delà de cette limite, les messages les plus anciens sont automatiquement retirés
@@ -114,6 +115,8 @@ class ConversationProvider extends ChangeNotifier {
       _webSocketService = WebSocketService.instance,
       _authProvider = authProvider {
     _keyDirectory = KeyDirectoryService(_apiService);
+    _keyCacheUserId = _authProvider.userId;
+    _authProvider.addListener(_handleAuthIdentityChange);
 
     // Initialiser le stockage local (async, non-bloquant)
     LocalMessageStorage.instance.initialize().catchError((e) {
@@ -137,6 +140,30 @@ class ConversationProvider extends ChangeNotifier {
 
     // Configurer les autres callbacks WebSocket de manière asynchrone
     _setupWebSocketCallbacksAsync();
+  }
+
+  Future<String> _currentDeviceId() async {
+    final userId = _authProvider.userId;
+    if (userId == null) {
+      throw StateError('authenticated user is required for device identity');
+    }
+    return SessionDeviceService.instance.getOrCreateDeviceId(userId);
+  }
+
+  void _handleAuthIdentityChange() {
+    final nextUserId = _authProvider.userId;
+    if (_keyCacheUserId != nextUserId) {
+      _decryptedCache.clear();
+      _keyDirectory.clearAllCaches().catchError((_) {});
+      _keyCacheUserId = nextUserId;
+    }
+  }
+
+  @override
+  void dispose() {
+    _authProvider.removeListener(_handleAuthIdentityChange);
+    _notificationBatchTimer?.cancel();
+    super.dispose();
   }
 
   /// Configure l'écoute du service global de présence
@@ -381,8 +408,7 @@ class ConversationProvider extends ChangeNotifier {
         throw Exception('Utilisateur non authentifié');
       }
 
-      final myDeviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final myDeviceId = await _currentDeviceId();
       final groupId = groupIdForConversation(message.conversationId);
       if (groupId == null) {
         throw const MessageAuthenticationException('unknown_conversation');
@@ -1477,8 +1503,7 @@ class ConversationProvider extends ChangeNotifier {
       );
 
       final myUserId = _authProvider.userId!;
-      final myDeviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final myDeviceId = await _currentDeviceId();
 
       debugPrint(
         '📤 [ConversationProvider] myUserId: $myUserId, myDeviceId: $myDeviceId',
@@ -1629,8 +1654,7 @@ class ConversationProvider extends ChangeNotifier {
           !plaintext.contains('🔧 RETRY:')) {
         try {
           // Tentative UNIQUE de publication automatique des clés
-          final myDeviceId =
-              await SessionDeviceService.instance.getOrCreateDeviceId();
+          final myDeviceId = await _currentDeviceId();
           final groupId =
               _conversations
                   .firstWhere((c) => c.conversationId == conversationId)
@@ -1660,8 +1684,7 @@ class ConversationProvider extends ChangeNotifier {
   /// CORRECTION: Synchronisation proactive des clés pour tous les groupes
   Future<void> ensureDeviceKeysForAllGroups() async {
     try {
-      final myDeviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final myDeviceId = await _currentDeviceId();
       final conversations = _conversations;
 
       debugPrint(
@@ -1877,8 +1900,7 @@ class ConversationProvider extends ChangeNotifier {
         );
         return;
       }
-      final myDeviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final myDeviceId = await _currentDeviceId();
 
       // Récupérer le groupId depuis la conversation
       final conversation = _conversations.firstWhere(
@@ -2085,8 +2107,7 @@ class ConversationProvider extends ChangeNotifier {
         );
         return;
       }
-      final myDeviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final myDeviceId = await _currentDeviceId();
       final trustedGroupId = groupIdForConversation(convId);
       if (trustedGroupId == null) {
         debugPrint('Message WebSocket rejeté: conversation inconnue');

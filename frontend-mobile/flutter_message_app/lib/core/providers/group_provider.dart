@@ -57,6 +57,14 @@ class GroupProvider extends ChangeNotifier {
     );
   }
 
+  Future<String> _currentDeviceId() async {
+    final userId = _authProvider.userId;
+    if (userId == null) {
+      throw StateError('authenticated user is required for device identity');
+    }
+    return SessionDeviceService.instance.getOrCreateDeviceId(userId);
+  }
+
   Map<String, dynamic>? get groupDetail => _groupDetail;
   List<Map<String, dynamic>> get joinRequests => _joinRequests;
   List<Map<String, dynamic>> get members => _members;
@@ -97,8 +105,7 @@ class GroupProvider extends ChangeNotifier {
       );
 
       // Générer et publier les clés du créateur pour permettre l'envoi de messages
-      final deviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final deviceId = await _currentDeviceId();
 
       // S'assurer que les clés device sont générées
       await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);
@@ -173,8 +180,7 @@ class GroupProvider extends ChangeNotifier {
   }) async {
     try {
       // 🚀 NOUVEAU: Générer les clés device lors de la demande
-      final deviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final deviceId = await _currentDeviceId();
       await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);
 
       final pubKeys = await KeyManagerFinal.instance.publicKeysBase64(
@@ -224,8 +230,7 @@ class GroupProvider extends ChangeNotifier {
       // Après traitement, on refait un fetch
       await fetchJoinRequests(groupId);
       // Publier les clés du device courant après acceptation
-      final deviceId =
-          await SessionDeviceService.instance.getOrCreateDeviceId();
+      final deviceId = await _currentDeviceId();
       final pubKeys = await KeyManagerFinal.instance.publicKeysBase64(
         groupId,
         deviceId,

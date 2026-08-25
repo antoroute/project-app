@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/providers/group_provider.dart';
+import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 import 'package:flutter_message_app/core/services/session_device_service.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
@@ -18,7 +19,7 @@ class GroupScreen extends StatefulWidget {
 
 class _GroupScreenState extends State<GroupScreen> {
   final TextEditingController _groupNameController = TextEditingController();
-  final TextEditingController _groupIdController   = TextEditingController();
+  final TextEditingController _groupIdController = TextEditingController();
   bool _loading = false;
 
   @override
@@ -32,40 +33,43 @@ class _GroupScreenState extends State<GroupScreen> {
     setState(() => _loading = true);
     try {
       // 🚀 NOUVEAU: Générer les clés du groupe avec KeyManagerV2 (basé sur le nom du groupe)
-      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
+      final userId = context.read<AuthProvider>().userId;
+      if (userId == null) throw StateError('Utilisateur non authentifié');
+      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId(
+        userId,
+      );
       final groupName = _groupNameController.text.trim();
-      
+
       // Utiliser le nom du groupe comme identifiant temporaire pour générer les clés groupe
       await KeyManagerFinal.instance.ensureKeysFor(groupName, deviceId);
-      final groupKeys = await KeyManagerFinal.instance.publicKeysBase64(groupName, deviceId);
-      
-      final groupProvider =
-          Provider.of<GroupProvider>(context, listen: false);
+      final groupKeys = await KeyManagerFinal.instance.publicKeysBase64(
+        groupName,
+        deviceId,
+      );
+
+      final groupProvider = Provider.of<GroupProvider>(context, listen: false);
       final groupId = await groupProvider.createGroupWithMembers(
         groupName: groupName,
         memberEmails: [],
-        groupSigningPubKeyB64: groupKeys['pk_sig']!, // Ed25519 pour signature groupe
-        groupKEMPubKeyB64: groupKeys['pk_kem']!,     // X25519 pour échange groupe
+        groupSigningPubKeyB64:
+            groupKeys['pk_sig']!, // Ed25519 pour signature groupe
+        groupKEMPubKeyB64: groupKeys['pk_kem']!, // X25519 pour échange groupe
       );
 
-      SnackbarService.showSuccess(
-          context, 'Groupe créé avec succès !');
-      
+      SnackbarService.showSuccess(context, 'Groupe créé avec succès !');
+
       // CORRECTION: Naviguer vers la page du groupe (informations) après création
       if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => GroupNavScreen(
-              groupId: groupId,
-              groupName: groupName,
-            ),
+            builder:
+                (_) => GroupNavScreen(groupId: groupId, groupName: groupName),
           ),
         );
       }
     } catch (e) {
-      SnackbarService.showError(
-          context, 'Erreur création groupe : $e');
+      SnackbarService.showError(context, 'Erreur création groupe : $e');
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -78,24 +82,30 @@ class _GroupScreenState extends State<GroupScreen> {
     final String groupId = _groupIdController.text.trim();
     try {
       // 🚀 NOUVEAU: Générer les clés du groupe avec KeyManagerV2 (basé sur l'ID du groupe)
-      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId();
-      
-      // Utiliser l'ID du groupe pour générer les clés groupe
-      await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);
-      final groupKeys = await KeyManagerFinal.instance.publicKeysBase64(groupId, deviceId);
-      
-      final groupProvider =
-          Provider.of<GroupProvider>(context, listen: false);
-      await groupProvider.sendJoinRequest(
-        groupId, 
-        '', 
-        groupSigningPubKeyB64: groupKeys['pk_sig']!, // Ed25519 pour signature groupe
-        groupKEMPubKeyB64: groupKeys['pk_kem']!,     // X25519 pour échange groupe
+      final userId = context.read<AuthProvider>().userId;
+      if (userId == null) throw StateError('Utilisateur non authentifié');
+      final deviceId = await SessionDeviceService.instance.getOrCreateDeviceId(
+        userId,
       );
 
-      SnackbarService.showSuccess(
-          context, 'Demande d\'adhésion envoyée');
-      
+      // Utiliser l'ID du groupe pour générer les clés groupe
+      await KeyManagerFinal.instance.ensureKeysFor(groupId, deviceId);
+      final groupKeys = await KeyManagerFinal.instance.publicKeysBase64(
+        groupId,
+        deviceId,
+      );
+
+      final groupProvider = Provider.of<GroupProvider>(context, listen: false);
+      await groupProvider.sendJoinRequest(
+        groupId,
+        '',
+        groupSigningPubKeyB64:
+            groupKeys['pk_sig']!, // Ed25519 pour signature groupe
+        groupKEMPubKeyB64: groupKeys['pk_kem']!, // X25519 pour échange groupe
+      );
+
+      SnackbarService.showSuccess(context, 'Demande d\'adhésion envoyée');
+
       // CORRECTION: Retourner à la page qui liste les groupes en attendant d'être accepté
       if (mounted) {
         Navigator.pushAndRemoveUntil(
@@ -105,8 +115,7 @@ class _GroupScreenState extends State<GroupScreen> {
         );
       }
     } catch (e) {
-      SnackbarService.showError(
-          context, 'Erreur demande de jointure : $e');
+      SnackbarService.showError(context, 'Erreur demande de jointure : $e');
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -124,8 +133,7 @@ class _GroupScreenState extends State<GroupScreen> {
           children: <Widget>[
             TextField(
               controller: _groupNameController,
-              decoration:
-                  const InputDecoration(labelText: 'Nom du groupe'),
+              decoration: const InputDecoration(labelText: 'Nom du groupe'),
             ),
             const SizedBox(height: 8),
             ElevatedButton(
@@ -145,17 +153,21 @@ class _GroupScreenState extends State<GroupScreen> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.qr_code_scanner),
-                  onPressed: _loading
-                      ? null
-                      : () async {
-                          final String? groupId = await Navigator.push<String?>(
-                            context,
-                            MaterialPageRoute(builder: (_) => const QRScanScreen()),
-                          );
-                          if (groupId != null && groupId.isNotEmpty) {
-                            setState(() => _groupIdController.text = groupId);
-                          }
-                        },
+                  onPressed:
+                      _loading
+                          ? null
+                          : () async {
+                            final String? groupId =
+                                await Navigator.push<String?>(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const QRScanScreen(),
+                                  ),
+                                );
+                            if (groupId != null && groupId.isNotEmpty) {
+                              setState(() => _groupIdController.text = groupId);
+                            }
+                          },
                 ),
               ],
             ),

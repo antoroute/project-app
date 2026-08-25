@@ -232,8 +232,6 @@ class MessageCipherV2 {
 
           await MessageKeyCache.instance.cacheVerifiedMessageKey(
             envelope: verifiedEnvelope,
-            recipientUserId: myUserId,
-            recipientDeviceId: myDeviceId,
             messageKey: messageKey,
           );
           return {'decryptedText': clear, 'signatureValid': true};

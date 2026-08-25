@@ -18,18 +18,23 @@ class MessageKeyCache {
   Future<Uint8List?> getVerifiedMessageKey(
     VerifiedMessageEnvelope envelope,
   ) async {
-    final memoryKey = _getMemoryMessageKey(envelope.messageId);
+    final cacheKey = _cacheKey(envelope);
+    final memoryKey = _getMemoryMessageKey(cacheKey);
     if (memoryKey != null) {
       return memoryKey;
     }
 
     final persistentKey = await PersistentMessageKeyCache.instance
-        .getMessageKey(envelope.messageId);
+        .getMessageKey(
+          messageId: envelope.messageId,
+          userId: envelope.recipientUserId,
+          deviceId: envelope.recipientDeviceId,
+        );
     if (persistentKey == null || persistentKey.length != 32) {
       return null;
     }
 
-    _cache[envelope.messageId] = _CachedMessageKey(
+    _cache[cacheKey] = _CachedMessageKey(
       key: Uint8List.fromList(persistentKey),
       timestamp: DateTime.now(),
       ttl: _defaultTtl,
@@ -42,15 +47,13 @@ class MessageKeyCache {
   /// du tag AES-GCM du contenu.
   Future<void> cacheVerifiedMessageKey({
     required VerifiedMessageEnvelope envelope,
-    required String recipientUserId,
-    required String recipientDeviceId,
     required Uint8List messageKey,
   }) async {
     if (messageKey.length != 32) {
       throw const MessageAuthenticationException('invalid_message_key');
     }
 
-    _cache[envelope.messageId] = _CachedMessageKey(
+    _cache[_cacheKey(envelope)] = _CachedMessageKey(
       key: Uint8List.fromList(messageKey),
       timestamp: DateTime.now(),
       ttl: _defaultTtl,
@@ -61,8 +64,8 @@ class MessageKeyCache {
       await PersistentMessageKeyCache.instance.saveMessageKey(
         messageId: envelope.messageId,
         groupId: envelope.groupId,
-        userId: recipientUserId,
-        deviceId: recipientDeviceId,
+        userId: envelope.recipientUserId,
+        deviceId: envelope.recipientDeviceId,
         messageKey: messageKey,
         derivedFromDevice: envelope.senderDeviceId,
       );
@@ -71,13 +74,16 @@ class MessageKeyCache {
     }
   }
 
-  Uint8List? _getMemoryMessageKey(String messageId) {
-    final cached = _cache[messageId];
+  String _cacheKey(VerifiedMessageEnvelope envelope) =>
+      '${envelope.recipientUserId}\u0000${envelope.recipientDeviceId}\u0000${envelope.messageId}';
+
+  Uint8List? _getMemoryMessageKey(String cacheKey) {
+    final cached = _cache[cacheKey];
     if (cached == null) {
       return null;
     }
     if (cached.isExpired) {
-      _cache.remove(messageId);
+      _cache.remove(cacheKey);
       return null;
     }
     return Uint8List.fromList(cached.key);

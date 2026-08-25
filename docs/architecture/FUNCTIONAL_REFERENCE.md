@@ -2,7 +2,7 @@
 
 Statut : comportement observé, non contractuel pour une release
 Dernière mise à jour : 2026-08-25
-Code observé : `abf6b51abf2967b7ddd0d43020690b0fc4872e8c`
+Code observé : branche `main`, changement `TC-106` lot A
 Tâche : `TC-009`
 
 ## Objet et règles de lecture
@@ -143,7 +143,7 @@ Depuis `TC-104`, `groups.creator_id` détermine l'unique propriétaire et `user_
 
 ### Identifiant d'appareil
 
-`SessionDeviceService` crée un UUID et le stocke sous `device_id_v1` dans le stockage sécurisé. Cet identifiant est global à l'installation, pas séparé par compte.
+`SessionDeviceService` valide l'UUID du sujet, crée un UUID propre à ce compte et le stocke sous `device_id_v2:account:<userId>`. L'ancien `device_id_v1` global n'est pas réutilisé implicitement. Le cache mémoire des identifiants est purgé à la déconnexion ou au changement de compte.
 
 ### Paire par cercle
 
@@ -152,7 +152,7 @@ Pour chaque couple `groupId/deviceId`, `KeyManagerFinal` génère :
 - une paire Ed25519 pour les signatures ;
 - une paire X25519 statique de destinataire pour recevoir les clés de message.
 
-Les seeds privés et clés publiques sont stockés via `flutter_secure_storage`. Le détail des noms, tailles et usages est dans [`CRYPTOGRAPHY_V2.md`](../security/CRYPTOGRAPHY_V2.md).
+Les seeds privés et clés publiques sont stockés via `flutter_secure_storage`. Leur création est explicite ; toute paire partielle, invalide ou incohérente est refusée sans suppression ni régénération. Le détail des noms, tailles et usages est dans [`CRYPTOGRAPHY_V2.md`](../security/CRYPTOGRAPHY_V2.md).
 
 ### Annuaire et cache
 
@@ -168,7 +168,7 @@ Les seeds privés et clés publiques sont stockés via `flutter_secure_storage`.
 - Messaging refuse qu'un appareil révoqué republie simplement les mêmes clés et vérifie le statut actif lors d'un envoi. Publication et révocation partagent des contrôles verrouillés ; l'upsert conditionnel ne peut jamais réactiver une ligne `revoked`, même en concurrence.
 - Les caches locaux tentent d'invalider les entrées associées.
 
-Écarts : pas de preuve de possession, d'approbation par un appareil existant, de notification de changement de clé ni de rattachement robuste au compte (`TC-106`). Une révocation n'efface pas les messages ou clés déjà obtenus par l'appareil.
+Écarts : le cloisonnement local par compte est réalisé, mais il n'existe encore ni registre de compte, ni preuve de possession, ni approbation par un appareil actif, ni notification de changement de clé (`TC-106`, lots B à D). Une révocation n'efface pas les messages ou clés déjà obtenus par l'appareil.
 
 ## Conversations
 
@@ -251,11 +251,11 @@ La latence est limitée sans affaiblissement : priorité aux messages visibles d
 
 | Stockage | Contenu observé | Protection réelle | Limite |
 |---|---|---|---|
-| `flutter_secure_storage` | jetons, `deviceId`, seeds Ed25519/X25519, clés maîtres locales | mécanisme OS selon plateforme | espaces de noms incomplets par compte |
+| `flutter_secure_storage` | jetons, `deviceId` par compte, seeds Ed25519/X25519, clés maîtres locales | mécanisme OS selon plateforme ; sélection des clés via un `deviceId` propre au compte | registre de confiance serveur encore absent |
 | `messages_encrypted.db` | enveloppes V2, métadonnées, statut de signature, état de sync, caches | SQLite `sqflite` standard | la clé DB générée n'est pas utilisée |
-| `message_keys_cache` | clés de message chiffrées | AES-GCM, mais clé maître actuelle générée de façon non sûre | protection insuffisante et TTL 7 jours |
+| `message_keys_cache` | clés de message chiffrées | AES-GCM, clé maître CSPRNG propre au compte, index compte/appareil/message | SQLite non chiffré et TTL 7 jours |
 | `group_keys_cache` | clés publiques et empreintes | intégrité logique locale | pas d'ancrage de confiance serveur |
-| mémoire | textes déchiffrés, clés, états providers | isolation du processus seulement | nettoyage de changement de compte incomplet |
+| mémoire | textes déchiffrés, clés, états providers | caches cryptographiques purgés au changement de sujet et à la déconnexion | isolation du processus seulement |
 | `message_queue.db` | structure de messages en attente | SQLite standard | chemin V2 non raccordé, sérialisation non JSON |
 
 L'application n'est donc pas encore offline-first de façon fiable. La reprise se fonde sur timestamps et relecture des derniers messages, sans curseur durable/idempotence client complètement intégrés (`TC-501` à `TC-508`).

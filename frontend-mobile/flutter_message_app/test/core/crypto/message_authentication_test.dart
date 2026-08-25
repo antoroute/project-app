@@ -6,6 +6,7 @@ import 'package:flutter_message_app/core/crypto/crypto_isolate_data.dart';
 import 'package:flutter_message_app/core/crypto/crypto_isolate_service.dart';
 import 'package:flutter_message_app/core/crypto/message_envelope_verifier.dart';
 import 'package:flutter_message_app/core/services/key_directory_service.dart';
+import 'package:flutter_message_app/core/services/message_key_cache.dart';
 import 'package:flutter_message_app/core/services/performance_benchmark.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -43,6 +44,8 @@ void main() {
       expect(verified.messageId, 'message-1');
       expect(verified.conversationId, 'conversation-1');
       expect(verified.senderDeviceId, 'sender-device');
+      expect(verified.recipientUserId, 'recipient-user');
+      expect(verified.recipientDeviceId, 'recipient-device');
       expect(
         PerformanceBenchmark.instance.getStats(
           'message_signature_verify',
@@ -119,6 +122,44 @@ void main() {
         throwsA(_authenticationCode('algorithm_mismatch')),
       );
     });
+
+    test(
+      'isole le cache pour un même message entre deux destinataires',
+      () async {
+        final firstEnvelope = await _verify(envelope, senderKey);
+        final secondPayload = await _signedEnvelope(
+          signingKey,
+          recipientUserId: 'other-recipient-user',
+          recipientDeviceId: 'other-recipient-device',
+        );
+        final secondEnvelope =
+            await MessageEnvelopeVerifier.verifyWithSenderKey(
+              expectedGroupId: 'group-1',
+              expectedConversationId: 'conversation-1',
+              recipientUserId: 'other-recipient-user',
+              recipientDeviceId: 'other-recipient-device',
+              messageV2: secondPayload,
+              senderKey: senderKey,
+            );
+        final firstKey = Uint8List.fromList(List<int>.filled(32, 1));
+
+        MessageKeyCache.instance.clear();
+        await MessageKeyCache.instance.cacheVerifiedMessageKey(
+          envelope: firstEnvelope,
+          messageKey: firstKey,
+        );
+
+        expect(
+          await MessageKeyCache.instance.getVerifiedMessageKey(firstEnvelope),
+          firstKey,
+        );
+        expect(
+          await MessageKeyCache.instance.getVerifiedMessageKey(secondEnvelope),
+          isNull,
+        );
+        MessageKeyCache.instance.clear();
+      },
+    );
 
     test(
       'rejette une clé expéditeur inactive ou de mauvaise version',
@@ -226,7 +267,11 @@ Matcher _authenticationCode(String code) =>
       code,
     );
 
-Future<Map<String, dynamic>> _signedEnvelope(SimpleKeyPair signingKey) async {
+Future<Map<String, dynamic>> _signedEnvelope(
+  SimpleKeyPair signingKey, {
+  String recipientUserId = 'recipient-user',
+  String recipientDeviceId = 'recipient-device',
+}) async {
   final payload = <String, dynamic>{
     'v': 2,
     'alg': {
@@ -247,8 +292,8 @@ Future<Map<String, dynamic>> _signedEnvelope(SimpleKeyPair signingKey) async {
     },
     'recipients': [
       {
-        'userId': 'recipient-user',
-        'deviceId': 'recipient-device',
+        'userId': recipientUserId,
+        'deviceId': recipientDeviceId,
         'wrap': base64Encode(Uint8List(48)),
         'nonce': base64Encode(Uint8List(12)),
       },

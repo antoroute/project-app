@@ -1,8 +1,8 @@
 # Spécification du chiffrement V2 observé
 
 Statut : description du code existant, **pas** spécification d'un protocole approuvé
-Dernière mise à jour : 2026-08-24
-Code observé : `25d0f657763036e90acad27f16f33f4cda369f31`
+Dernière mise à jour : 2026-08-25
+Code observé : branche `main`, changement `TC-106` lot A
 Implémentation principale : `lib/core/crypto/message_cipher_v2.dart`
 
 ## Objet
@@ -39,15 +39,15 @@ Cette description ne protège pas contre un client compromis, un appareil déver
 | empreinte de contenu signé | SHA-256 | hexadécimal minuscule du texte Base64 du chiffré |
 | encodage binaire | Base64 | représentation JSON des clés, nonces et chiffrés |
 
-Les appels aléatoires du chiffrement des messages utilisent `Random.secure()`. Les faiblesses propres aux clés de cache local sont décrites plus bas.
+Les appels aléatoires du chiffrement des messages et la clé maître du cache de clés de message utilisent `Random.secure()`.
 
 ## Clés et secrets
 
-### Identifiant d'installation
+### Identifiant d'appareil local par compte
 
-`SessionDeviceService` crée un UUID `device_id_v1` dans `flutter_secure_storage`. Cet identifiant est global à l'installation et n'est pas séparé par compte utilisateur.
+`SessionDeviceService` valide l'UUID du sujet authentifié puis crée un UUID sous `device_id_v2:account:<userId>` dans `flutter_secure_storage`. La mémoire est également indexée par compte et purgée à la déconnexion ou au changement de sujet.
 
-Conséquence : plusieurs comptes utilisés sur la même installation partagent le même identifiant logique d'appareil. Le cloisonnement des identités locales n'est donc pas complet.
+L'ancien `device_id_v1`, global à l'installation, n'est ni lu ni migré automatiquement : son rattachement à un compte ne peut pas être démontré. Chaque compte utilisé sur une installation reçoit ainsi sa propre identité locale. Le registre et l'approbation serveur restent à implémenter dans les lots suivants de `TC-106`.
 
 ### Paires de clés E2EE
 
@@ -67,7 +67,7 @@ v2:<groupId>:<deviceId>:x25519_pub:seed
 
 Le suffixe `:seed` est également appliqué aux clés publiques ; il s'agit d'une convention d'implémentation, pas d'une propriété cryptographique.
 
-Les paires sont mises en cache en mémoire sous la clé `<groupId>:<deviceId>`. Le compte utilisateur n'entre pas dans cet espace de noms. Une donnée absente ou illisible provoque actuellement une régénération silencieuse. Cela peut changer l'identité cryptographique de l'appareil et rendre des messages historiques indéchiffrables.
+Les paires sont mises en cache en mémoire sous la clé `<groupId>:<deviceId>`. Le `deviceId` est désormais propre au compte. Une création n'est permise que par l'appel explicite `ensureKeysFor` lorsque les quatre valeurs sont absentes. Les méthodes de lecture, signature et déchiffrement ne génèrent rien : une valeur manquante, partielle, Base64 invalide, d'une taille autre que 32 octets ou dont la clé publique ne correspond pas au seed provoque une erreur fail-closed sans suppression ni réécriture. Deux créations concurrentes du même couple sont sérialisées.
 
 ### Publication et annuaire
 
@@ -227,17 +227,17 @@ La réactivité est préservée par l'annuaire et les clés de message en cache 
 
 | Élément | Emplacement | Durée observée | État de sécurité |
 |---|---|---:|---|
-| graines privées Ed25519/X25519 | `flutter_secure_storage` | installation | stockage OS, isolation par compte incomplète |
+| graines privées Ed25519/X25519 | `flutter_secure_storage` | installation | stockage OS, sélection par `deviceId` propre au compte ; registre serveur incomplet |
 | jetons d'accès/refresh | `flutter_secure_storage` | session/30 jours | biométrie autour du refresh à valider par plateforme |
-| clé de message en mémoire | RAM | TTL 24 h, max. 1 000 | texte et clés accessibles au processus |
-| clé de message persistante | SQLite, chiffrée AES-GCM | TTL 7 jours | accessible seulement après preuve d'enveloppe ; clé maître encore trop faible |
+| clé de message en mémoire | RAM | TTL 24 h, max. 1 000 | index utilisateur/appareil/message ; clés accessibles au processus |
+| clé de message persistante | SQLite, chiffrée AES-GCM | TTL 7 jours | index utilisateur/appareil/message ; clé maître CSPRNG propre au compte |
 | enveloppes de messages | `messages_encrypted.db` SQLite | non bornée clairement | fichier SQLite non chiffré, contenu E2EE conservé |
 | texte déchiffré | objets/cache en RAM | session/cache | ne doit jamais être écrit ou journalisé |
 | clé publique de groupe | cache local | TTL 30 jours | mécanisme historique, rôle V2 limité |
 
 `LocalMessageStorage` génère une valeur appelée clé de base de données, mais `sqflite` n'utilise pas cette clé : le fichier n'est pas chiffré au repos.
 
-La clé maître de `PersistentMessageKeyCache` et la pseudo-clé de base locale sont actuellement construites en prenant, pour chacun des 32 octets, l'octet faible de l'horodatage en millisecondes. Une boucle normale produit essentiellement le même octet répété — ou quelques valeurs consécutives — et n'apporte pas d'entropie cryptographique. La première protège réellement des clés de message et est donc insuffisante ; la seconde est actuellement inutilisée. Ces défauts relèvent notamment de `TC-306`.
+Depuis le lot A de `TC-106`, `PersistentMessageKeyCache` crée une clé maître aléatoire de 32 octets par compte sous `message_key_master:v2:account:<userId>`. Les anciennes clés maîtres globales prévisibles ne sont plus sélectionnées. La pseudo-clé de base locale reste construite depuis l'horloge et, surtout, `sqflite` ne l'utilise pas : le chiffrement réel de SQLite et la migration/suppression maîtrisée des anciens caches restent dans `TC-306`.
 
 ## Métadonnées visibles du serveur
 
@@ -271,7 +271,7 @@ Le backend applique l'identité JWT à l'expéditeur depuis `TC-103`, mais il ne
 - pas de déniabilité ou d'anonymat ;
 - pas de restauration automatique sûre de l'historique sur un nouvel appareil ;
 - pas de rotation ou migration de clé complète ;
-- pas de protection cryptographique suffisante du cache persistant de `MK` ;
+- pas de chiffrement complet de la base SQLite contenant les enveloppes et métadonnées ;
 - pas de protocole complet anti-rejeu et de synchronisation par curseur.
 
 ## Cycle d'un nouvel appareil

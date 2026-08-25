@@ -28,6 +28,8 @@ class VerifiedMessageEnvelope {
     required this.conversationId,
     required this.senderUserId,
     required this.senderDeviceId,
+    required this.recipientUserId,
+    required this.recipientDeviceId,
   });
 
   final String messageId;
@@ -35,6 +37,8 @@ class VerifiedMessageEnvelope {
   final String conversationId;
   final String senderUserId;
   final String senderDeviceId;
+  final String recipientUserId;
+  final String recipientDeviceId;
 }
 
 class MessageEnvelopeVerifier {
@@ -132,6 +136,8 @@ class MessageEnvelopeVerifier {
           conversationId: expectedConversationId,
           senderUserId: validated.senderUserId,
           senderDeviceId: validated.senderDeviceId,
+          recipientUserId: recipientUserId,
+          recipientDeviceId: recipientDeviceId,
         );
       },
     );
