@@ -20,6 +20,7 @@ Les fiches transforment la roadmap en unités confiables pour un développement 
 - [TC-102 — JWT access/refresh](TC-102-jwt-access-refresh.md)
 - [TC-103 — Identité dérivée côté serveur](TC-103-identite-serveur.md)
 - [TC-104 — Matrice ACL cercle/conversation/rôle](TC-104-matrice-acl.md)
+- [TC-105 — Atomicité des contrôles et écritures](TC-105-atomicite-controles-ecritures.md)
 - [TC-114 — Vérification avant utilisation](TC-114-verification-avant-utilisation.md)
 
 ## Format obligatoire des nouvelles fiches

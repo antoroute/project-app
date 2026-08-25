@@ -4,6 +4,7 @@
 import { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 
+import type { DbExecutor } from '../plugins/db.js';
 import { authenticatedUserId } from '../security/jwt.js';
 
 export default async function routes(app: FastifyInstance) {
@@ -22,28 +23,33 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { groupId, type, memberIds } = req.body as any;
 
-    const allowed = await app.services.acl.canCreateConversation(
-      userId,
-      groupId,
-      memberIds,
-    );
-    if (!allowed) {
-      return reply.code(403).send({ error: 'forbidden' });
-    }
+    const allMembers = [...new Set([userId, ...memberIds])].sort();
+    const conv = await app.db.transaction(
+      async (transaction: DbExecutor) => {
+        const allowed = await app.services.acl.canCreateConversation(
+          userId,
+          groupId,
+          memberIds,
+          { executor: transaction, lock: true },
+        );
+        if (!allowed) return null;
 
-    const conv = await app.db.one(
-      `INSERT INTO conversations(group_id, type, creator_id)
-       VALUES($1,$2,$3) RETURNING id`,
-      [groupId, type, userId]
+        const createdConversation = await transaction.one(
+          `INSERT INTO conversations(group_id, type, creator_id)
+           VALUES($1,$2,$3) RETURNING id`,
+          [groupId, type, userId],
+        );
+        await transaction.none(
+          `INSERT INTO conversation_users(conversation_id, user_id)
+           SELECT $1, members.user_id
+             FROM unnest($2::uuid[]) AS members(user_id)`,
+          [createdConversation.id, allMembers],
+        );
+        return createdConversation;
+      },
     );
-    // Ajout des membres (y compris le créateur)
-    const allMembers = Array.from(new Set([userId, ...memberIds]));
-    for (const uid of allMembers) {
-      await app.db.none(
-        `INSERT INTO conversation_users(conversation_id, user_id) VALUES($1,$2)
-         ON CONFLICT DO NOTHING`,
-        [conv.id, uid]
-      );
+    if (!conv) {
+      return reply.code(403).send({ error: 'forbidden' });
     }
 
     // Tous les membres ont été validés par l'ACL avant l'insertion.
@@ -142,15 +148,18 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
 
-    if (!(await app.services.acl.hasConversationPermission(
-      userId,
-      convId,
-      'read-receipt:write',
-    ))) {
+    const ts = await app.db.transaction(
+      async (transaction: DbExecutor) => {
+        return app.services.acl.markConversationRead(
+          convId,
+          userId,
+          transaction,
+        );
+      },
+    );
+    if (ts === null) {
       return reply.code(403).send({ error: 'forbidden' });
     }
-
-    const ts = await app.services.acl.markConversationRead(convId, userId);
 
     // Notifie les autres membres de la conversation (exclure l'utilisateur qui a marqué comme lu)
     app.io.to(`conv:${convId}`).except(`user:${userId}`).emit('conv:read', { convId, userId, at: ts });

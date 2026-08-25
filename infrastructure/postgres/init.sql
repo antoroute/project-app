@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS join_requests (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_join_requests_pending_group_user
+  ON join_requests(group_id, user_id)
+  WHERE status = 'pending';
+
 -- Votes sur les demandes de jointure (un membre peut voter une seule fois par demande)
 CREATE TABLE IF NOT EXISTS join_request_votes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

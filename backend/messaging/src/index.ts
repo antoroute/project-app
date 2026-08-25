@@ -15,6 +15,7 @@ import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
 import validateAppSecret from './middlewares/validateAppSecret.js';
 import socketAuth from './middlewares/socketAuth.js';
+import type { AppDatabase } from './plugins/db.js';
 
 // Routes 
 import keysDevicesRoutes from './routes/keys.devices.js';
@@ -28,7 +29,7 @@ import { initAclService } from './services/acl.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
-    db: any;
+    db: AppDatabase;
     io: IOServer;
     services: {
       presence: ReturnType<typeof initPresenceService>;

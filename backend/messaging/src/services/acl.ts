@@ -1,5 +1,7 @@
 import { FastifyInstance } from 'fastify';
 
+import type { DbExecutor } from '../plugins/db.js';
+
 export type GroupRole = 'owner' | 'admin' | 'member';
 
 export type GroupPermission =
@@ -76,12 +78,20 @@ export interface ConversationAccess {
   groupRole: GroupRole;
 }
 
+interface AclQueryOptions {
+  executor?: DbExecutor;
+  lock?: boolean;
+}
+
 export function initAclService(app: FastifyInstance) {
   async function getGroupRole(
     userId: string,
     groupId: string,
+    options: AclQueryOptions = {},
   ): Promise<GroupRole | null> {
-    const row = await app.db.oneOrNone(
+    const db = options.executor ?? app.db;
+    const lockClause = options.lock ? 'FOR SHARE OF g, ug' : '';
+    const row = await db.oneOrNone(
       `SELECT CASE
                 WHEN g.creator_id = $1 THEN 'owner'
                 ELSE ug.role
@@ -90,7 +100,8 @@ export function initAclService(app: FastifyInstance) {
          JOIN user_groups ug
            ON ug.group_id = g.id
           AND ug.user_id = $1
-        WHERE g.id = $2`,
+        WHERE g.id = $2
+        ${lockClause}`,
       [userId, groupId],
     );
     return (row?.role as GroupRole | undefined) ?? null;
@@ -100,16 +111,20 @@ export function initAclService(app: FastifyInstance) {
     userId: string,
     groupId: string,
     permission: GroupPermission,
+    options: AclQueryOptions = {},
   ): Promise<boolean> {
-    const role = await getGroupRole(userId, groupId);
+    const role = await getGroupRole(userId, groupId, options);
     return role !== null && groupRoleAllows(role, permission);
   }
 
   async function getConversationAccess(
     userId: string,
     conversationId: string,
+    options: AclQueryOptions = {},
   ): Promise<ConversationAccess | null> {
-    const row = await app.db.oneOrNone(
+    const db = options.executor ?? app.db;
+    const lockClause = options.lock ? 'FOR SHARE OF c, cu, g, ug' : '';
+    const row = await db.oneOrNone(
       `SELECT c.id AS "conversationId",
               c.group_id AS "groupId",
               CASE
@@ -124,7 +139,8 @@ export function initAclService(app: FastifyInstance) {
          JOIN user_groups ug
            ON ug.group_id = c.group_id
           AND ug.user_id = $1
-        WHERE c.id = $2`,
+        WHERE c.id = $2
+        ${lockClause}`,
       [userId, conversationId],
     );
     return row as ConversationAccess | null;
@@ -134,28 +150,39 @@ export function initAclService(app: FastifyInstance) {
     userId: string,
     conversationId: string,
     permission: ConversationPermission,
+    options: AclQueryOptions = {},
   ): Promise<boolean> {
     if (!conversationMemberAllows(permission)) return false;
-    return (await getConversationAccess(userId, conversationId)) !== null;
+    return (await getConversationAccess(userId, conversationId, options)) !== null;
   }
 
   async function canCreateConversation(
     userId: string,
     groupId: string,
     memberIds: string[],
+    options: AclQueryOptions = {},
   ): Promise<boolean> {
+    const db = options.executor ?? app.db;
     if (
-      !(await hasGroupPermission(userId, groupId, 'conversation:create'))
+      !(await hasGroupPermission(
+        userId,
+        groupId,
+        'conversation:create',
+        options,
+      ))
     ) {
       return false;
     }
 
-    const expectedMembers = [...new Set([userId, ...memberIds])];
-    const rows = await app.db.any(
-      `SELECT user_id AS "userId"
-         FROM user_groups
-        WHERE group_id = $1
-          AND user_id = ANY($2::uuid[])`,
+    const expectedMembers = [...new Set([userId, ...memberIds])].sort();
+    const lockClause = options.lock ? 'FOR SHARE OF ug' : '';
+    const rows = await db.any(
+      `SELECT ug.user_id AS "userId"
+         FROM user_groups ug
+        WHERE ug.group_id = $1
+          AND ug.user_id = ANY($2::uuid[])
+        ORDER BY ug.user_id
+        ${lockClause}`,
       [groupId, expectedMembers],
     );
     const actualMembers = new Set(rows.map((row: any) => row.userId));
@@ -168,8 +195,14 @@ export function initAclService(app: FastifyInstance) {
     groupId: string,
     conversationId: string,
     recipients: Array<{ userId: string; deviceId: string }>,
+    options: AclQueryOptions = {},
   ): Promise<boolean> {
-    const access = await getConversationAccess(senderUserId, conversationId);
+    const db = options.executor ?? app.db;
+    const access = await getConversationAccess(
+      senderUserId,
+      conversationId,
+      options,
+    );
     if (
       access === null ||
       access.groupId !== groupId ||
@@ -178,38 +211,67 @@ export function initAclService(app: FastifyInstance) {
       return false;
     }
 
-    const senderDevice = await app.db.oneOrNone(
+    const senderLockClause = options.lock ? 'FOR SHARE OF gdk' : '';
+    const senderDevice = await db.oneOrNone(
       `SELECT 1
-         FROM group_device_keys
-        WHERE group_id = $1
-          AND user_id = $2
-          AND device_id = $3
-          AND status = 'active'`,
+         FROM group_device_keys gdk
+        WHERE gdk.group_id = $1
+          AND gdk.user_id = $2
+          AND gdk.device_id = $3
+          AND gdk.status = 'active'
+        ${senderLockClause}`,
       [groupId, senderUserId, senderDeviceId],
     );
     if (!senderDevice) return false;
 
-    for (const recipient of recipients) {
-      const allowedRecipient = await app.db.oneOrNone(
-        `SELECT 1
-           FROM conversation_users cu
-           JOIN conversations c ON c.id = cu.conversation_id
-           JOIN user_groups ug
-             ON ug.group_id = c.group_id
-            AND ug.user_id = cu.user_id
-           JOIN group_device_keys gdk
-             ON gdk.group_id = c.group_id
-            AND gdk.user_id = cu.user_id
-            AND gdk.device_id = $4
-            AND gdk.status = 'active'
-          WHERE cu.conversation_id = $1
-            AND cu.user_id = $2
-            AND c.group_id = $3`,
-        [conversationId, recipient.userId, groupId, recipient.deviceId],
-      );
-      if (!allowedRecipient) return false;
-    }
-    return true;
+    const expectedRecipients = [
+      ...new Map(
+        recipients.map((recipient) => [
+          `${recipient.userId}\u0000${recipient.deviceId}`,
+          recipient,
+        ]),
+      ).values(),
+    ].sort((left, right) =>
+      left.userId.localeCompare(right.userId) ||
+      left.deviceId.localeCompare(right.deviceId));
+    if (expectedRecipients.length === 0) return false;
+
+    const recipientLockClause = options.lock
+      ? 'FOR SHARE OF c, cu, ug, gdk'
+      : '';
+    const rows = await db.any(
+      `SELECT expected.user_id AS "userId",
+              expected.device_id AS "deviceId"
+         FROM unnest($3::uuid[], $4::text[])
+              AS expected(user_id, device_id)
+         JOIN conversation_users cu
+           ON cu.conversation_id = $1
+          AND cu.user_id = expected.user_id
+         JOIN conversations c
+           ON c.id = cu.conversation_id
+          AND c.group_id = $2
+         JOIN user_groups ug
+           ON ug.group_id = c.group_id
+          AND ug.user_id = expected.user_id
+         JOIN group_device_keys gdk
+           ON gdk.group_id = c.group_id
+          AND gdk.user_id = expected.user_id
+          AND gdk.device_id = expected.device_id
+          AND gdk.status = 'active'
+        ORDER BY expected.user_id, expected.device_id
+        ${recipientLockClause}`,
+      [
+        conversationId,
+        groupId,
+        expectedRecipients.map(({ userId }) => userId),
+        expectedRecipients.map(({ deviceId }) => deviceId),
+      ],
+    );
+    const actualRecipients = new Set(
+      rows.map((row: any) => `${row.userId}\u0000${row.deviceId}`),
+    );
+    return expectedRecipients.every((recipient) =>
+      actualRecipients.has(`${recipient.userId}\u0000${recipient.deviceId}`));
   }
 
   async function listAccessibleConversationIds(
@@ -259,20 +321,34 @@ export function initAclService(app: FastifyInstance) {
     return rows.map((row: any) => row.groupId as string);
   }
 
-  async function markConversationRead(convId: string, userId: string) {
-    await app.db.none(
-      `UPDATE conversation_users
+  async function markConversationRead(
+    convId: string,
+    userId: string,
+    executor: DbExecutor = app.db,
+  ) {
+    const row = await executor.oneOrNone(
+      `WITH authorized AS MATERIALIZED (
+         SELECT cu.conversation_id, cu.user_id
+           FROM conversation_users cu
+           JOIN conversations c ON c.id = cu.conversation_id
+           JOIN groups g ON g.id = c.group_id
+           JOIN user_groups ug
+             ON ug.group_id = c.group_id
+            AND ug.user_id = cu.user_id
+          WHERE cu.conversation_id = $1
+            AND cu.user_id = $2
+          FOR UPDATE OF cu
+          FOR SHARE OF c, g, ug
+       )
+       UPDATE conversation_users target
           SET last_read_at = NOW()
-        WHERE conversation_id = $1 AND user_id = $2`,
+         FROM authorized
+        WHERE target.conversation_id = authorized.conversation_id
+          AND target.user_id = authorized.user_id
+        RETURNING target.last_read_at`,
       [convId, userId],
     );
-    const row = await app.db.one(
-      `SELECT last_read_at
-         FROM conversation_users
-        WHERE conversation_id = $1 AND user_id = $2`,
-      [convId, userId],
-    );
-    return row.last_read_at as string;
+    return (row?.last_read_at as string | undefined) ?? null;
   }
 
   async function listReaders(convId: string) {

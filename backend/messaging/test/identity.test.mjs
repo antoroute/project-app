@@ -41,8 +41,8 @@ async function accessIssuer() {
   return app;
 }
 
-async function messageApp() {
-  const calls = { acl: [], inserts: [], emissions: [] };
+async function messageApp({ insertError = null } = {}) {
+  const calls = { acl: [], inserts: [], emissions: [], sequence: [] };
   const app = Fastify({ logger: false });
   await registerAccessJwt(app, ACCESS_PUBLIC_KEY);
   app.decorate('authenticate', async (request, reply) => {
@@ -60,16 +60,34 @@ async function messageApp() {
       },
     },
   });
-  app.decorate('db', {
+  const transactionExecutor = {
     one: async (query, params) => {
+      calls.sequence.push('insert');
       calls.inserts.push({ query, params });
+      if (insertError) throw insertError;
       return { id: STORED_MESSAGE_ID };
+    },
+  };
+  app.decorate('db', {
+    transaction: async (work) => {
+      calls.sequence.push('begin');
+      try {
+        const result = await work(transactionExecutor);
+        calls.sequence.push('commit');
+        return result;
+      } catch (error) {
+        calls.sequence.push('rollback');
+        throw error;
+      }
     },
   });
   app.decorate('io', {
     to: (room) => ({
       except: (excludedRoom) => ({
-        emit: (event, payload) => calls.emissions.push({ room, excludedRoom, event, payload }),
+        emit: (event, payload) => {
+          calls.sequence.push('emit');
+          calls.emissions.push({ room, excludedRoom, event, payload });
+        },
       }),
     }),
   });
@@ -149,4 +167,28 @@ test('uses only the authenticated subject for ACL, persistence and sender room',
   assert.equal(calls.inserts[0].params[1], AUTHENTICATED_USER_ID);
   assert.equal(calls.emissions.length, 1);
   assert.equal(calls.emissions[0].excludedRoom, `user:${AUTHENTICATED_USER_ID}`);
+  assert.deepEqual(calls.sequence, ['begin', 'insert', 'commit', 'emit']);
+  assert.equal(calls.acl[0][5].lock, true);
+  assert.ok(calls.acl[0][5].executor);
+});
+
+test('un rollback de persistance ne produit aucun événement Socket.IO', async (t) => {
+  const issuer = await accessIssuer();
+  const insertError = new Error('synthetic insert failure');
+  const { app, calls } = await messageApp({ insertError });
+  t.after(async () => {
+    await app.close();
+    await issuer.close();
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/messages',
+    headers: { authorization: `Bearer ${accessToken(issuer)}` },
+    payload: messagePayload(AUTHENTICATED_USER_ID),
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(calls.sequence, ['begin', 'insert', 'rollback']);
+  assert.equal(calls.emissions.length, 0);
 });

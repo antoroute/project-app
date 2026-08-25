@@ -4,6 +4,7 @@
 import { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 
+import type { DbExecutor } from '../plugins/db.js';
 import { authenticatedUserId } from '../security/jwt.js';
 
 const DeviceKey = Type.Object({
@@ -108,33 +109,40 @@ export default async function routes(app: FastifyInstance) {
     const { groupId } = req.params as any;
     const { deviceId, pk_sig, pk_kem, key_version } = req.body as any;
 
-    if (!(await app.services.acl.hasGroupPermission(
-      userId,
-      groupId,
-      'keys:manage-own',
-    ))) {
+    const outcome = await app.db.transaction(
+      async (transaction: DbExecutor) => {
+        if (!(await app.services.acl.hasGroupPermission(
+          userId,
+          groupId,
+          'keys:manage-own',
+          { executor: transaction, lock: true },
+        ))) {
+          return 'forbidden';
+        }
+
+        const published = await transaction.oneOrNone(
+          `INSERT INTO group_device_keys(
+             group_id, user_id, device_id, pk_sig, pk_kem, key_version, status
+           )
+           VALUES($1,$2,$3,decode($4,'base64'),decode($5,'base64'),$6,'active')
+           ON CONFLICT (group_id, user_id, device_id)
+           DO UPDATE
+                 SET pk_sig = EXCLUDED.pk_sig,
+                     pk_kem = EXCLUDED.pk_kem,
+                     key_version = EXCLUDED.key_version
+               WHERE group_device_keys.status <> 'revoked'
+           RETURNING status`,
+          [groupId, userId, deviceId, pk_sig, pk_kem, key_version],
+        );
+        return published ? 'published' : 'revoked';
+      },
+    );
+    if (outcome === 'forbidden') {
       return reply.code(403).send({ error: 'forbidden' });
     }
-
-    // CORRECTION CRITIQUE: Ne pas réactiver un device révoqué lors de la publication
-    // Si le device est révoqué, on refuse la publication pour éviter la réactivation automatique
-    const existing = await app.db.oneOrNone(
-      `SELECT status FROM group_device_keys 
-       WHERE group_id=$1 AND user_id=$2 AND device_id=$3`,
-      [groupId, userId, deviceId]
-    );
-    
-    if (existing && existing.status === 'revoked') {
+    if (outcome === 'revoked') {
       return reply.code(403).send({ error: 'device_revoked', message: 'Cannot publish keys for a revoked device' });
     }
-    
-    await app.db.none(
-      `INSERT INTO group_device_keys(group_id, user_id, device_id, pk_sig, pk_kem, key_version, status)
-       VALUES($1,$2,$3, decode($4,'base64'), decode($5,'base64'), $6, 'active')
-       ON CONFLICT (group_id, user_id, device_id)
-       DO UPDATE SET pk_sig=EXCLUDED.pk_sig, pk_kem=EXCLUDED.pk_kem, key_version=EXCLUDED.key_version, status='active'`,
-      [groupId, userId, deviceId, pk_sig, pk_kem, key_version]
-    );
     reply.code(201);
     return { ok: true };
   });
@@ -151,19 +159,27 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { groupId, deviceId } = req.params as any;
 
-    if (!(await app.services.acl.hasGroupPermission(
-      userId,
-      groupId,
-      'keys:manage-own',
-    ))) {
+    const allowed = await app.db.transaction(
+      async (transaction: DbExecutor) => {
+        if (!(await app.services.acl.hasGroupPermission(
+          userId,
+          groupId,
+          'keys:manage-own',
+          { executor: transaction, lock: true },
+        ))) {
+          return false;
+        }
+        await transaction.none(
+          `UPDATE group_device_keys SET status='revoked'
+            WHERE group_id=$1 AND user_id=$2 AND device_id=$3`,
+          [groupId, userId, deviceId],
+        );
+        return true;
+      },
+    );
+    if (!allowed) {
       return reply.code(403).send({ error: 'forbidden' });
     }
-
-    await app.db.none(
-      `UPDATE group_device_keys SET status='revoked'
-        WHERE group_id=$1 AND user_id=$2 AND device_id=$3`,
-      [groupId, userId, deviceId]
-    );
     return { ok: true };
   });
 }

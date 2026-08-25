@@ -13,6 +13,7 @@ const OWNER = '11111111-1111-4111-8111-111111111111';
 const MEMBER = '22222222-2222-4222-8222-222222222222';
 const OUTSIDER = '33333333-3333-4333-8333-333333333333';
 const GROUP = '44444444-4444-4444-8444-444444444444';
+const CONVERSATION = '55555555-5555-4555-8555-555555555555';
 
 test('la matrice autorise seulement owner/admin à gérer les adhésions', () => {
   for (const permission of ['join-request:read', 'join-request:handle']) {
@@ -85,4 +86,82 @@ test('la création accepte uniquement un ensemble entièrement membre du cercle'
   const acl = initAclService(app);
 
   assert.equal(await acl.canCreateConversation(OWNER, GROUP, [MEMBER]), true);
+});
+
+test('l’envoi transactionnel verrouille et valide tous les destinataires en une requête', async () => {
+  const queryCalls = [];
+  let oneOrNoneCalls = 0;
+  const transaction = {
+    oneOrNone: async (query) => {
+      queryCalls.push(query);
+      oneOrNoneCalls += 1;
+      if (oneOrNoneCalls === 1) {
+        return {
+          conversationId: CONVERSATION,
+          groupId: GROUP,
+          groupRole: 'owner',
+        };
+      }
+      return { active: true };
+    },
+    any: async (query) => {
+      queryCalls.push(query);
+      return [
+        { userId: MEMBER, deviceId: 'member-a' },
+        { userId: OUTSIDER, deviceId: 'outsider-a' },
+      ];
+    },
+  };
+  const app = {
+    db: {
+      oneOrNone: async () => {
+        throw new Error('the pool executor must not be used');
+      },
+      any: async () => {
+        throw new Error('the pool executor must not be used');
+      },
+    },
+  };
+  const acl = initAclService(app);
+
+  const allowed = await acl.canSend(
+    OWNER,
+    'owner-a',
+    GROUP,
+    CONVERSATION,
+    [
+      { userId: MEMBER, deviceId: 'member-a' },
+      { userId: OUTSIDER, deviceId: 'outsider-a' },
+    ],
+    { executor: transaction, lock: true },
+  );
+
+  assert.equal(allowed, true);
+  assert.equal(queryCalls.length, 3);
+  assert.match(queryCalls[0], /FOR SHARE OF c, cu, g, ug/);
+  assert.match(queryCalls[1], /FOR SHARE OF gdk/);
+  assert.match(queryCalls[2], /FROM unnest/);
+  assert.match(queryCalls[2], /FOR SHARE OF c, cu, ug, gdk/);
+});
+
+test('l’accusé de lecture verrouille la participation avant la mise à jour', async () => {
+  let capturedQuery = '';
+  const transaction = {
+    oneOrNone: async (query) => {
+      capturedQuery = query;
+      return { last_read_at: '2026-08-25T12:00:00.000Z' };
+    },
+  };
+  const acl = initAclService({ db: {} });
+
+  const timestamp = await acl.markConversationRead(
+    CONVERSATION,
+    OWNER,
+    transaction,
+  );
+
+  assert.equal(timestamp, '2026-08-25T12:00:00.000Z');
+  assert.match(capturedQuery, /FOR UPDATE OF cu/);
+  assert.match(capturedQuery, /FOR SHARE OF c, g, ug/);
+  assert.match(capturedQuery, /RETURNING target\.last_read_at/);
 });

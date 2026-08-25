@@ -6,6 +6,7 @@ import { FastifyInstance } from 'fastify';
 import { SendMessageV2Schema, SendMessageV2Reply } from '../schemas/messageV2.schema.js';
 import { Type } from '@sinclair/typebox';
 
+import type { DbExecutor } from '../plugins/db.js';
 import { authenticatedUserId } from '../security/jwt.js';
 
 export default async function routes(app: FastifyInstance) {
@@ -24,28 +25,39 @@ export default async function routes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
-    // ACL: vérifie appartenance et devices actifs
-    const allowed = await app.services.acl.canSend(senderUserId, b.sender.deviceId, b.groupId, b.convId, b.recipients);
-    if (!allowed) return reply.code(403).send({ error: 'forbidden' });
-
     try {
-      const row = await app.db.one(`
-        INSERT INTO messages(
-          conversation_id, sender_id, sender_device_id, v, alg,
-          message_id, sent_at, sender_eph_pub, iv, ciphertext, wrapped_keys, sig, salt
-        )
-        VALUES($1,$2,$3,2,$4::jsonb,$5,$6,
-               decode($7,'base64'), decode($8,'base64'), decode($9,'base64'), $10::jsonb, decode($11,'base64'), decode($12,'base64'))
-        RETURNING id
-      `, [
-        b.convId, senderUserId, b.sender.deviceId,
-        JSON.stringify(b.alg),
-        b.messageId, new Date(b.sentAt * 1000).toISOString(),
-        b.sender.eph_pub, b.iv, b.ciphertext,
-        JSON.stringify(b.recipients),
-        b.sig,
-        b.salt // Ajouter la salt au INSERT
-      ]);
+      const row = await app.db.transaction(
+        async (transaction: DbExecutor) => {
+          const allowed = await app.services.acl.canSend(
+            senderUserId,
+            b.sender.deviceId,
+            b.groupId,
+            b.convId,
+            b.recipients,
+            { executor: transaction, lock: true },
+          );
+          if (!allowed) return null;
+
+          return transaction.one(`
+            INSERT INTO messages(
+              conversation_id, sender_id, sender_device_id, v, alg,
+              message_id, sent_at, sender_eph_pub, iv, ciphertext, wrapped_keys, sig, salt
+            )
+            VALUES($1,$2,$3,2,$4::jsonb,$5,$6,
+                   decode($7,'base64'), decode($8,'base64'), decode($9,'base64'), $10::jsonb, decode($11,'base64'), decode($12,'base64'))
+            RETURNING id
+          `, [
+            b.convId, senderUserId, b.sender.deviceId,
+            JSON.stringify(b.alg),
+            b.messageId, new Date(b.sentAt * 1000).toISOString(),
+            b.sender.eph_pub, b.iv, b.ciphertext,
+            JSON.stringify(b.recipients),
+            b.sig,
+            b.salt,
+          ]);
+        },
+      );
+      if (!row) return reply.code(403).send({ error: 'forbidden' });
 
       // SÉCURITÉ: Émettre un ping avec convId et groupId (identifiants, pas de contenu sensible)
       // Les clients devront récupérer les messages via l'API après avoir reçu le ping

@@ -34,7 +34,7 @@ function authenticatedClaims() {
 }
 
 async function routeApp(routes, aclOverrides = {}) {
-  const calls = { db: 0, emissions: 0 };
+  const calls = { db: 0, emissions: 0, transactions: 0 };
   const app = Fastify({ logger: false });
   app.decorate('authenticate', async (request) => {
     request.user = authenticatedClaims();
@@ -51,12 +51,19 @@ async function routeApp(routes, aclOverrides = {}) {
     calls.db += 1;
     throw new Error('database must not be reached after an ACL refusal');
   };
-  app.decorate('db', {
+  const transactionExecutor = {
     query: unexpectedDbCall,
     one: unexpectedDbCall,
     oneOrNone: unexpectedDbCall,
     any: unexpectedDbCall,
     none: unexpectedDbCall,
+  };
+  app.decorate('db', {
+    ...transactionExecutor,
+    transaction: async (work) => {
+      calls.transactions += 1;
+      return work(transactionExecutor);
+    },
   });
   app.decorate('io', {
     in: () => ({ socketsJoin: () => undefined }),
