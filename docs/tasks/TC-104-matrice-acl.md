@@ -1,6 +1,6 @@
 # TC-104 — Centraliser la matrice ACL cercle, conversation et rôle
 
-Statut : En cours
+Statut : Terminée
 Priorité : P0 sécurité
 Décision : mainteneur, avec revue sécurité
 Dépendances : TC-103
@@ -73,16 +73,16 @@ Le rôle propriétaire est dérivé de `groups.creator_id`, qui reste l'unique s
 
 ## Critères d'acceptation
 
-- [ ] Une matrice exportée couvre explicitement les trois rôles et toutes les actions du tableau.
-- [ ] Aucun endpoint de clés d'un cercle n'est accessible à un non-membre.
-- [ ] Un membre simple ne peut ni voir ni traiter une demande d'adhésion, et la route de vote héritée est indisponible.
-- [ ] Propriétaire et administrateur peuvent voir et traiter les demandes ; seul le propriétaire peut changer un rôle.
-- [ ] Une conversation ne peut être créée que si l'acteur et chaque participant appartiennent au même cercle, avant toute insertion.
-- [ ] Lecture, message, accusé, lecteurs, abonnement et frappe exigent l'appartenance à la conversation et au cercle parent.
-- [ ] REST et Socket.IO utilisent le même service ACL ; les requêtes d'autorisation ad hoc ont disparu des routes/handlers concernés.
-- [ ] Les refus d'accès croisé sont génériques et n'émettent ni événement ni écriture.
-- [ ] La migration monte et redescend sur une base de test sans perte d'appartenance.
-- [ ] Tests et build Messaging passent, puis les scénarios négatifs passent sur `trust-circle-staging`.
+- [x] Une matrice exportée couvre explicitement les trois rôles et toutes les actions du tableau.
+- [x] Aucun endpoint de clés d'un cercle n'est accessible à un non-membre.
+- [x] Un membre simple ne peut ni voir ni traiter une demande d'adhésion, et la route de vote héritée est indisponible.
+- [x] Propriétaire et administrateur peuvent voir et traiter les demandes ; seul le propriétaire peut changer un rôle.
+- [x] Une conversation ne peut être créée que si l'acteur et chaque participant appartiennent au même cercle, avant toute insertion.
+- [x] Lecture, message, accusé, lecteurs, abonnement et frappe exigent l'appartenance à la conversation et au cercle parent.
+- [x] REST et Socket.IO utilisent le même service ACL ; les requêtes d'autorisation ad hoc ont disparu des routes/handlers concernés.
+- [x] Les refus d'accès croisé sont génériques et n'émettent ni événement ni écriture.
+- [x] La migration monte et redescend sur une base de test sans perte d'appartenance.
+- [x] Tests et build Messaging passent, puis les scénarios négatifs passent sur `trust-circle-staging`.
 
 ## Tests et preuves attendues
 
@@ -96,6 +96,20 @@ Le rôle propriétaire est dérivé de `groups.creator_id`, qui reste l'unique s
 ## Migration et rollback
 
 Déployer d'abord la migration ajoutant `user_groups.role`, puis le service Messaging. Le rollback repointe d'abord l'application vers la version précédente, puis exécute le script descendant qui retire uniquement la colonne de rôle. Les appartenances `(user_id, group_id)` restent intactes. Aucune production n'est modifiée dans cette tâche.
+
+## Résultat et preuves — 2026-08-25
+
+- Implémentation applicative : commit `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f`, poussé sur `main`.
+- Local : Auth `17/17`, Messaging `28/28`, build TypeScript Messaging réussi, OpenAPI YAML sans doublon, liens documentaires valides, script shell valide et `git diff --check` propre.
+- Flutter 3.47.1 : `13/13` tests réussis ; l'analyse ne relève aucune erreur de compilation, mais conserve 88 avertissements/informations préexistants et la configuration `.env` attendue hors dépôt.
+- Migration : montée et descente exercées dans le schéma PostgreSQL isolé `tc104_migration_test` ; les deux appartenances synthétiques sont conservées, la valeur par défaut et la contrainte de rôle sont vérifiées.
+- Sauvegarde avant changement : dump PostgreSQL vérifié `pre-tc104-20260825T110719Z.dump`, conservé sur le staging en mode `0600`.
+- Staging LXC106 : migration appliquée, quatre services sains, révision des images Auth/Messaging vérifiée, aucun redémarrage ni log Messaging de niveau erreur observé après déploiement.
+- Deux exécutions du smoke test ont réussi. La seconde couvre trois comptes synthétiques et prouve notamment le refus hors cercle, l'absence d'écriture après création de conversation refusée, le traitement owner/admin, le refus au membre simple et au non-propriétaire, la neutralisation du vote et l'isolation de l'annuaire de clés.
+- Le client réutilise le rôle reçu dans les réponses cercle ; aucun aller-retour réseau supplémentaire n'est ajouté à la connexion ou au chargement des messages.
+- Aucun environnement de production n'a été modifié et aucun secret n'a été affiché.
+
+La migration est compatible avec la release précédente : le rollback applicatif peut repointer vers `8ebeaa30f243a010d22070b8de20d969adedba89`, puis le script descendant peut être appliqué. La configuration antérieure est conservée sous `staging.env.before-f0e1baa7db2c` en mode `0600`.
 
 ## Décisions humaines nécessaires
 

@@ -1,8 +1,8 @@
 # Référence fonctionnelle de l'application
 
 Statut : comportement observé, non contractuel pour une release
-Dernière mise à jour : 2026-08-24
-Code observé : `25d0f657763036e90acad27f16f33f4cda369f31`
+Dernière mise à jour : 2026-08-25
+Code observé : `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f`
 Tâche : `TC-009`
 
 ## Objet et règles de lecture
@@ -272,7 +272,7 @@ Le handshake exige l'access token strict et, transitoirement, le faux `APP_SECRE
 |---|---|---|
 | `conv:subscribe` | `convId` | ACL conversation + cercle parent |
 | `conv:subscribe:batch` | `convIds[]` | ACL partagée filtrant les conversations autorisées |
-| `conv:unsubscribe` | `convId` | ACL avant sortie et émission de présence |
+| `conv:unsubscribe` | `convId` | sortie systématique de la room ; ACL avant toute émission de présence |
 | `typing:start` / `typing:stop` | `convId` | ACL conversation + cercle parent |
 
 Aucun `userId` fourni par ces événements ne fait autorité ; l'acteur est celui du socket authentifié.

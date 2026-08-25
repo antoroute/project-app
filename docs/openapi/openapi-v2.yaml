@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Project App – API v2 (E2EE X25519/Ed25519)
+  title: CircleHaven — Trust Circle API v2 (E2EE X25519/Ed25519)
   version: "2.0.0"
 servers:
   - url: https://trust-circle.kavalek.fr

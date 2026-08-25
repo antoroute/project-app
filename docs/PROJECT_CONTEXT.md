@@ -1,8 +1,8 @@
 # Contexte du projet
 
 Statut : référence de travail
-Dernière mise à jour : 2026-08-24
-Instantané fonctionnel documenté : branche `main`, commit `25d0f65`
+Dernière mise à jour : 2026-08-25
+Instantané fonctionnel documenté : branche `main`, commit `f0e1baa`
 
 ## Mission
 
@@ -28,9 +28,9 @@ Le propriétaire a choisi **CircleHaven** comme marque et **CircleHaven — Trus
 
 ## Niveau de préparation
 
-Le projet est un prototype fonctionnel, pas une version publiable. Les builds TypeScript ont réussi lors de l'audit initial. Flutter/Dart n'étaient pas installés dans l'environnement d'audit ; aucun build client n'a donc été validé. Il n'existe ni suite de tests significative ni CI.
+Le projet est un prototype fonctionnel, pas une version publiable. Les builds TypeScript et les suites locales Auth/Messaging réussissent. Un SDK Flutter 3.47.1 temporaire a permis de faire passer les 13 tests clients et de confirmer l'absence d'erreur de compilation dans l'analyse statique ; les builds release et tests sur appareils restent à réaliser. La couverture automatisée demeure partielle et aucune CI n'est encore en place.
 
-Les principaux bloqueurs restants sont : autorisations backend contournables, cycle de vie multi-appareil incomplet, stockage local insuffisamment protégé, protocole cryptographique non audité, fiabilité hors ligne fragile, compatibilité desktop incomplète, configuration de release non préparée et absence de migrations versionnées. La confusion entre access et refresh tokens a été fermée par `TC-102`, l'identité d'envoi est dérivée du JWT par `TC-103`, et `TC-114` impose désormais l'authentification du message avant tout usage du texte — sous réserve des mesures finales Android/Windows. L'inventaire Docker détaillé est dans `docs/operations/PRODUCTION_INVENTORY.md`.
+Les principaux bloqueurs restants sont : atomicité des écritures backend, cycle de vie multi-appareil incomplet, stockage local insuffisamment protégé, protocole cryptographique non audité, fiabilité hors ligne fragile, compatibilité desktop incomplète, configuration de release non préparée et absence d'un véritable outil de migrations. La confusion entre access et refresh tokens a été fermée par `TC-102`, l'identité d'envoi est dérivée du JWT par `TC-103`, et les autorisations cercle/conversation/rôle sont centralisées par `TC-104`. `TC-114` impose désormais l'authentification du message avant tout usage du texte — sous réserve des mesures finales Android/Windows. L'inventaire Docker détaillé est dans `docs/operations/PRODUCTION_INVENTORY.md`.
 
 ## Ordre de travail
 

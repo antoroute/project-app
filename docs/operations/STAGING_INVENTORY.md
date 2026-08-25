@@ -1,7 +1,7 @@
 # Inventaire du staging backend
 
 Statut : opérationnel, accès local au LXC uniquement
-Dernier déploiement : 2026-08-24 (`TC-103`)
+Dernier déploiement : 2026-08-25 (`TC-104`)
 Environnement : LXC106, stack Compose `trust-circle-staging`
 
 ## Résumé
@@ -12,8 +12,8 @@ Le staging backend est une installation neuve et isolée des anciennes ressource
 
 | Élément | Valeur assainie |
 |---|---|
-| Commit source | `8ebeaa30f243a010d22070b8de20d969adedba89` |
-| Release | `/opt/trust-circle-staging/releases/8ebeaa30f243a010d22070b8de20d969adedba89` |
+| Commit source | `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f` |
+| Release | `/opt/trust-circle-staging/releases/f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f` |
 | Pointeur actif | `/opt/trust-circle-staging/current` |
 | Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
 | Source Compose | `deploy/staging/compose.yml` |
@@ -25,8 +25,8 @@ Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affich
 
 | Service | Image | Preuve | État final |
 |---|---|---|---|
-| Auth | `trust-circle-staging-auth:staging-8ebeaa30f243` | image ID `84b79f800a6b`, label revision complet | sain |
-| Messaging | `trust-circle-staging-messaging:staging-8ebeaa30f243` | image ID `9859e2d897d7`, label revision complet | sain |
+| Auth | `trust-circle-staging-auth:staging-f0e1baa7db2c` | image ID `a190c4e59656`, label revision complet | sain, 0 redémarrage |
+| Messaging | `trust-circle-staging-messaging:staging-f0e1baa7db2c` | image ID `235c9caf10de`, label revision complet | sain, 0 redémarrage |
 | PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 | Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 
@@ -58,9 +58,9 @@ PostgreSQL utilise un volume inscriptible, des limites de ressources, un healthc
 
 - Base PostgreSQL 16 neuve.
 - `infrastructure/postgres/init.sql` monté en lecture seule pour la première initialisation.
-- 12 tables publiques observées.
+- 12 tables publiques observées ; `user_groups.role` contraint à `admin` ou `member`, le propriétaire restant dérivé de `groups.creator_id`.
 - Données uniquement synthétiques, créées par les smoke tests.
-- Aucun système de migration versionnée : blocage suivi par `TC-201`.
+- Première migration SQL réversible conservée dans `infrastructure/postgres/migrations/` et appliquée manuellement pour `TC-104`. Le choix et l'automatisation d'un véritable outil de migration restent suivis par `TC-201`.
 
 ## Validations exécutées
 
@@ -117,12 +117,23 @@ Le redéploiement `TC-103` du 2026-08-24 a enfin validé :
 
 La configuration immédiatement antérieure au changement de métadonnées est conservée en mode `0600` sous `staging.env.before-8ebeaa30f243`. La release `e7be1b027923a7868cca3145694e9bcc27217332` reste disponible pour rollback applicatif sans restauration de données.
 
+Le redéploiement `TC-104` du 2026-08-25 a ensuite validé :
+
+1. montée et descente de `20260825_001_group_member_role` dans un schéma isolé, avec conservation des appartenances et rejet d'un rôle invalide ;
+2. sauvegarde PostgreSQL préalable vérifiée `pre-tc104-20260825T110719Z.dump`, conservée en mode `0600` dans le répertoire privé de sauvegardes du staging ;
+3. application de la migration réelle et présence d'une unique colonne et contrainte de rôle, sans ligne invalide ;
+4. build et déploiement des images Auth/Messaging depuis `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f`, avec labels de révision correspondants ;
+5. healthchecks des quatre services, zéro redémarrage des services applicatifs et aucun log Messaging de niveau erreur observé dans la fenêtre post-déploiement ;
+6. deux smoke tests complets, dont le second avec trois comptes synthétiques : refus d'accès à l'annuaire hors cercle, création de conversation interdite sans écriture, décision d'adhésion par propriétaire puis administrateur, refus au membre simple et au non-propriétaire, vote neutralisé et poignée de main Socket.IO réussie.
+
+La configuration précédente est conservée en mode `0600` sous `staging.env.before-f0e1baa7db2c`. La release `8ebeaa30f243a010d22070b8de20d969adedba89` reste disponible pour rollback applicatif ; la migration descendante a été exercée isolément avant le déploiement.
+
 ## Limites assumées
 
 - Pas de domaine ni TLS : accès volontairement local jusqu'à la revue de fermeture de Phase 1.
 - Pas encore de build Flutter ciblant le staging.
-- Pas de migrations ni preuve de restauration du nouveau volume.
-- Le scénario d'usurpation d'identité est couvert, mais les tests d'autorisation croisée cercle/conversation/clé ne sont pas encore exhaustifs (`TC-104` et `TC-111`).
+- Pas encore d'outil de migrations ni de restauration complète du nouveau volume ; la migration `TC-104` et son rollback ont seulement été exercés dans un schéma isolé.
+- Les principaux scénarios d'autorisation croisée cercle/conversation/clé de `TC-104` sont couverts ; l'élargissement de la suite d'intégration PostgreSQL et des tests négatifs reste suivi par `TC-111`.
 - Images backend locales non publiées dans un registre ; l'image ID et les labels assurent la traçabilité locale, pas une provenance distante.
 - Le LXC reste partagé et privilégié.
 

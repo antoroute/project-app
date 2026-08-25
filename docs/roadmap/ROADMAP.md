@@ -1,11 +1,11 @@
 # Roadmap de développement vers la V1
 
 Statut : plan directeur initial
-Dernière mise à jour : 2026-08-24
+Dernière mise à jour : 2026-08-25
 
 ## Mode d'emploi
 
-Les identifiants sont stables. Une tâche est développée à partir d'une fiche dans `docs/tasks/`; seules `TC-001` à `TC-008` ont leur fiche détaillée à ce stade. Avant le démarrage d'une phase, créer/raffiner les fiches de cette phase à partir des constats les plus récents.
+Les identifiants sont stables. Une tâche est développée à partir d'une fiche dans `docs/tasks/`. Les fiches de Phase 0 et celles déjà engagées en Phase 1 sont détaillées ; créer ou raffiner chaque fiche restante à partir des constats les plus récents avant son démarrage.
 
 Statuts utilisés : `À faire`, `Prête`, `En cours`, `Terminée`, `Bloquée`. Une phase ne passe sa porte de sortie que si les preuves sont attachées aux tâches et les risques critiques fermés.
 
@@ -38,8 +38,8 @@ Objectif : empêcher l'usurpation, l'accès croisé et l'enregistrement illégit
 | TC-101 | Faire échouer les services si un secret/config critique manque | TC-004 | Terminée |
 | TC-102 | Séparer strictement access/refresh JWT et valider toutes les claims | TC-101 | Terminée — Ed25519 déployé |
 | TC-103 | Dériver l'identité serveur et supprimer les `userId` faisant autorité côté client | TC-102 | Terminée |
-| TC-104 | Centraliser la matrice ACL cercle/conversation/rôle | TC-103 | En cours |
-| TC-105 | Corriger l'atomicité des contrôles et écritures | TC-104 | À faire |
+| TC-104 | Centraliser la matrice ACL cercle/conversation/rôle | TC-103 | Terminée |
+| TC-105 | Corriger l'atomicité des contrôles et écritures | TC-104 | Prête |
 | TC-106 | Sécuriser preuve, approbation, rotation et révocation des clés d'appareil | TC-104 | À faire |
 | TC-107 | Borner et valider tous les payloads, identifiants et tailles | TC-103 | À faire |
 | TC-108 | Durcir CORS, rate limits, proxy trust et WebSocket | TC-102, TC-107 | À faire |

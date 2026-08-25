@@ -32,6 +32,9 @@ password=$(openssl rand -hex 16)
 secondary_email="tc-smoke-secondary-${run_id}@example.invalid"
 secondary_username="smoke_secondary_${run_id}"
 secondary_password=$(openssl rand -hex 16)
+tertiary_email="tc-smoke-tertiary-${run_id}@example.invalid"
+tertiary_username="smoke_tertiary_${run_id}"
+tertiary_password=$(openssl rand -hex 16)
 
 assert_status() {
   local expected=$1
@@ -93,6 +96,26 @@ secondary_login_response=$(curl --silent --show-error \
   --data "$secondary_login_payload" \
   "$base_url/auth/login")
 secondary_access_token=$(jq -er '.access' <<<"$secondary_login_response")
+
+tertiary_register_payload=$(jq -nc \
+  --arg email "$tertiary_email" \
+  --arg username "$tertiary_username" \
+  --arg password "$tertiary_password" \
+  '{email:$email,username:$username,password:$password}')
+curl --silent --show-error --fail \
+  -H 'content-type: application/json' \
+  --data "$tertiary_register_payload" \
+  "$base_url/auth/register" >/dev/null
+
+tertiary_login_payload=$(jq -nc \
+  --arg email "$tertiary_email" \
+  --arg password "$tertiary_password" \
+  '{email:$email,password:$password}')
+tertiary_login_response=$(curl --silent --show-error \
+  -H 'content-type: application/json' \
+  --data "$tertiary_login_payload" \
+  "$base_url/auth/login")
+tertiary_access_token=$(jq -er '.access' <<<"$tertiary_login_response")
 
 assert_status 401 "$base_url/auth/refresh" \
   -X POST \
@@ -235,6 +258,35 @@ assert_status 200 "$base_url/api/groups/$group_id/join-requests" \
   -H "authorization: Bearer $secondary_access_token" \
   -H "x-app-secret: $app_secret" \
   -H 'x-client-version: 2.0.0'
+
+tertiary_join_payload=$(jq -nc \
+  --arg device_id "smoke-tertiary-device-$run_id" \
+  --arg key "$device_key" \
+  '{deviceId:$device_id,deviceSigPubKey:$key,deviceKemPubKey:$key}')
+tertiary_join_response=$(curl --silent --show-error \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $tertiary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data "$tertiary_join_payload" \
+  "$base_url/api/groups/$group_id/join-requests")
+tertiary_join_request_id=$(jq -er '.requestId' <<<"$tertiary_join_response")
+
+admin_requests=$(curl --silent --show-error \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  "$base_url/api/groups/$group_id/join-requests")
+jq -e --arg request_id "$tertiary_join_request_id" \
+  'any(.[]; .id == $request_id)' >/dev/null <<<"$admin_requests"
+assert_status 200 "$base_url/api/groups/$group_id/join-requests/$tertiary_join_request_id/handle" \
+  -X POST \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data '{"action":"reject"}'
+
 assert_status 403 "$base_url/api/groups/$group_id/members/$authenticated_user_id/role" \
   -X PATCH \
   -H 'content-type: application/json' \
@@ -302,5 +354,5 @@ assert_status 401 "$base_url/auth/refresh" \
   -H "authorization: Bearer $refresh_token" \
   -H "x-app-secret: $app_secret"
 
-unset password secondary_password access_token secondary_access_token refreshed_access_token refresh_token
-echo "Smoke tests passed: health, tokens, identity, group ACL/roles, key directory isolation, conversation pre-check, group write/read and Socket.IO handshake."
+unset password secondary_password tertiary_password access_token secondary_access_token tertiary_access_token refreshed_access_token refresh_token
+echo "Smoke tests passed: health, tokens, identity, owner/admin ACL, role isolation, key directory isolation, conversation pre-check, group write/read and Socket.IO handshake."

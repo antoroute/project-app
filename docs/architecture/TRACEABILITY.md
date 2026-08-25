@@ -1,7 +1,7 @@
 # Matrice de traçabilité fonctionnelle et sécurité
 
-Dernière mise à jour : 2026-08-24
-Code observé : `25d0f657763036e90acad27f16f33f4cda369f31`
+Dernière mise à jour : 2026-08-25
+Code observé : `f0e1baa7db2cd9c0e0cfd1104f477af25eec5b9f`
 
 Cette matrice aide à retrouver rapidement le code réellement responsable d'un comportement. Elle n'atteste ni la qualité ni la sécurité d'une fonction : consulter la référence fonctionnelle, les invariants et les tâches liées avant toute modification.
 
@@ -58,11 +58,11 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | serveur HTTP et Socket.IO | [`index.ts`](../../backend/messaging/src/index.ts) | événements temps réel | `TC-108`, `TC-505`, `TC-510` |
 | configuration | [`config.ts`](../../backend/messaging/src/config.ts) | variables d'environnement | `TC-101`, `TC-108` |
 | validation JWT HTTP/socket | [`jwt.ts`](../../backend/messaging/src/security/jwt.ts), [`socketAuth.ts`](../../backend/messaging/src/middlewares/socketAuth.ts) | JWT access public-key-only | `TC-102` terminé |
-| cercles/adhésion | [`groups.ts`](../../backend/messaging/src/routes/groups.ts) | `groups`, `user_groups`, demandes/rôles | `TC-104`, `TC-105`, `TC-107` |
+| cercles/adhésion | [`groups.ts`](../../backend/messaging/src/routes/groups.ts) | `groups`, `user_groups`, demandes/rôles | `TC-104` terminé, `TC-105`, `TC-107` |
 | appareils et clés publiques | [`keys.devices.ts`](../../backend/messaging/src/routes/keys.devices.ts) | `group_device_keys` | `TC-106`, `TC-107` |
-| conversations | [`conversations.ts`](../../backend/messaging/src/routes/conversations.ts) | `conversations`, `conversation_users` | `TC-104`, `TC-105`, `TC-107` |
-| messages V2 | [`messages.v2.ts`](../../backend/messaging/src/routes/messages.v2.ts), [`messageV2.schema.ts`](../../backend/messaging/src/schemas/messageV2.schema.ts) | `messages`, `message:new` | `TC-103` terminé, `TC-104`, `TC-107`, Phase 5 |
-| matrice et contrôles d'accès partagés | [`acl.ts`](../../backend/messaging/src/services/acl.ts) | rôles, groupes, conversations, clés, Socket.IO | `TC-104` |
+| conversations | [`conversations.ts`](../../backend/messaging/src/routes/conversations.ts) | `conversations`, `conversation_users` | `TC-104` terminé, `TC-105`, `TC-107` |
+| messages V2 | [`messages.v2.ts`](../../backend/messaging/src/routes/messages.v2.ts), [`messageV2.schema.ts`](../../backend/messaging/src/schemas/messageV2.schema.ts) | `messages`, `message:new` | `TC-103` et `TC-104` terminés, `TC-107`, Phase 5 |
+| matrice et contrôles d'accès partagés | [`acl.ts`](../../backend/messaging/src/services/acl.ts) | rôles, groupes, conversations, clés, Socket.IO | `TC-104` terminé |
 | présence | [`presence.ts`](../../backend/messaging/src/services/presence.ts) | mémoire processus | `TC-205`, `TC-510` |
 
 ## Données PostgreSQL observées
