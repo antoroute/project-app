@@ -161,6 +161,70 @@ async function prove(
   );
 }
 
+async function decideDevice(
+  accessToken: string,
+  approver: Identity,
+  target: Identity,
+  decision: 'approve' | 'reject',
+): Promise<{ challengeId: string; result: JsonObject }> {
+  const approvalChallenge = objectValue(
+    await request(
+      `/api/devices/${target.deviceId}/approvals/challenge`,
+      'POST',
+      201,
+      { approverDeviceId: approver.deviceId, decision },
+      accessToken,
+    ),
+    'device approval challenge',
+  );
+  const challengeId = stringValue(
+    approvalChallenge,
+    'challengeId',
+    'device approval challenge',
+  );
+  if (
+    approvalChallenge.approverDeviceId !== approver.deviceId ||
+    approvalChallenge.targetDeviceId !== target.deviceId ||
+    approvalChallenge.decision !== decision
+  ) {
+    throw new Error('device approval challenge: unexpected binding');
+  }
+  const transcript = Buffer.from(
+    stringValue(
+      approvalChallenge,
+      'transcript',
+      'device approval challenge',
+    ),
+    'base64',
+  );
+  if (transcript.length !== 216) {
+    throw new Error('device approval challenge: unexpected transcript length');
+  }
+  const signature = sign(null, transcript, approver.privateKey).toString(
+    'base64',
+  );
+  const result = objectValue(
+    await request(
+      `/api/devices/approvals/${challengeId}/decision`,
+      'POST',
+      200,
+      { signature },
+      accessToken,
+    ),
+    'device approval result',
+  );
+  const expectedStatus = decision === 'approve' ? 'active' : 'revoked';
+  if (
+    result.approverDeviceId !== approver.deviceId ||
+    result.targetDeviceId !== target.deviceId ||
+    result.decision !== decision ||
+    result.status !== expectedStatus
+  ) {
+    throw new Error('device approval result: unexpected transition');
+  }
+  return { challengeId, result };
+}
+
 const owner = await createAccount('owner');
 const firstIdentity = createIdentity();
 const grantResponse = objectValue(
@@ -210,6 +274,57 @@ if (statuses[0] !== 'active' || statuses[1] !== 'pending') {
   throw new Error('device registry: expected active and pending statuses');
 }
 
+const approval = await decideDevice(
+  owner.accessToken,
+  firstIdentity,
+  secondIdentity,
+  'approve',
+);
+await request(
+  `/api/devices/approvals/${approval.challengeId}/decision`,
+  'POST',
+  409,
+  { signature: Buffer.alloc(64).toString('base64') },
+  owner.accessToken,
+);
+
+const thirdIdentity = createIdentity();
+const thirdChallenge = await challenge(owner.accessToken, thirdIdentity);
+const thirdProof = objectValue(
+  await prove(owner.accessToken, thirdIdentity, thirdChallenge, 201),
+  'third device proof',
+);
+if (thirdProof.status !== 'pending' || thirdProof.bootstrap !== false) {
+  throw new Error('third device proof: expected a pending device');
+}
+await decideDevice(
+  owner.accessToken,
+  firstIdentity,
+  thirdIdentity,
+  'reject',
+);
+
+const decidedDevices = await request(
+  '/api/devices',
+  'GET',
+  200,
+  undefined,
+  owner.accessToken,
+);
+if (!Array.isArray(decidedDevices) || decidedDevices.length !== 3) {
+  throw new Error('device registry: expected exactly three decided devices');
+}
+const decidedStatuses = decidedDevices
+  .map((device) => objectValue(device, 'device registry row').status)
+  .sort();
+if (
+  decidedStatuses[0] !== 'active' ||
+  decidedStatuses[1] !== 'active' ||
+  decidedStatuses[2] !== 'revoked'
+) {
+  throw new Error('device registry: expected active, active and revoked');
+}
+
 const accessOnlyAccount = await createAccount('access_only');
 const attackerIdentity = createIdentity();
 const attackerChallenge = await challenge(
@@ -230,5 +345,5 @@ if (deniedProof.error !== 'bootstrap_authorization_required') {
 }
 
 console.log(
-  'Device trust smoke passed: password-bound bootstrap, Ed25519 proof, replay denial, pending second device and subject-scoped registry.',
+  'Device trust smoke passed: password-bound bootstrap, Ed25519 proof, signed approval/rejection, replay denial and subject-scoped registry.',
 );
