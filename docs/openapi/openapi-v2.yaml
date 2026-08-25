@@ -86,11 +86,13 @@ components:
 
     Group:
       type: object
-      required: [id, name, created_at]
+      required: [id, name, role, createdAt]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        created_at: { type: string, format: date-time }
+        creatorId: { type: string, format: uuid }
+        role: { type: string, enum: [owner, admin, member] }
+        createdAt: { type: string, format: date-time }
 
 paths:
   /auth/register:
@@ -195,15 +197,92 @@ paths:
         schema: { type: string, format: uuid }
     get:
       tags: [groups]
+      description: Réservé aux membres du cercle.
       responses:
         "200":
           description: Members
+        "403": { description: Cercle inaccessible. }
+
+  /groups/{groupId}/members/{memberId}/role:
+    parameters:
+      - in: path
+        name: groupId
+        required: true
+        schema: { type: string, format: uuid }
+      - in: path
+        name: memberId
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [groups]
+      summary: Affecter le rôle admin ou membre (propriétaire uniquement)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [admin, member] }
+      responses:
+        "200": { description: Rôle mis à jour. }
+        "403": { description: Action interdite ou cible inaccessible. }
+
+  /groups/{groupId}/join-requests:
+    parameters:
+      - in: path
+        name: groupId
+        required: true
+        schema: { type: string, format: uuid }
     post:
       tags: [groups]
-      description: Add member (admin only)
-      responses: { "204": { description: Added } }
+      summary: Demander à rejoindre un cercle
+      responses:
+        "201": { description: Demande créée. }
+        "409": { description: Déjà membre. }
+    get:
+      tags: [groups]
+      summary: Lister les demandes (propriétaire ou administrateur)
+      responses:
+        "200": { description: Demandes en attente. }
+        "403": { description: Action interdite ou cercle inaccessible. }
 
-  /groups/{groupId}/keys/devices:
+  /groups/{groupId}/join-requests/{requestId}/handle:
+    post:
+      tags: [groups]
+      summary: Accepter ou refuser une demande (propriétaire ou administrateur)
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: requestId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [accept, reject] }
+      responses:
+        "200": { description: Demande traitée. }
+        "403": { description: Action interdite ou cible inaccessible. }
+
+  /groups/{groupId}/join-requests/{requestId}/vote:
+    post:
+      tags: [groups]
+      deprecated: true
+      summary: Route héritée neutralisée, aucun vote collectif en V1
+      responses:
+        "403": { description: Toujours refusé. }
+
+  /keys/group/{groupId}:
     parameters:
       - in: path
         name: groupId
@@ -211,7 +290,7 @@ paths:
         schema: { type: string, format: uuid }
     get:
       tags: [keys]
-      summary: Répertoire des clés publiques par (user, device) d’un groupe
+      summary: Répertoire des clés actives du cercle, réservé aux membres
       responses:
         "200":
           description: OK
@@ -220,34 +299,62 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/DeviceKey' }
+        "403": { description: Cercle inaccessible. }
+
+  /keys/group/{groupId}/my-devices:
+    get:
+      tags: [keys]
+      summary: Lister ses appareils actifs et révoqués dans un cercle membre
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK }
+        "403": { description: Cercle inaccessible. }
+
+  /keys/group/{groupId}/devices:
     post:
       tags: [keys]
-      summary: Publier les clés d’un nouvel appareil (pairing)
+      summary: Publier ses propres clés d'appareil dans un cercle membre
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [deviceId, pk_sig, pk_kem, key_version, attestation]
+              required: [deviceId, pk_sig, pk_kem, key_version]
               properties:
                 deviceId: { type: string }
                 pk_sig: { type: string }
                 pk_kem: { type: string }
                 key_version: { type: integer }
-                attestation:
-                  type: object
-                  properties:
-                    signed_by_device: { type: string }   # deviceId du parrain
-                    signature: { type: string }         # Ed25519(base64)
-                    ts: { type: string, format: date-time }
-      responses: { "201": { description: Created } }
+      responses:
+        "201": { description: Created }
+        "403": { description: Cercle inaccessible ou appareil révoqué. }
 
-  /groups/{groupId}/keys/devices/{deviceId}:
+  /keys/group/{groupId}/devices/{deviceId}:
     delete:
       tags: [keys]
-      summary: Révoquer un appareil
-      responses: { "204": { description: Revoked } }
+      summary: Révoquer l'un de ses propres appareils dans un cercle membre
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Revoked }
+        "403": { description: Cercle inaccessible. }
 
   /conversations:
     post:
@@ -258,14 +365,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [groupId, type, members]
+              required: [groupId, type, memberIds]
               properties:
                 groupId: { type: string, format: uuid }
                 type: { type: string, enum: [private, subset] }
-                members:
+                memberIds:
                   type: array
                   items: { type: string, format: uuid }
-      responses: { "201": { description: Created } }
+      responses:
+        "201": { description: Created }
+        "403": { description: Acteur ou participant extérieur au cercle. }
     get:
       tags: [conversations]
       responses: { "200": { description: List } }

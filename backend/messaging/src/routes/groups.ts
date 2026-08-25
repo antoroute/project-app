@@ -5,6 +5,7 @@ import { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 
 import { authenticatedUserId } from '../security/jwt.js';
+import { groupRoleAllows } from '../services/acl.js';
 
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
@@ -59,7 +60,9 @@ export default async function routes(app: FastifyInstance) {
   app.get('/api/groups', async (req, reply) => {
     const userId = authenticatedUserId(req);
     const rows = await app.db.any(
-      `SELECT g.id, g.name, g.creator_id, g.created_at as "createdAt"
+      `SELECT g.id, g.name, g.creator_id AS "creatorId",
+              CASE WHEN g.creator_id = $1 THEN 'owner' ELSE ug.role END AS role,
+              g.created_at as "createdAt"
          FROM groups g
          JOIN user_groups ug ON ug.group_id=g.id
         WHERE ug.user_id=$1
@@ -78,13 +81,8 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { id: groupId } = req.params as any;
 
-    // Vérifie que l'utilisateur est membre du groupe
-    const membership = await app.db.any(
-      `SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`,
-      [userId, groupId]
-    );
-    
-    if (membership.length === 0) {
+    const role = await app.services.acl.getGroupRole(userId, groupId);
+    if (role === null || !groupRoleAllows(role, 'group:read')) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
@@ -105,6 +103,7 @@ export default async function routes(app: FastifyInstance) {
       id: group.id,
       name: group.name,
       creatorId: group.creator_id,
+      role,
       createdAt: group.created_at.toISOString()
     };
   });
@@ -118,21 +117,21 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { id: groupId } = req.params as any;
 
-    // Vérifie que l'utilisateur est membre du groupe
-    const membership = await app.db.any(
-      `SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`,
-      [userId, groupId]
-    );
-    
-    if (membership.length === 0) {
+    if (!(await app.services.acl.hasGroupPermission(
+      userId,
+      groupId,
+      'members:read',
+    ))) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
     // Récupère les membres du groupe
     const members = await app.db.any(
-      `SELECT u.id, u.email, u.username, u.created_at
+      `SELECT u.id, u.email, u.username, u.created_at,
+              CASE WHEN g.creator_id = u.id THEN 'owner' ELSE ug.role END AS role
         FROM users u
         JOIN user_groups ug ON ug.user_id = u.id
+        JOIN groups g ON g.id = ug.group_id
         WHERE ug.group_id = $1
         ORDER BY u.username`,
       [groupId]
@@ -142,6 +141,7 @@ export default async function routes(app: FastifyInstance) {
       userId: member.id,
       email: member.email,
       username: member.username,
+      role: member.role,
       joinedAt: member.created_at.toISOString()
     }));
   });
@@ -178,7 +178,7 @@ export default async function routes(app: FastifyInstance) {
   });
 
   // POST /api/groups/:id/requests/:rid/accept
-  // Route legacy - SEUL LE CRÉATEUR PEUT ACCEPTER
+  // Route legacy conservée pour compatibilité client.
   app.post('/api/groups/:id/requests/:rid/accept', {
     schema: {
       params: Type.Object({
@@ -190,18 +190,16 @@ export default async function routes(app: FastifyInstance) {
     const approverId = authenticatedUserId(req);
     const { id: groupId, rid } = req.params as any;
 
-    // Vérifie que l'approver est membre du groupe
-    const a = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [approverId, groupId]);
-    if (!a.length) return reply.code(403).send({ error: 'forbidden' });
-
-    // Vérifie que l'approver est le créateur du groupe
-    const group = await app.db.oneOrNone(`SELECT creator_id FROM groups WHERE id=$1`, [groupId]);
-    if (!group) return reply.code(404).send({ error: 'group_not_found' });
-    if (group.creator_id !== approverId) {
-      return reply.code(403).send({ error: 'only_creator_can_handle' });
+    if (!(await app.services.acl.hasGroupPermission(
+      approverId,
+      groupId,
+      'join-request:handle',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
     }
 
-    const jr = await app.db.one(`SELECT * FROM join_requests WHERE id=$1 AND group_id=$2 AND status='pending'`, [rid, groupId]);
+    const jr = await app.db.oneOrNone(`SELECT * FROM join_requests WHERE id=$1 AND group_id=$2 AND status='pending'`, [rid, groupId]);
+    if (!jr) return reply.code(403).send({ error: 'forbidden' });
 
     // Ajoute le user
     await app.db.none(`INSERT INTO user_groups(user_id, group_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [jr.user_id, groupId]);
@@ -342,7 +340,7 @@ export default async function routes(app: FastifyInstance) {
   });
 
   // GET /api/groups/:id/join-requests
-  // Récupère les demandes de jointure pour un groupe (pour les admins/membres)
+  // Récupère les demandes de jointure pour les gestionnaires du cercle.
   app.get('/api/groups/:id/join-requests', {
     schema: {
       params: Type.Object({ id: Type.String({ format: 'uuid' }) })
@@ -351,39 +349,37 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { id: groupId } = req.params as any;
 
-    // Vérifie que l'utilisateur est membre du groupe
-    const m = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [userId, groupId]);
-    if (!m.length) return reply.code(403).send({ error: 'forbidden' });
+    if (!(await app.services.acl.hasGroupPermission(
+      userId,
+      groupId,
+      'join-request:read',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
 
     const rows = await app.db.any(
       `SELECT jr.id, jr.user_id, jr.device_id, jr.status, jr.created_at,
-              u.email, u.username,
-              COALESCE(COUNT(CASE WHEN jrv.vote = true THEN 1 END), 0)::int as "yesVotes",
-              COALESCE(COUNT(CASE WHEN jrv.vote = false THEN 1 END), 0)::int as "noVotes"
+              u.email, u.username
          FROM join_requests jr
          JOIN users u ON u.id = jr.user_id
-         LEFT JOIN join_request_votes jrv ON jrv.join_request_id = jr.id
         WHERE jr.group_id = $1 AND jr.status = 'pending'
-        GROUP BY jr.id, jr.user_id, jr.device_id, jr.status, jr.created_at, u.email, u.username
         ORDER BY jr.created_at DESC`,
       [groupId]
     );
     
-    return rows.map((row: { id: any; user_id: any; device_id: any; status: any; created_at: { toISOString: () => any; }; email: any; username: any; yesVotes: any; noVotes: any; }) => ({
+    return rows.map((row: { id: any; user_id: any; device_id: any; status: any; created_at: { toISOString: () => any; }; email: any; username: any; }) => ({
       id: row.id,
       userId: row.user_id,
       deviceId: row.device_id,
       status: row.status,
       createdAt: row.created_at.toISOString(),
       email: row.email,
-      username: row.username,
-      yesVotes: row.yesVotes,
-      noVotes: row.noVotes
+      username: row.username
     }));
   });
 
   // POST /api/groups/:id/join-requests/:reqId/vote
-  // Permet aux membres du groupe de voter oui/non sur une demande de jointure
+  // Route héritée neutralisée : la V1 n'utilise aucun vote collectif.
   app.post('/api/groups/:id/join-requests/:reqId/vote', {
     schema: {
       params: Type.Object({ 
@@ -395,42 +391,12 @@ export default async function routes(app: FastifyInstance) {
       })
     }
   }, async (req, reply) => {
-    const voterId = authenticatedUserId(req);
-    const { id: groupId, reqId } = req.params as any;
-    const { vote } = req.body as any;
-
-    // Vérifie que le votant est membre du groupe
-    const membership = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [voterId, groupId]);
-    if (membership.length === 0) return reply.code(403).send({ error: 'forbidden' });
-
-    // Vérifie que la demande existe et est en attente
-    const jr = await app.db.oneOrNone(`SELECT id FROM join_requests WHERE id=$1 AND group_id=$2 AND status='pending'`, [reqId, groupId]);
-    if (!jr) return reply.code(404).send({ error: 'request_not_found' });
-
-    // Insère ou met à jour le vote (un utilisateur ne peut voter qu'une fois)
-    await app.db.none(
-      `INSERT INTO join_request_votes(join_request_id, user_id, vote)
-       VALUES($1, $2, $3)
-       ON CONFLICT (join_request_id, user_id) 
-       DO UPDATE SET vote = $3, created_at = NOW()`,
-      [reqId, voterId, vote]
-    );
-
-    // Récupère les compteurs mis à jour
-    const counts = await app.db.one(
-      `SELECT 
-         COALESCE(COUNT(CASE WHEN vote = true THEN 1 END), 0)::int as "yesVotes",
-         COALESCE(COUNT(CASE WHEN vote = false THEN 1 END), 0)::int as "noVotes"
-        FROM join_request_votes
-        WHERE join_request_id = $1`,
-      [reqId]
-    );
-
-    return { yesVotes: counts.yesVotes, noVotes: counts.noVotes };
+    authenticatedUserId(req);
+    return reply.code(403).send({ error: 'forbidden' });
   });
 
   // POST /api/groups/:id/join-requests/:reqId/handle
-  // Route pour accepter/rejeter une demande de jointure (SEUL LE CRÉATEUR PEUT DÉCIDER)
+  // Route pour accepter/rejeter une demande de jointure (owner/admin).
   app.post('/api/groups/:id/join-requests/:reqId/handle', {
     schema: {
       params: Type.Object({ 
@@ -446,20 +412,18 @@ export default async function routes(app: FastifyInstance) {
     const { id: groupId, reqId } = req.params as any;
     const { action } = req.body as any;
 
-    // Vérifie que l'approver est membre du groupe
-    const membership = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [approverId, groupId]);
-    if (membership.length === 0) return reply.code(403).send({ error: 'forbidden' });
-
-    // Vérifie que l'approver est le créateur du groupe
-    const group = await app.db.oneOrNone(`SELECT creator_id FROM groups WHERE id=$1`, [groupId]);
-    if (!group) return reply.code(404).send({ error: 'group_not_found' });
-    if (group.creator_id !== approverId) {
-      return reply.code(403).send({ error: 'only_creator_can_handle' });
+    if (!(await app.services.acl.hasGroupPermission(
+      approverId,
+      groupId,
+      'join-request:handle',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
     }
 
     if (action === 'accept') {
       // Code pour accepter la demande (identique à la route /accept)
-      const jr = await app.db.one(`SELECT * FROM join_requests WHERE id=$1 AND group_id=$2 AND status='pending'`, [reqId, groupId]);
+      const jr = await app.db.oneOrNone(`SELECT * FROM join_requests WHERE id=$1 AND group_id=$2 AND status='pending'`, [reqId, groupId]);
+      if (!jr) return reply.code(403).send({ error: 'forbidden' });
       
       // Ajoute le user
       await app.db.none(`INSERT INTO user_groups(user_id, group_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [jr.user_id, groupId]);
@@ -521,8 +485,14 @@ export default async function routes(app: FastifyInstance) {
       }
       app.log.info({ groupId, userId: jr.user_id }, 'Presence broadcasted for accepted user');
     } else if (action === 'reject') {
-      // Code pour rejeter la demande (identique à la route /reject)
-      await app.db.none(`UPDATE join_requests SET status='rejected', handled_by=$1 WHERE id=$2`, [approverId, reqId]);
+      const rejected = await app.db.oneOrNone(
+        `UPDATE join_requests
+            SET status='rejected', handled_by=$1
+          WHERE id=$2 AND group_id=$3 AND status='pending'
+          RETURNING id`,
+        [approverId, reqId, groupId],
+      );
+      if (!rejected) return reply.code(403).send({ error: 'forbidden' });
     }
 
     reply.code(200); // Explicitement retourner le code 200 OK
@@ -530,7 +500,7 @@ export default async function routes(app: FastifyInstance) {
   });
 
   // POST /api/groups/:id/requests/:rid/reject
-  // Route legacy - SEUL LE CRÉATEUR PEUT REJETER
+  // Route legacy conservée pour compatibilité client.
   app.post('/api/groups/:id/requests/:rid/reject', {
     schema: {
       params: Type.Object({
@@ -542,17 +512,65 @@ export default async function routes(app: FastifyInstance) {
     const approverId = authenticatedUserId(req);
     const { id: groupId, rid } = req.params as any;
 
-    const a = await app.db.any(`SELECT 1 FROM user_groups WHERE user_id=$1 AND group_id=$2`, [approverId, groupId]);
-    if (!a.length) return reply.code(403).send({ error: 'forbidden' });
-
-    // Vérifie que l'approver est le créateur du groupe
-    const group = await app.db.oneOrNone(`SELECT creator_id FROM groups WHERE id=$1`, [groupId]);
-    if (!group) return reply.code(404).send({ error: 'group_not_found' });
-    if (group.creator_id !== approverId) {
-      return reply.code(403).send({ error: 'only_creator_can_handle' });
+    if (!(await app.services.acl.hasGroupPermission(
+      approverId,
+      groupId,
+      'join-request:handle',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
     }
 
-    await app.db.none(`UPDATE join_requests SET status='rejected', handled_by=$1 WHERE id=$2`, [approverId, rid]);
+    const rejected = await app.db.oneOrNone(
+      `UPDATE join_requests
+          SET status='rejected', handled_by=$1
+        WHERE id=$2 AND group_id=$3 AND status='pending'
+        RETURNING id`,
+      [approverId, rid, groupId],
+    );
+    if (!rejected) return reply.code(403).send({ error: 'forbidden' });
     return { ok: true };
+  });
+
+  // PATCH /api/groups/:id/members/:memberId/role
+  // Le propriétaire peut promouvoir/rétrograder un membre sans modifier
+  // la propriété, qui reste exclusivement portée par groups.creator_id.
+  app.patch('/api/groups/:id/members/:memberId/role', {
+    schema: {
+      params: Type.Object({
+        id: Type.String({ format: 'uuid' }),
+        memberId: Type.String({ format: 'uuid' }),
+      }),
+      body: Type.Object({
+        role: Type.Union([Type.Literal('admin'), Type.Literal('member')]),
+      }),
+    },
+  }, async (req, reply) => {
+    const ownerId = authenticatedUserId(req);
+    const { id: groupId, memberId } = req.params as any;
+    const { role } = req.body as any;
+
+    if (!(await app.services.acl.hasGroupPermission(
+      ownerId,
+      groupId,
+      'member-role:set',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
+
+    const updated = await app.db.oneOrNone(
+      `UPDATE user_groups ug
+          SET role = $1
+         FROM groups g
+        WHERE ug.group_id = $2
+          AND ug.user_id = $3
+          AND g.id = ug.group_id
+          AND g.creator_id = $4
+          AND ug.user_id <> g.creator_id
+        RETURNING ug.user_id AS "userId", ug.role`,
+      [role, groupId, memberId, ownerId],
+    );
+    if (!updated) return reply.code(403).send({ error: 'forbidden' });
+
+    return updated;
   });
 }

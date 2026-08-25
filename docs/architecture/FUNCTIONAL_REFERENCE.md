@@ -45,10 +45,10 @@ Le staging actuellement validé est isolé sur le loopback du LXC106. Le client 
 | Flutter UI | écrans de compte, cercles, conversations, appareils et messages | interface finalisée, accessible ou adaptée desktop |
 | `AuthProvider` | login, stockage des jetons, refresh biométrique, headers HTTP | vérification e-mail, récupération ou révocation multi-session |
 | `GroupProvider` | état des cercles, adhésions, membres et appareils | matrice propriétaire/admin/membre complète |
-| `ConversationProvider` | conversations, messages, caches, synchronisation et notifications | outbox fiable ou vérification systématique avant affichage |
+| `ConversationProvider` | conversations, messages, caches, synchronisation et notifications | outbox fiable ou synchronisation durable |
 | `WebSocketService` | connexion Socket.IO, reconnexion, abonnements et callbacks | source durable des messages ; les événements sont principalement des pings |
 | Auth Fastify | inscription, login, access/refresh JWT, `/me`, logout | gestion complète du cycle de compte |
-| Messaging Fastify | REST métier, Socket.IO, présence et ACL partielles | autorisations centralisées et atomiques |
+| Messaging Fastify | REST métier, Socket.IO, présence et matrice ACL partagée | autorisations atomiques pour toutes les mutations |
 | PostgreSQL | comptes, sessions, appartenances, clés publiques et enveloppes | migrations versionnées ou séparation des privilèges par service |
 | SQLite local | enveloppes, état de synchronisation et caches | base réellement chiffrée ; le fichier est actuellement ouvert avec `sqflite` standard |
 
@@ -126,17 +126,17 @@ Les clés générées sous le nom du cercle et la table `group_keys` ne particip
 1. L'utilisateur fournit ou scanne l'UUID du cercle.
 2. Flutter obtient son `deviceId`, génère une paire Ed25519/X25519 pour ce cercle et transmet les clés publiques dans une join request.
 3. Messaging crée `join_requests` avec le sujet JWT, l'appareil et les clés publiques.
-4. Les membres peuvent voir et voter sur la demande dans l'interface actuelle.
-5. Seul le créateur est effectivement autorisé par le backend actuel à accepter ou refuser.
+4. Seuls le propriétaire et les administrateurs peuvent voir puis accepter ou refuser la demande.
+5. La route de vote historique est neutralisée et le client ne l'utilise plus.
 6. À l'acceptation, l'utilisateur rejoint `user_groups` et la clé initiale est copiée dans `group_device_keys` avec le statut `active`.
 7. Des pings `group:member_joined` et `group:joined` demandent aux clients de rafraîchir leurs données.
 
-Cible V1 : propriétaire et administrateurs peuvent décider, sans vote collectif. Le modèle observé ne possède pas encore les rôles décidés et conserve des routes de vote héritées (`TC-104`).
+Depuis `TC-104`, `groups.creator_id` détermine l'unique propriétaire et `user_groups.role` distingue administrateur et membre. Seul le propriétaire peut affecter ces deux rôles ; le transfert de propriété reste hors de ce parcours.
 
 ### Consultation
 
 - `GET /api/groups` retourne uniquement les cercles du sujet JWT.
-- Les détails et membres vérifient l'appartenance dans les routes correspondantes.
+- Les détails et membres vérifient l'appartenance via la matrice ACL et exposent le rôle effectif du sujet.
 - Les événements de cercle ne transportent volontairement qu'un identifiant minimal dans les nouvelles émissions.
 
 ## Appareils et clés publiques
@@ -158,6 +158,7 @@ Les seeds privés et clés publiques sont stockés via `flutter_secure_storage`.
 
 - Le client publie ses clés dans `POST /api/keys/group/:groupId/devices`; l'identité utilisateur vient du JWT.
 - `GET /api/keys/group/:groupId` renvoie les appareils actifs et leurs clés publiques.
+- La lecture de l'annuaire, la publication, la liste personnelle et la révocation exigent toutes l'appartenance au cercle ; un sujet ne gère que ses propres appareils.
 - Un cache mémoire puis SQLite de 30 jours évite certains appels réseau.
 - Les empreintes SHA-256 stockées détectent une corruption locale d'une entrée en cache, mais il n'existe pas de journal de transparence ni de comparaison fiable contre un historique approuvé.
 
@@ -175,17 +176,17 @@ Les seeds privés et clés publiques sont stockés via `flutter_secure_storage`.
 
 Flutter transmet `groupId`, `type` et une liste de membres ciblés. Messaging :
 
-1. crée la conversation avec le sujet JWT comme créateur ;
-2. ajoute le créateur et tous les UUID ciblés dans `conversation_users` ;
-3. rejoint aux rooms Socket.IO uniquement les utilisateurs trouvés dans le cercle ;
-4. émet un ping `conversation:created` aux membres du cercle.
+1. vérifie par la matrice ACL que le sujet et chaque UUID ciblé appartiennent au même cercle ;
+2. refuse avant toute insertion si un seul participant est extérieur ;
+3. crée la conversation et ajoute les participants validés ;
+4. rejoint leurs sockets aux rooms utiles puis émet un ping `conversation:created`.
 
-Écart critique : l'insertion de la conversation et de ses participants précède la validation complète de l'appartenance au cercle. Les ACL et l'atomicité doivent être corrigées dans `TC-104` et `TC-105`.
+Écart restant : le contrôle préalable ferme l'insertion manifestement interdite, mais la vérification et les écritures multi-étapes ne partagent pas encore une transaction (`TC-105`).
 
 ### Lecture et accusés
 
 - La liste des conversations est filtrée par `conversation_users` et le sujet JWT.
-- Le détail, les membres, les messages et lecteurs exigent une appartenance à la conversation dans leurs routes actuelles.
+- Le détail, les membres, les messages et lecteurs exigent à la fois l'appartenance à la conversation et au cercle parent via le service ACL.
 - `POST /api/conversations/:id/read` met `last_read_at` à l'heure serveur et émet `conv:read`.
 - Les indicateurs de frappe sont émis uniquement après vérification d'appartenance par Messaging.
 
@@ -244,7 +245,7 @@ La latence est limitée sans affaiblissement : priorité aux messages visibles d
 - Les notifications in-app et locales sont calculées sur le client.
 - Le code peut inclure le texte déchiffré et un nom d'expéditeur dans une notification locale.
 - Aucun fournisseur de push distant n'est intégré dans l'état observé.
-- Les logs de debug Flutter peuvent inclure un extrait de texte déchiffré ; cela doit être supprimé avant release.
+- Depuis `TC-114`, les chemins de notification ne journalisent plus d'extrait du texte déchiffré.
 
 ## Stockage local et comportement hors ligne
 
@@ -269,10 +270,10 @@ Le handshake exige l'access token strict et, transitoirement, le faux `APP_SECRE
 
 | Événement | Donnée utile | Contrôle serveur |
 |---|---|---|
-| `conv:subscribe` | `convId` | appartenance à la conversation |
-| `conv:subscribe:batch` | `convIds[]` | requête SQL filtrant les conversations autorisées |
-| `conv:unsubscribe` | `convId` | quitte seulement la room du socket |
-| `typing:start` / `typing:stop` | `convId` | appartenance à la conversation |
+| `conv:subscribe` | `convId` | ACL conversation + cercle parent |
+| `conv:subscribe:batch` | `convIds[]` | ACL partagée filtrant les conversations autorisées |
+| `conv:unsubscribe` | `convId` | ACL avant sortie et émission de présence |
+| `typing:start` / `typing:stop` | `convId` | ACL conversation + cercle parent |
 
 Aucun `userId` fourni par ces événements ne fait autorité ; l'acteur est celui du socket authentifié.
 
@@ -320,8 +321,9 @@ Toutes les routes métier exigent actuellement `X-Client-Version`, le faux `X-Ap
 | Messaging | `POST /api/groups/:id/join` | ancienne variante de join request |
 | Messaging | `POST /api/groups/:id/join-requests` | join request actuelle |
 | Messaging | `GET /api/groups/:id/join-requests` | demandes en attente |
-| Messaging | `POST .../vote` | vote hérité |
-| Messaging | `POST .../handle` | accepter/refuser, créateur seulement |
+| Messaging | `POST .../vote` | route héritée toujours refusée |
+| Messaging | `POST .../handle` | accepter/refuser, propriétaire ou administrateur |
+| Messaging | `PATCH .../members/:memberId/role` | affecter admin/membre, propriétaire seulement |
 | Messaging | `POST .../requests/:rid/accept|reject` | variantes historiques |
 | Messaging | `GET /api/keys/group/:groupId` | annuaire actif du cercle |
 | Messaging | `GET .../my-devices` | appareils du sujet, actifs ou révoqués |
@@ -341,9 +343,9 @@ Le fichier OpenAPI actuel ne couvre pas encore fidèlement toutes ces routes et 
 |---|---|---|
 | inscription/login | prototype fonctionnel | compléter vérification, récupération et erreurs |
 | biométrie | protège le refresh local | UX et plateformes à valider |
-| cercles | création, liste, demande, décision créateur | rôles V1 à implémenter |
+| cercles | création, liste, demande, décision owner/admin, rôles | transfert de propriété et UX de gestion à finaliser |
 | QR d'adhésion | lecture d'un identifiant de cercle | format d'invitation sûr à concevoir |
-| conversations | création/liste/détail | ACL et atomicité à corriger |
+| conversations | création/liste/détail avec ACL commune | atomicité à corriger dans `TC-105` |
 | texte E2EE V2 | envoi/réception avec vérification avant usage | protocole V3 et validation appareils réels requis |
 | appareils | liste/publication/révocation partielle | preuve et approbation requises |
 | présence/frappe/lecture | temps réel en mémoire | confidentialité, limites et fiabilité à tester |

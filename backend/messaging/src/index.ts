@@ -108,20 +108,20 @@ async function build() {
     }, 'User WebSocket connected');
     
     // CORRECTION: Rejoindre automatiquement les rooms de groupes de l'utilisateur
-    app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
-      .then((groups: any[]) => {
-        groups.forEach((group: any) => {
-          socket.join(`group:${group.group_id}`);
+    app.services.acl.listAccessibleGroupIds(userId)
+      .then((groupIds: string[]) => {
+        groupIds.forEach((groupId: string) => {
+          socket.join(`group:${groupId}`);
           app.log.info({ 
             userId, 
-            groupId: group.group_id,
+            groupId,
             socketId: socket.id,
             event: 'group_room_joined'
           }, 'User auto-joined group room');
         });
         app.log.info({ 
           userId, 
-          groupCount: groups.length,
+          groupCount: groupIds.length,
           socketId: socket.id,
           event: 'all_group_rooms_joined'
         }, 'User auto-joined group rooms');
@@ -205,34 +205,32 @@ async function build() {
     socket.on('conv:subscribe', async (data: any) => {
       const convId = data.convId || data;
       const roomName = `conv:${convId}`;
-      
-      // ✅ OPTIMISATION: Vérifier si déjà abonné (évite requête DB inutile)
+
+      const hasAccess = await app.services.acl.hasConversationPermission(
+        userId,
+        convId,
+        'socket:subscribe',
+      );
+      if (!hasAccess) {
+        socket.emit('conv:subscribe', { success: false, error: 'forbidden' });
+        app.log.warn({ convId, userId }, 'Unauthorized conversation subscription attempt');
+        return;
+      }
+
+      // L'accès est revérifié même si le socket se trouve déjà dans la room.
       const room = app.io.sockets.adapter.rooms.get(roomName);
       if (room && room.has(socket.id)) {
         app.log.info({ convId, userId }, 'User already subscribed to conversation');
         socket.emit('conv:subscribe', { success: true, convId, alreadySubscribed: true });
         return;
       }
-      
-      // Vérifier que l'utilisateur a accès à cette conversation
-      const hasAccess = await app.db.oneOrNone(
-        `SELECT 1 FROM conversation_users cu 
-         JOIN conversations c ON cu.conversation_id = c.id 
-         WHERE cu.user_id = $1 AND c.id = $2`,
-        [userId, convId]
-      );
-      
-      if (hasAccess) {
-        socket.join(roomName);
-        socket.emit('conv:subscribe', { success: true, convId });
-        app.log.info({ convId, userId }, 'User subscribed to conversation');
-        
-        // ✅ OPTIMISÉ: Utiliser la fonction helper pour les événements de présence
-        await emitBatchPresenceEvents(socket, [convId], userId, app);
-      } else {
-        socket.emit('conv:subscribe', { success: false, error: 'Unauthorized' });
-        app.log.warn({ convId, userId }, 'Unauthorized conversation subscription attempt');
-      }
+
+      socket.join(roomName);
+      socket.emit('conv:subscribe', { success: true, convId });
+      app.log.info({ convId, userId }, 'User subscribed to conversation');
+
+      // ✅ OPTIMISÉ: Utiliser la fonction helper pour les événements de présence
+      await emitBatchPresenceEvents(socket, [convId], userId, app);
     });
     
     // ✅ NOUVEAU: Endpoint batch pour abonner plusieurs conversations en une requête
@@ -246,16 +244,8 @@ async function build() {
       
       app.log.info({ userId, count: convIds.length }, 'Batch subscription request');
       
-      // ✅ OPTIMISÉ: Vérifier les accès en une seule requête avec ANY
-      const accessCheck = await app.db.any(
-        `SELECT c.id 
-         FROM conversation_users cu 
-         JOIN conversations c ON cu.conversation_id = c.id 
-         WHERE cu.user_id = $1 AND c.id = ANY($2::uuid[])`,
-        [userId, convIds]
-      );
-      
-      const authorizedConvIds = accessCheck.map((row: any) => row.id);
+      const authorizedConvIds =
+        await app.services.acl.listAccessibleConversationIds(userId, convIds);
       const unauthorizedCount = convIds.length - authorizedConvIds.length;
       
       // Abonner à toutes les conversations autorisées
@@ -295,14 +285,23 @@ async function build() {
       }, 'Batch subscription completed');
     });
     
-    socket.on('conv:unsubscribe', (data: any) => {
+    socket.on('conv:unsubscribe', async (data: any) => {
       const convId = data.convId || data;
-      socket.leave(`conv:${convId}`);
+      const conversationRoom = `conv:${convId}`;
+      socket.leave(conversationRoom);
+
+      if (!(await app.services.acl.hasConversationPermission(
+        userId,
+        convId,
+        'socket:subscribe',
+      ))) {
+        app.log.warn({ convId, userId }, 'Conversation room left without presence emission after ACL refusal');
+        return;
+      }
       app.log.info({ convId, userId }, 'User unsubscribed from conversation');
       
       // CORRECTION: Émettre la présence de l'utilisateur comme hors ligne dans cette conversation
       // Vérifier si l'utilisateur a encore des sockets dans cette conversation
-      const conversationRoom = `conv:${convId}`;
       const socketsInConversation = app.io.sockets.adapter.rooms.get(conversationRoom);
       const userSocketsInConversation = Array.from(socketsInConversation || []).filter(socketId => {
         const socket = app.io.sockets.sockets.get(socketId);
@@ -323,11 +322,12 @@ async function build() {
     socket.on('typing:start', async (data: any) => {
       const convId = data.convId;
       if (convId) {
-        // Vérifier que l'utilisateur est dans la conversation
-        const isInConversation = await app.db.oneOrNone(
-          `SELECT 1 FROM conversation_users WHERE user_id = $1 AND conversation_id = $2`,
-          [userId, convId]
-        );
+        const isInConversation =
+          await app.services.acl.hasConversationPermission(
+            userId,
+            convId,
+            'typing:emit',
+          );
         
         if (isInConversation) {
           // Broadcaster à tous les autres utilisateurs dans la conversation
@@ -342,11 +342,12 @@ async function build() {
     socket.on('typing:stop', async (data: any) => {
       const convId = data.convId;
       if (convId) {
-        // Vérifier que l'utilisateur est dans la conversation
-        const isInConversation = await app.db.oneOrNone(
-          `SELECT 1 FROM conversation_users WHERE user_id = $1 AND conversation_id = $2`,
-          [userId, convId]
-        );
+        const isInConversation =
+          await app.services.acl.hasConversationPermission(
+            userId,
+            convId,
+            'typing:emit',
+          );
         
         if (isInConversation) {
           // Broadcaster à tous les autres utilisateurs dans la conversation

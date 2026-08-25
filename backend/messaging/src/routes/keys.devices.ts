@@ -30,7 +30,15 @@ export default async function routes(app: FastifyInstance) {
       })) }
     }
   }, async (req, reply) => {
+    const userId = authenticatedUserId(req);
     const { groupId } = req.params as any;
+    if (!(await app.services.acl.hasGroupPermission(
+      userId,
+      groupId,
+      'keys:read',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
     const rows = await app.db.any(
       `SELECT user_id as "userId", device_id as "deviceId",
               encode(pk_sig,'base64') as "pk_sig",
@@ -64,6 +72,13 @@ export default async function routes(app: FastifyInstance) {
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
     const { groupId } = req.params as any;
+    if (!(await app.services.acl.hasGroupPermission(
+      userId,
+      groupId,
+      'keys:manage-own',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
     const rows = await app.db.any(
       `SELECT user_id as "userId", device_id as "deviceId",
               encode(pk_sig,'base64') as "pk_sig",
@@ -92,6 +107,14 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { groupId } = req.params as any;
     const { deviceId, pk_sig, pk_kem, key_version } = req.body as any;
+
+    if (!(await app.services.acl.hasGroupPermission(
+      userId,
+      groupId,
+      'keys:manage-own',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
 
     // CORRECTION CRITIQUE: Ne pas réactiver un device révoqué lors de la publication
     // Si le device est révoqué, on refuse la publication pour éviter la réactivation automatique
@@ -127,6 +150,14 @@ export default async function routes(app: FastifyInstance) {
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
     const { groupId, deviceId } = req.params as any;
+
+    if (!(await app.services.acl.hasGroupPermission(
+      userId,
+      groupId,
+      'keys:manage-own',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
 
     await app.db.none(
       `UPDATE group_device_keys SET status='revoked'

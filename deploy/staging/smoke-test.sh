@@ -84,6 +84,16 @@ secondary_register_response=$(curl --silent --show-error \
   "$base_url/auth/register")
 secondary_user_id=$(jq -er '.id' <<<"$secondary_register_response")
 
+secondary_login_payload=$(jq -nc \
+  --arg email "$secondary_email" \
+  --arg password "$secondary_password" \
+  '{email:$email,password:$password}')
+secondary_login_response=$(curl --silent --show-error \
+  -H 'content-type: application/json' \
+  --data "$secondary_login_payload" \
+  "$base_url/auth/login")
+secondary_access_token=$(jq -er '.access' <<<"$secondary_login_response")
+
 assert_status 401 "$base_url/auth/refresh" \
   -X POST \
   -H "authorization: Bearer $access_token" \
@@ -125,6 +135,113 @@ group_response=$(curl --silent --show-error \
   --data "$group_payload" \
   "$base_url/api/groups")
 group_id=$(jq -er '.groupId | select(type == "string")' <<<"$group_response")
+
+# TC-104 : un utilisateur extérieur ne lit pas l'annuaire de clés et ne
+# peut pas être injecté dans une conversation avant son adhésion.
+assert_status 403 "$base_url/api/keys/group/$group_id" \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0'
+
+conversations_before=$(curl --silent --show-error \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  "$base_url/api/conversations")
+conversation_count_before=$(jq -er 'length' <<<"$conversations_before")
+forbidden_conversation_payload=$(jq -nc \
+  --arg group_id "$group_id" \
+  --arg outsider_id "$secondary_user_id" \
+  '{groupId:$group_id,type:"private",memberIds:[$outsider_id]}')
+assert_status 403 "$base_url/api/conversations" \
+  -X POST \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data "$forbidden_conversation_payload"
+conversations_after=$(curl --silent --show-error \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  "$base_url/api/conversations")
+conversation_count_after=$(jq -er 'length' <<<"$conversations_after")
+if [[ "$conversation_count_before" != "$conversation_count_after" ]]; then
+  echo "Denied conversation creation changed persistent state." >&2
+  exit 1
+fi
+
+# Le propriétaire gère l'adhésion, le membre simple ne voit pas les
+# demandes, puis le rôle admin reçoit uniquement les permissions prévues.
+device_key='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+join_payload=$(jq -nc \
+  --arg device_id "smoke-device-$run_id" \
+  --arg key "$device_key" \
+  '{deviceId:$device_id,deviceSigPubKey:$key,deviceKemPubKey:$key}')
+join_response=$(curl --silent --show-error \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data "$join_payload" \
+  "$base_url/api/groups/$group_id/join-requests")
+join_request_id=$(jq -er '.requestId' <<<"$join_response")
+
+owner_requests=$(curl --silent --show-error \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  "$base_url/api/groups/$group_id/join-requests")
+jq -e --arg request_id "$join_request_id" \
+  'any(.[]; .id == $request_id)' >/dev/null <<<"$owner_requests"
+
+handle_payload='{"action":"accept"}'
+assert_status 200 "$base_url/api/groups/$group_id/join-requests/$join_request_id/handle" \
+  -X POST \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data "$handle_payload"
+
+assert_status 403 "$base_url/api/groups/$group_id/join-requests" \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0'
+assert_status 403 "$base_url/api/groups/$group_id/join-requests/$join_request_id/vote" \
+  -X POST \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data '{"vote":true}'
+assert_status 200 "$base_url/api/keys/group/$group_id" \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0'
+
+role_payload='{"role":"admin"}'
+role_response=$(curl --silent --show-error \
+  -X PATCH \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data "$role_payload" \
+  "$base_url/api/groups/$group_id/members/$secondary_user_id/role")
+jq -e '.role == "admin"' >/dev/null <<<"$role_response"
+
+assert_status 200 "$base_url/api/groups/$group_id/join-requests" \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0'
+assert_status 403 "$base_url/api/groups/$group_id/members/$authenticated_user_id/role" \
+  -X PATCH \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $secondary_access_token" \
+  -H "x-app-secret: $app_secret" \
+  -H 'x-client-version: 2.0.0' \
+  --data '{"role":"member"}'
 
 # L'identité de l'expéditeur fait partie de l'enveloppe signée, mais ne fait
 # jamais autorité : le serveur doit refuser B lorsque le token appartient à A.
@@ -185,5 +302,5 @@ assert_status 401 "$base_url/auth/refresh" \
   -H "authorization: Bearer $refresh_token" \
   -H "x-app-secret: $app_secret"
 
-unset password secondary_password access_token refreshed_access_token refresh_token
-echo "Smoke tests passed: health, login, strict access/refresh separation, refresh revocation, forged sender rejection, app-secret rejection, group write/read and Socket.IO handshake."
+unset password secondary_password access_token secondary_access_token refreshed_access_token refresh_token
+echo "Smoke tests passed: health, tokens, identity, group ACL/roles, key directory isolation, conversation pre-check, group write/read and Socket.IO handshake."

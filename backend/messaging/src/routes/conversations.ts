@@ -22,6 +22,15 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { groupId, type, memberIds } = req.body as any;
 
+    const allowed = await app.services.acl.canCreateConversation(
+      userId,
+      groupId,
+      memberIds,
+    );
+    if (!allowed) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
+
     const conv = await app.db.one(
       `INSERT INTO conversations(group_id, type, creator_id)
        VALUES($1,$2,$3) RETURNING id`,
@@ -37,30 +46,18 @@ export default async function routes(app: FastifyInstance) {
       );
     }
 
-    // CORRECTION: S'assurer que tous les membres de la conversation sont dans la room du groupe AVANT d'émettre l'événement
-    // Vérifier que tous les membres sont bien membres du groupe (sécurité)
-    const groupMembers = await app.db.any(
-      `SELECT user_id FROM user_groups WHERE group_id = $1`,
-      [groupId]
-    );
-    const groupMemberIds = new Set(groupMembers.map((m: any) => m.user_id));
-    
-    // Rejoindre uniquement les membres qui sont dans le groupe
+    // Tous les membres ont été validés par l'ACL avant l'insertion.
     for (const uid of allMembers) {
-      if (groupMemberIds.has(uid)) {
-        app.io.in(`user:${uid}`).socketsJoin(`group:${groupId}`);
-        app.log.debug({ groupId, userId: uid }, 'User joined group room for conversation creation');
-      } else {
-        app.log.warn({ groupId, userId: uid }, 'User is not a group member, skipping room join');
-      }
+      app.io.in(`user:${uid}`).socketsJoin(`group:${groupId}`);
+      app.log.debug({ groupId, userId: uid }, 'User joined group room for conversation creation');
     }
-    app.log.info({ groupId, memberCount: allMembers.length, groupMemberCount: groupMemberIds.size }, 'All conversation members joined group room');
+    app.log.info({ groupId, memberCount: allMembers.length }, 'All conversation members joined group room');
 
     // SÉCURITÉ: Émettre un ping avec convId et groupId (identifiants, pas de données sensibles)
     // Les clients devront récupérer les conversations via l'API après avoir reçu le ping
     // Le convId et groupId sont nécessaires pour identifier quelle conversation a été créée
     // CORRECTION: Exclure le créateur de la notification (il vient de créer la conversation)
-    app.log.info({ convId: conv.id, groupId, userId, memberCount: groupMemberIds.size }, 'About to emit conversation:created ping');
+    app.log.info({ convId: conv.id, groupId, userId, memberCount: allMembers.length }, 'About to emit conversation:created ping');
     app.io.to(`group:${groupId}`).except(`user:${userId}`).emit('conversation:created', {
       type: 'conversation:created',
       convId: conv.id,
@@ -79,6 +76,7 @@ export default async function routes(app: FastifyInstance) {
       `SELECT c.id, c.group_id as "groupId", c.type, c.creator_id as "creatorId", c.created_at as "createdAt"
          FROM conversations c
          JOIN conversation_users cu ON cu.conversation_id=c.id
+         JOIN user_groups ug ON ug.group_id=c.group_id AND ug.user_id=cu.user_id
         WHERE cu.user_id=$1
         ORDER BY c.created_at DESC`,
       [userId]
@@ -93,12 +91,11 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
 
-    // ACL: être membre de la conversation
-    const membership = await app.db.any(
-      `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
-      [convId, userId]
-    );
-    if (membership.length === 0) {
+    if (!(await app.services.acl.hasConversationPermission(
+      userId,
+      convId,
+      'conversation:read',
+    ))) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
@@ -145,12 +142,13 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
 
-    // ACL implicite: être membre
-    const rows = await app.db.any(
-      `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
-      [convId, userId]
-    );
-    if (rows.length === 0) return reply.code(403).send({ error: 'forbidden' });
+    if (!(await app.services.acl.hasConversationPermission(
+      userId,
+      convId,
+      'read-receipt:write',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
 
     const ts = await app.services.acl.markConversationRead(convId, userId);
 
@@ -168,12 +166,13 @@ export default async function routes(app: FastifyInstance) {
     const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
 
-    // ACL: membre
-    const rows = await app.db.any(
-      `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
-      [convId, userId]
-    );
-    if (rows.length === 0) return reply.code(403).send({ error: 'forbidden' });
+    if (!(await app.services.acl.hasConversationPermission(
+      userId,
+      convId,
+      'readers:read',
+    ))) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
 
     const readers = await app.services.acl.listReaders(convId);
     return { readers };

@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS group_keys (
 CREATE TABLE IF NOT EXISTS user_groups (
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin','member')),
   PRIMARY KEY (user_id, group_id)
 );
 

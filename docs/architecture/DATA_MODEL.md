@@ -1,14 +1,14 @@
 # Modèle de données
 
 Statut : photographie V2 et contraintes cibles
-Dernière mise à jour : 2026-08-24
+Dernière mise à jour : 2026-08-25
 
 ## Modèle observé
 
 Le script `infrastructure/postgres/init.sql` définit :
 
 - `users` : compte, e-mail, hash de mot de passe, nom ;
-- `groups`, `user_groups` : cercle et appartenance ;
+- `groups`, `user_groups` : cercle, appartenance et rôle `admin|member` ; l'unique propriétaire reste `groups.creator_id` ;
 - `join_requests`, `join_request_votes` : demandes et votes d'entrée ;
 - `group_keys`, `group_device_keys` : clés publiques par cercle/utilisateur/appareil ;
 - `conversations`, `conversation_users` : conversation et participants ;
@@ -16,14 +16,14 @@ Le script `infrastructure/postgres/init.sql` définit :
 - `refresh_tokens` : sessions renouvelables ;
 - `notifications` : événements applicatifs utilisateur.
 
-Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. Le schéma historique ou tout futur déploiement peut néanmoins différer tant qu'une baseline de migrations et une table de version n'existent pas (`TC-201`).
+Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. `TC-104` ajoute le premier couple SQL montant/descendant pour le rôle, à reprendre dans l'outil et la baseline qui seront choisis par `TC-201`.
 
 La circulation de ces données par parcours est décrite dans [`FUNCTIONAL_REFERENCE.md`](FUNCTIONAL_REFERENCE.md), et les fichiers responsables dans [`TRACEABILITY.md`](TRACEABILITY.md).
 
 ## Problèmes structurels à résoudre
 
-- Pas d'historique de migrations ni de table de version de schéma.
-- Rôles de cercle insuffisamment explicites ; certaines décisions semblent dépendre du créateur ou d'un vote implicite.
+- Pas encore d'outil, de registre appliqué ni de baseline globale de migrations ; seul le changement TC-104 possède des scripts SQL versionnés.
+- Le stockage des rôles est explicite, mais le transfert de propriété et l'interface complète de gestion restent à concevoir.
 - Cycle de vie des appareils incomplet : preuve d'approbation, révocation, rotation et rattachement au compte.
 - Horodatages mêlant `timestamp` et `timestamptz`.
 - Énumérations métier parfois représentées par texte libre.

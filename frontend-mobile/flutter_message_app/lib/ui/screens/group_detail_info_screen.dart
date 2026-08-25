@@ -39,10 +39,7 @@ class _GroupDetailInfoScreenState extends State<GroupDetailInfoScreen> {
       await groupProv.fetchGroupDetail(widget.groupId);
       await groupProv.fetchGroupMembers(widget.groupId);
     } catch (error) {
-      SnackbarService.showError(
-        context,
-        'Erreur chargement : $error',
-      );
+      SnackbarService.showError(context, 'Erreur chargement : $error');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -161,140 +158,148 @@ class _GroupDetailInfoScreenState extends State<GroupDetailInfoScreen> {
               );
             },
           ),
-          // Bouton demandes d'adhésion
-          IconButton(
-            icon: const Icon(Icons.how_to_reg),
-            tooltip: "Demandes d'adhésion",
-            onPressed: () {
-              final bool isCreator = groupDetail != null && 
-                  currentUserId != null &&
-                  groupDetail['creatorId'] == currentUserId;
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => JoinRequestsScreen(
-                    groupId: widget.groupId,
-                    groupName: widget.groupName,
-                    isCreator: isCreator,
+          if (groupDetail != null &&
+              (groupDetail['role'] == 'owner' ||
+                  groupDetail['role'] == 'admin'))
+            IconButton(
+              icon: const Icon(Icons.how_to_reg),
+              tooltip: "Demandes d'adhésion",
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder:
+                        (_) => JoinRequestsScreen(
+                          groupId: widget.groupId,
+                          groupName: widget.groupName,
+                        ),
                   ),
-                ),
-              ).then((_) {
-                _loadGroupData();
-              });
-            },
-          ),
+                ).then((_) {
+                  _loadGroupData();
+                });
+              },
+            ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadGroupData,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  // Informations générales
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Informations du groupe',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (groupDetail != null) ...[
-                            _buildInfoRow('ID', widget.groupId),
-                            if (groupDetail['name'] != null)
-                              _buildInfoRow('Nom', groupDetail['name']),
-                            if (groupDetail['createdAt'] != null)
-                              _buildInfoRow(
-                                'Créé le',
-                                _formatDate(groupDetail['createdAt']),
-                              ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // Membres du groupe
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                'Membres',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Text(
-                                '${members.length}',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: Theme.of(context).primaryColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          if (members.isEmpty)
+      body:
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                onRefresh: _loadGroupData,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // Informations générales
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             const Text(
-                              'Aucun membre',
-                              style: TextStyle(color: Colors.grey),
-                            )
-                          else
-                            ...members.map((member) {
-                              final isCurrentUser =
-                                  member['userId'] == currentUserId;
-                              return ListTile(
-                                dense: true,
-                                leading: CircleAvatar(
-                                  child: Text(
-                                    (member['username'] ?? member['email'] ?? 'U')
-                                        .substring(0, 1)
-                                        .toUpperCase(),
-                                  ),
+                              'Informations du groupe',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            if (groupDetail != null) ...[
+                              _buildInfoRow('ID', widget.groupId),
+                              if (groupDetail['name'] != null)
+                                _buildInfoRow('Nom', groupDetail['name']),
+                              if (groupDetail['createdAt'] != null)
+                                _buildInfoRow(
+                                  'Créé le',
+                                  _formatDate(groupDetail['createdAt']),
                                 ),
-                                title: Text(
-                                  member['username'] ?? member['email'] ?? 'Utilisateur',
-                                  style: TextStyle(
-                                    fontWeight: isCurrentUser
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  member['email'] ?? '',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                trailing: isCurrentUser
-                                    ? Chip(
-                                        label: const Text('Vous'),
-                                        labelStyle: const TextStyle(fontSize: 10),
-                                      )
-                                    : null,
-                              );
-                            }),
-                        ],
+                            ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 16),
+                    // Membres du groupe
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Membres',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  '${members.length}',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Theme.of(context).primaryColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            if (members.isEmpty)
+                              const Text(
+                                'Aucun membre',
+                                style: TextStyle(color: Colors.grey),
+                              )
+                            else
+                              ...members.map((member) {
+                                final isCurrentUser =
+                                    member['userId'] == currentUserId;
+                                return ListTile(
+                                  dense: true,
+                                  leading: CircleAvatar(
+                                    child: Text(
+                                      (member['username'] ??
+                                              member['email'] ??
+                                              'U')
+                                          .substring(0, 1)
+                                          .toUpperCase(),
+                                    ),
+                                  ),
+                                  title: Text(
+                                    member['username'] ??
+                                        member['email'] ??
+                                        'Utilisateur',
+                                    style: TextStyle(
+                                      fontWeight:
+                                          isCurrentUser
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    member['email'] ?? '',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  trailing:
+                                      isCurrentUser
+                                          ? Chip(
+                                            label: const Text('Vous'),
+                                            labelStyle: const TextStyle(
+                                              fontSize: 10,
+                                            ),
+                                          )
+                                          : null,
+                                );
+                              }),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
     );
   }
 
@@ -314,12 +319,7 @@ class _GroupDetailInfoScreenState extends State<GroupDetailInfoScreen> {
               ),
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 14),
-            ),
-          ),
+          Expanded(child: Text(value, style: const TextStyle(fontSize: 14))),
         ],
       ),
     );
@@ -335,4 +335,3 @@ class _GroupDetailInfoScreenState extends State<GroupDetailInfoScreen> {
     }
   }
 }
-

@@ -13,33 +13,31 @@ export function initPresenceService(io: Server, app: any) {
   }
 
   function broadcastPresenceToGroups(userId: string, online: boolean, count: number) {
-    // Récupérer les groupes de l'utilisateur et broadcaster uniquement aux membres de ces groupes
-    app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
-      .then((userGroups: any[]) => {
-        userGroups.forEach((group: any) => {
-          io.to(`group:${group.group_id}`).emit('presence:update', { userId, online, count });
+    app.services.acl.listAccessibleGroupIds(userId)
+      .then((groupIds: string[]) => {
+        groupIds.forEach((groupId: string) => {
+          io.to(`group:${groupId}`).emit('presence:update', { userId, online, count });
         });
       })
       .catch((err: any) => {
-        console.error(`[Presence] Error getting user groups for ${userId}:`, err);
+        app.log.error({ err, userId }, 'Unable to resolve presence groups');
       });
   }
 
   function broadcastPresenceToConversations(userId: string, online: boolean, count: number) {
-    // Récupérer les conversations de l'utilisateur et broadcaster uniquement aux membres de ces conversations
-    app.db.any(`SELECT conversation_id FROM conversation_users WHERE user_id = $1`, [userId])
-      .then((userConversations: any[]) => {
-        userConversations.forEach((conv: any) => {
-          io.to(`conv:${conv.conversation_id}`).emit('presence:conversation', { 
+    app.services.acl.listAllAccessibleConversationIds(userId)
+      .then((conversationIds: string[]) => {
+        conversationIds.forEach((conversationId: string) => {
+          io.to(`conv:${conversationId}`).emit('presence:conversation', {
             userId, 
             online, 
             count,
-            conversationId: conv.conversation_id 
+            conversationId,
           });
         });
       })
       .catch((err: any) => {
-        console.error(`[Presence] Error getting user conversations for ${userId}:`, err);
+        app.log.error({ err, userId }, 'Unable to resolve presence conversations');
       });
   }
 
@@ -60,18 +58,18 @@ export function initPresenceService(io: Server, app: any) {
     // CORRECTION: Envoyer l'état de présence actuel uniquement aux groupes communs
     // Pour chaque utilisateur en ligne, vérifier s'il est dans les mêmes groupes que le nouvel utilisateur
     console.log(`[Presence] Broadcasting current presence state to user's groups (filtered by membership)`);
-    app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [userId])
-      .then((userGroups: any[]) => {
-        console.log(`[Presence] User ${userId} is in ${userGroups.length} groups`);
-        const userGroupIds = new Set(userGroups.map((g: any) => g.group_id));
+    app.services.acl.listAccessibleGroupIds(userId)
+      .then((userGroupIdsList: string[]) => {
+        console.log(`[Presence] User ${userId} is in ${userGroupIdsList.length} groups`);
+        const userGroupIds = new Set(userGroupIdsList);
         
         // Pour chaque utilisateur en ligne, vérifier s'il est dans les mêmes groupes
         for (const [uid, socketSet] of state.entries()) {
           if (socketSet.size > 0 && uid !== userId) {
             // Vérifier si cet utilisateur est dans au moins un groupe commun
-            app.db.any(`SELECT group_id FROM user_groups WHERE user_id = $1`, [uid])
-              .then((otherUserGroups: any[]) => {
-                const otherUserGroupIds = new Set(otherUserGroups.map((g: any) => g.group_id));
+            app.services.acl.listAccessibleGroupIds(uid)
+              .then((otherUserGroupIdsList: string[]) => {
+                const otherUserGroupIds = new Set(otherUserGroupIdsList);
                 const commonGroups = Array.from(userGroupIds).filter(gid => otherUserGroupIds.has(gid));
                 
                 // Émettre la présence uniquement dans les groupes communs

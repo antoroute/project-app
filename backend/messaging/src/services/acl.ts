@@ -1,81 +1,302 @@
-// backend/messaging/src/services/acl.ts
-// - Vérifie l'appartenance groupe/conversation.
-// - Fournit des helpers pour "mark as read" et lister qui a lu (via conversation_users.last_read_at).
-
 import { FastifyInstance } from 'fastify';
 
+export type GroupRole = 'owner' | 'admin' | 'member';
+
+export type GroupPermission =
+  | 'group:read'
+  | 'members:read'
+  | 'keys:read'
+  | 'keys:manage-own'
+  | 'conversation:create'
+  | 'join-request:read'
+  | 'join-request:handle'
+  | 'member-role:set';
+
+export type ConversationPermission =
+  | 'conversation:read'
+  | 'message:read'
+  | 'message:send'
+  | 'read-receipt:write'
+  | 'readers:read'
+  | 'socket:subscribe'
+  | 'typing:emit';
+
+const commonGroupPermissions: readonly GroupPermission[] = [
+  'group:read',
+  'members:read',
+  'keys:read',
+  'keys:manage-own',
+  'conversation:create',
+];
+
+const managerPermissions: readonly GroupPermission[] = [
+  ...commonGroupPermissions,
+  'join-request:read',
+  'join-request:handle',
+];
+
+export const GROUP_ROLE_PERMISSIONS: Readonly<
+  Record<GroupRole, readonly GroupPermission[]>
+> = Object.freeze({
+  owner: Object.freeze([
+    ...managerPermissions,
+    'member-role:set' as GroupPermission,
+  ]),
+  admin: Object.freeze([...managerPermissions]),
+  member: Object.freeze([...commonGroupPermissions]),
+});
+
+export const CONVERSATION_MEMBER_PERMISSIONS: readonly ConversationPermission[] =
+  Object.freeze([
+    'conversation:read',
+    'message:read',
+    'message:send',
+    'read-receipt:write',
+    'readers:read',
+    'socket:subscribe',
+    'typing:emit',
+  ]);
+
+export function groupRoleAllows(
+  role: GroupRole,
+  permission: GroupPermission,
+): boolean {
+  return GROUP_ROLE_PERMISSIONS[role].includes(permission);
+}
+
+export function conversationMemberAllows(
+  permission: ConversationPermission,
+): boolean {
+  return CONVERSATION_MEMBER_PERMISSIONS.includes(permission);
+}
+
+export interface ConversationAccess {
+  conversationId: string;
+  groupId: string;
+  groupRole: GroupRole;
+}
+
 export function initAclService(app: FastifyInstance) {
+  async function getGroupRole(
+    userId: string,
+    groupId: string,
+  ): Promise<GroupRole | null> {
+    const row = await app.db.oneOrNone(
+      `SELECT CASE
+                WHEN g.creator_id = $1 THEN 'owner'
+                ELSE ug.role
+              END AS role
+         FROM groups g
+         JOIN user_groups ug
+           ON ug.group_id = g.id
+          AND ug.user_id = $1
+        WHERE g.id = $2`,
+      [userId, groupId],
+    );
+    return (row?.role as GroupRole | undefined) ?? null;
+  }
 
-  // Vérifie que user est membre de la conversation, que chaque destinataire aussi (par device)
-  async function canSend(senderUserId: string, senderDeviceId: string, groupId: string, convId: string, recipients: Array<{userId:string, deviceId:string}>) {
-    // 1) conversation dans le bon groupe ?
-    const conv = await app.db.one(
-      `SELECT c.id, c.group_id
+  async function hasGroupPermission(
+    userId: string,
+    groupId: string,
+    permission: GroupPermission,
+  ): Promise<boolean> {
+    const role = await getGroupRole(userId, groupId);
+    return role !== null && groupRoleAllows(role, permission);
+  }
+
+  async function getConversationAccess(
+    userId: string,
+    conversationId: string,
+  ): Promise<ConversationAccess | null> {
+    const row = await app.db.oneOrNone(
+      `SELECT c.id AS "conversationId",
+              c.group_id AS "groupId",
+              CASE
+                WHEN g.creator_id = $1 THEN 'owner'
+                ELSE ug.role
+              END AS "groupRole"
          FROM conversations c
-        WHERE c.id=$1`,
-      [convId]
+         JOIN conversation_users cu
+           ON cu.conversation_id = c.id
+          AND cu.user_id = $1
+         JOIN groups g ON g.id = c.group_id
+         JOIN user_groups ug
+           ON ug.group_id = c.group_id
+          AND ug.user_id = $1
+        WHERE c.id = $2`,
+      [userId, conversationId],
     );
-    if (conv.group_id !== groupId) return false;
+    return row as ConversationAccess | null;
+  }
 
-    // 2) sender membre de la conv
-    const s = await app.db.any(
-      `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
-      [convId, senderUserId]
+  async function hasConversationPermission(
+    userId: string,
+    conversationId: string,
+    permission: ConversationPermission,
+  ): Promise<boolean> {
+    if (!conversationMemberAllows(permission)) return false;
+    return (await getConversationAccess(userId, conversationId)) !== null;
+  }
+
+  async function canCreateConversation(
+    userId: string,
+    groupId: string,
+    memberIds: string[],
+  ): Promise<boolean> {
+    if (
+      !(await hasGroupPermission(userId, groupId, 'conversation:create'))
+    ) {
+      return false;
+    }
+
+    const expectedMembers = [...new Set([userId, ...memberIds])];
+    const rows = await app.db.any(
+      `SELECT user_id AS "userId"
+         FROM user_groups
+        WHERE group_id = $1
+          AND user_id = ANY($2::uuid[])`,
+      [groupId, expectedMembers],
     );
-    if (s.length === 0) return false;
+    const actualMembers = new Set(rows.map((row: any) => row.userId));
+    return expectedMembers.every((memberId) => actualMembers.has(memberId));
+  }
 
-    // CORRECTION CRITIQUE: Vérifier que le device de l'expéditeur est actif
-    // Un device révoqué ne peut plus envoyer de messages
-    const senderDevice = await app.db.any(
-      `SELECT 1 FROM group_device_keys WHERE group_id=$1 AND user_id=$2 AND device_id=$3 AND status='active'`,
-      [groupId, senderUserId, senderDeviceId]
+  async function canSend(
+    senderUserId: string,
+    senderDeviceId: string,
+    groupId: string,
+    conversationId: string,
+    recipients: Array<{ userId: string; deviceId: string }>,
+  ): Promise<boolean> {
+    const access = await getConversationAccess(senderUserId, conversationId);
+    if (
+      access === null ||
+      access.groupId !== groupId ||
+      !conversationMemberAllows('message:send')
+    ) {
+      return false;
+    }
+
+    const senderDevice = await app.db.oneOrNone(
+      `SELECT 1
+         FROM group_device_keys
+        WHERE group_id = $1
+          AND user_id = $2
+          AND device_id = $3
+          AND status = 'active'`,
+      [groupId, senderUserId, senderDeviceId],
     );
-    if (senderDevice.length === 0) return false;
+    if (!senderDevice) return false;
 
-    // 3) destinataires membres de la conv ET devices actifs
-    for (const r of recipients) {
-      const r1 = await app.db.any(
-        `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
-        [convId, r.userId]
+    for (const recipient of recipients) {
+      const allowedRecipient = await app.db.oneOrNone(
+        `SELECT 1
+           FROM conversation_users cu
+           JOIN conversations c ON c.id = cu.conversation_id
+           JOIN user_groups ug
+             ON ug.group_id = c.group_id
+            AND ug.user_id = cu.user_id
+           JOIN group_device_keys gdk
+             ON gdk.group_id = c.group_id
+            AND gdk.user_id = cu.user_id
+            AND gdk.device_id = $4
+            AND gdk.status = 'active'
+          WHERE cu.conversation_id = $1
+            AND cu.user_id = $2
+            AND c.group_id = $3`,
+        [conversationId, recipient.userId, groupId, recipient.deviceId],
       );
-      if (r1.length === 0) return false;
-
-      const r2 = await app.db.any(
-        `SELECT 1 FROM group_device_keys WHERE group_id=$1 AND user_id=$2 AND device_id=$3 AND status='active'`,
-        [groupId, r.userId, r.deviceId]
-      );
-      if (r2.length === 0) return false;
+      if (!allowedRecipient) return false;
     }
     return true;
   }
 
-  // Marquer comme lu: met à jour conversation_users.last_read_at (horodatage serveur)
+  async function listAccessibleConversationIds(
+    userId: string,
+    conversationIds: string[],
+  ): Promise<string[]> {
+    if (conversationIds.length === 0) return [];
+    const rows = await app.db.any(
+      `SELECT c.id
+         FROM conversations c
+         JOIN conversation_users cu
+           ON cu.conversation_id = c.id
+          AND cu.user_id = $1
+         JOIN user_groups ug
+           ON ug.group_id = c.group_id
+          AND ug.user_id = $1
+        WHERE c.id = ANY($2::uuid[])`,
+      [userId, conversationIds],
+    );
+    return rows.map((row: any) => row.id as string);
+  }
+
+  async function listAllAccessibleConversationIds(
+    userId: string,
+  ): Promise<string[]> {
+    const rows = await app.db.any(
+      `SELECT c.id
+         FROM conversations c
+         JOIN conversation_users cu
+           ON cu.conversation_id = c.id
+          AND cu.user_id = $1
+         JOIN user_groups ug
+           ON ug.group_id = c.group_id
+          AND ug.user_id = $1`,
+      [userId],
+    );
+    return rows.map((row: any) => row.id as string);
+  }
+
+  async function listAccessibleGroupIds(userId: string): Promise<string[]> {
+    const rows = await app.db.any(
+      `SELECT group_id AS "groupId"
+         FROM user_groups
+        WHERE user_id = $1`,
+      [userId],
+    );
+    return rows.map((row: any) => row.groupId as string);
+  }
+
   async function markConversationRead(convId: string, userId: string) {
     await app.db.none(
       `UPDATE conversation_users
           SET last_read_at = NOW()
-        WHERE conversation_id=$1 AND user_id=$2`,
-      [convId, userId]
+        WHERE conversation_id = $1 AND user_id = $2`,
+      [convId, userId],
     );
-    // retourne la nouvelle valeur
     const row = await app.db.one(
-      `SELECT last_read_at FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
-      [convId, userId]
+      `SELECT last_read_at
+         FROM conversation_users
+        WHERE conversation_id = $1 AND user_id = $2`,
+      [convId, userId],
     );
     return row.last_read_at as string;
   }
 
-  // Liste des readers: pour chaque membre, donne last_read_at
   async function listReaders(convId: string) {
-    const rows = await app.db.any(
-      `SELECT u.id as "userId", u.username, cu.last_read_at as "lastReadAt"
+    return app.db.any(
+      `SELECT u.id AS "userId", u.username,
+              cu.last_read_at AS "lastReadAt"
          FROM conversation_users cu
          JOIN users u ON u.id = cu.user_id
-        WHERE cu.conversation_id=$1`,
-      [convId]
+        WHERE cu.conversation_id = $1`,
+      [convId],
     );
-    return rows;
   }
 
-  return { canSend, markConversationRead, listReaders };
+  return {
+    getGroupRole,
+    hasGroupPermission,
+    getConversationAccess,
+    hasConversationPermission,
+    canCreateConversation,
+    canSend,
+    listAccessibleConversationIds,
+    listAllAccessibleConversationIds,
+    listAccessibleGroupIds,
+    markConversationRead,
+    listReaders,
+  };
 }

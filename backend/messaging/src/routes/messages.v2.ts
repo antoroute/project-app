@@ -89,14 +89,11 @@ export default async function routes(app: FastifyInstance) {
       const userId = authenticatedUserId(req);
       const { cursor, limit = 50 } = req.query as any;
 
-      // ACL: vérifier que l'utilisateur est membre de la conversation
-      const membership = await app.db.any(
-        `SELECT 1 FROM conversation_users WHERE conversation_id=$1 AND user_id=$2`,
-        [id, userId]
-      );
-      console.log(`📥 GET /conversations/${id}/messages - userId: ${userId}, membership: ${membership.length > 0 ? 'OK' : 'FORBIDDEN'}`);
-      
-      if (membership.length === 0) {
+      if (!(await app.services.acl.hasConversationPermission(
+        userId,
+        id,
+        'message:read',
+      ))) {
         return reply.code(403).send({ error: 'forbidden' });
       }
 
@@ -106,21 +103,15 @@ export default async function routes(app: FastifyInstance) {
         try {
           const cursorMs = Number(cursor);
           if (isNaN(cursorMs) || cursorMs < 0) {
-            console.log(`⚠️ Cursor invalide: ${cursor}`);
             return reply.code(400).send({ error: 'invalid_cursor' });
           }
           cursorDate = new Date(cursorMs);
-          console.log(`📅 Cursor converti: ${cursor} -> ${cursorDate.toISOString()}`);
         } catch (e) {
-          console.log(`❌ Erreur conversion cursor: ${e}`);
           return reply.code(400).send({ error: 'invalid_cursor_format' });
         }
       }
 
-      // CORRECTION: Requête SQL avec validation des paramètres
       const queryParams = [id, cursorDate, limit];
-      console.log(`🔍 Paramètres de requête: conversationId=${id}, cursor=${cursorDate}, limit=${limit}`);
-      
       const rows = await app.db.any(`
         SELECT m.id, m.conversation_id as "convId",
                encode(m.sender_eph_pub,'base64') as "sender_eph_pub",
@@ -139,18 +130,13 @@ export default async function routes(app: FastifyInstance) {
          ORDER BY m.sent_at DESC
          LIMIT $3
       `, queryParams);
-      console.log(`📥 Messages found for conversation ${id}: ${rows.length} messages`);
-      console.log(`📅 Cursor utilisé: ${cursorDate ? cursorDate.toISOString() : 'null'}`);
-      console.log(`📊 Limit utilisé: ${limit}`);
-      
+
       // CORRECTION: nextCursor doit être le timestamp du message le plus ancien de cette page
       const nextCursor = rows.length > 0 ? rows[rows.length - 1].sentAt : null;
-      console.log(`📄 Next cursor: ${nextCursor}`);
-      
       return { items: rows, nextCursor };
     } catch (e: any) {
-      console.error(`❌ Erreur GET /conversations/${id}/messages:`, e);
-      return reply.code(500).send({ error: 'internal_server_error', details: e.message });
+      req.log.error({ err: e, conversationId: id }, 'Unable to fetch messages');
+      return reply.code(500).send({ error: 'internal_server_error' });
     }
   });
 }
