@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/models/group_info.dart';
+import 'package:flutter_message_app/core/models/account_device.dart';
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/providers/conversation_provider.dart';
 import 'package:flutter_message_app/core/services/api_service.dart';
+import 'package:flutter_message_app/core/services/account_device_trust_service.dart';
 import 'package:flutter_message_app/core/services/websocket_service.dart';
 import 'package:flutter_message_app/core/services/notification_badge_service.dart';
 import 'package:flutter_message_app/core/services/persistent_message_key_cache.dart';
@@ -194,6 +196,51 @@ class GroupProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> rotateCurrentDeviceKeys() async {
+    final deviceId = await _currentDeviceId();
+    await fetchUserGroups(forceRefresh: true);
+    for (final group in _groups) {
+      await KeyManagerFinal.instance.ensureKeysFor(group.groupId, deviceId);
+
+      // Répare d'abord une publication interrompue lors d'une session
+      // précédente, puis seulement crée la version suivante.
+      var version = await KeyManagerFinal.instance.currentKeyVersion(
+        group.groupId,
+        deviceId,
+      );
+      var publicKeys = await KeyManagerFinal.instance.publicKeysBase64(
+        group.groupId,
+        deviceId,
+        keyVersion: version,
+      );
+      await _apiService.publishGroupDeviceKey(
+        groupId: group.groupId,
+        deviceId: deviceId,
+        pkSigB64: publicKeys['pk_sig']!,
+        pkKemB64: publicKeys['pk_kem']!,
+        keyVersion: version,
+      );
+
+      version = await KeyManagerFinal.instance.rotateKeysFor(
+        group.groupId,
+        deviceId,
+      );
+      publicKeys = await KeyManagerFinal.instance.publicKeysBase64(
+        group.groupId,
+        deviceId,
+        keyVersion: version,
+      );
+      await _apiService.publishGroupDeviceKey(
+        groupId: group.groupId,
+        deviceId: deviceId,
+        pkSigB64: publicKeys['pk_sig']!,
+        pkKemB64: publicKeys['pk_kem']!,
+        keyVersion: version,
+      );
+    }
+    _provisionedForSession.clear();
+  }
+
   /// Récupère les détails d’un groupe.
   Future<void> fetchGroupDetail(String groupId) async {
     try {
@@ -316,14 +363,26 @@ class GroupProvider extends ChangeNotifier {
     }
   }
 
-  /// Révoquer un device pour le groupe
+  /// Révoque globalement un appareil du compte depuis la vue d'un cercle.
   Future<void> revokeMyDevice(
     String groupId,
     String deviceId, {
     BuildContext? context,
   }) async {
     try {
-      await _apiService.revokeGroupDevice(groupId: groupId, deviceId: deviceId);
+      if (deviceId == _authProvider.currentDeviceId) {
+        throw StateError('the current device cannot revoke itself');
+      }
+      final accountDevices = await _authProvider.fetchAccountDevices();
+      final target = accountDevices.singleWhere(
+        (device) =>
+            device.deviceId == deviceId &&
+            device.status == AccountDeviceStatus.active,
+      );
+      await _authProvider.decideAccountDevice(
+        target: target,
+        decision: DeviceApprovalDecision.revoke,
+      );
 
       // Rafraîchir depuis le serveur
       final myUserId = _authProvider.userId;
@@ -340,9 +399,8 @@ class GroupProvider extends ChangeNotifier {
       if (context != null) {
         try {
           final conversationProvider = context.read<ConversationProvider>();
-          await conversationProvider.keyDirectory.invalidateDeviceKeys(
+          await conversationProvider.keyDirectory.invalidateGroupDirectory(
             groupId,
-            deviceId,
           );
         } catch (e) {
           debugPrint('⚠️ Erreur invalidation group keys: $e');

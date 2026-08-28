@@ -49,6 +49,9 @@ function createState() {
     users: new Set([ACCOUNT_A, ACCOUNT_B]),
     devices: new Map(),
     approvals: new Map(),
+    propagatedRevocations: [],
+    revocationEvents: [],
+    disconnectedDeviceIds: [],
   };
 }
 
@@ -233,10 +236,20 @@ function database(state) {
       }
       throw new Error(`unexpected none query: ${sql}`);
     },
+    any: async (query, params) => {
+      const sql = normalized(query);
+      if (sql.startsWith('UPDATE group_device_keys')) {
+        state.propagatedRevocations.push({
+          userId: params[0],
+          deviceId: params[1],
+        });
+        return [{ groupId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }];
+      }
+      return [];
+    },
   };
   return {
     ...executor,
-    any: async () => [],
     transaction: async (work) => {
       const run = transactionTail.then(() => work(executor));
       transactionTail = run.catch(() => undefined);
@@ -249,6 +262,41 @@ async function appFor(state, accountId = ACCOUNT_A) {
   const app = Fastify({ logger: false });
   app.decorate('authenticate', async (request) => {
     request.user = claims(accountId);
+  });
+  app.decorateRequest('accountDevice', null);
+  app.decorate('requireActiveDevice', async (request) => {
+    const challengeId = request.params?.challengeId;
+    const challengeApprover = challengeId
+      ? state.approvals.get(challengeId)?.approverDeviceId
+      : null;
+    const approverDeviceId =
+      request.body?.approverDeviceId ?? challengeApprover ?? DEVICE_A;
+    request.accountDevice = {
+      deviceId: approverDeviceId,
+      identityKeyVersion: 1,
+      identityPublicKey:
+        state.devices.get(deviceKey(accountId, approverDeviceId))
+          ?.identityPublicKey ?? Buffer.alloc(32),
+      status: 'active',
+    };
+  });
+  app.decorate('io', {
+    to: (room) => ({
+      emit: (event, payload) => {
+        state.revocationEvents.push({ room, event, payload });
+      },
+    }),
+    sockets: {
+      sockets: new Map([
+        [
+          'target-socket',
+          {
+            auth: { userId: accountId, deviceId: DEVICE_B },
+            disconnect: () => state.disconnectedDeviceIds.push(DEVICE_B),
+          },
+        ],
+      ]),
+    },
   });
   app.decorate('db', database(state));
   await app.register(accountDeviceApprovalRoutes);
@@ -423,7 +471,62 @@ test('un refus signé révoque la cible pending et empêche une nouvelle décisi
 
   const another = await requestApproval(app, DEVICE_B, DEVICE_A);
   assert.equal(another.statusCode, 409);
-  assert.equal(another.json().error, 'target_device_not_pending');
+  assert.equal(another.json().error, 'target_device_state_conflict');
+});
+
+test('une révocation signée désactive un appareil actif dans tous ses cercles', async (t) => {
+  const state = createState();
+  const approver = identity();
+  const target = identity();
+  addDevice(state, ACCOUNT_A, DEVICE_A, approver, 'active');
+  addDevice(state, ACCOUNT_A, DEVICE_B, target, 'active');
+  const app = await appFor(state);
+  t.after(() => app.close());
+
+  const challengeResponse = await requestApproval(
+    app,
+    DEVICE_B,
+    DEVICE_A,
+    'revoke',
+  );
+  assert.equal(challengeResponse.statusCode, 201);
+  const response = await decide(
+    app,
+    challengeResponse.json(),
+    approver.keyPair,
+  );
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().decision, 'revoke');
+  assert.equal(response.json().status, 'revoked');
+  assert.equal(
+    state.devices.get(deviceKey(ACCOUNT_A, DEVICE_B)).status,
+    'revoked',
+  );
+  assert.deepEqual(state.propagatedRevocations, [
+    { userId: ACCOUNT_A, deviceId: DEVICE_B },
+  ]);
+  assert.deepEqual(state.revocationEvents, [
+    {
+      room: `user:${ACCOUNT_A}`,
+      event: 'device:revoked',
+      payload: {
+        type: 'device:revoked',
+        deviceId: DEVICE_B,
+        groupIds: ['dddddddd-dddd-4ddd-8ddd-dddddddddddd'],
+      },
+    },
+    {
+      room: 'group:dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      event: 'device:key-directory-changed',
+      payload: {
+        type: 'device:key-directory-changed',
+        groupId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        deviceId: DEVICE_B,
+      },
+    },
+  ]);
+  assert.deepEqual(state.disconnectedDeviceIds, [DEVICE_B]);
 });
 
 test('un autre compte ne découvre ni ne consomme la décision', async (t) => {

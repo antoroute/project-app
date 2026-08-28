@@ -63,11 +63,14 @@ class MessageEnvelopeVerifier {
     final sender = _sender(messageV2);
     final senderUserId = _requiredString(sender, 'userId');
     final senderDeviceId = _requiredString(sender, 'deviceId');
+    final senderKeyVersion = _positiveInteger(sender['key_version']);
     final entries = await keyDirectory.getGroupDevices(expectedGroupId);
 
     GroupDeviceKeyEntry? senderKey;
     for (final entry in entries) {
-      if (entry.userId == senderUserId && entry.deviceId == senderDeviceId) {
+      if (entry.userId == senderUserId &&
+          entry.deviceId == senderDeviceId &&
+          entry.keyVersion == senderKeyVersion) {
         senderKey = entry;
         break;
       }
@@ -109,7 +112,11 @@ class MessageEnvelopeVerifier {
 
         if (senderKey.userId != validated.senderUserId ||
             senderKey.deviceId != validated.senderDeviceId ||
-            senderKey.status != 'active' ||
+            !const <String>{
+              'active',
+              'superseded',
+              'revoked',
+            }.contains(senderKey.status) ||
             senderKey.keyVersion != validated.senderKeyVersion) {
           throw const MessageAuthenticationException('sender_key_mismatch');
         }
@@ -167,6 +174,9 @@ class MessageEnvelopeVerifier {
       final map = Map<String, dynamic>.from(recipient as Map);
       buffer.write(map['userId']);
       buffer.write(map['deviceId']);
+      if (map.containsKey('key_version')) {
+        buffer.write(map['key_version']);
+      }
       buffer.write(map['wrap']);
       buffer.write(map['nonce']);
     }
@@ -238,12 +248,19 @@ class MessageEnvelopeVerifier {
         final recipient = Map<String, dynamic>.from(rawRecipient as Map);
         final userId = _requiredString(recipient, 'userId');
         final deviceId = _requiredString(recipient, 'deviceId');
+        final recipientKeyVersion =
+            recipient.containsKey('key_version')
+                ? _positiveInteger(recipient['key_version'])
+                : 1;
         if (!seen.add('$userId\u0000$deviceId')) {
           throw const MessageAuthenticationException('duplicate_recipient');
         }
         _decodeBase64AtLeast(_requiredString(recipient, 'wrap'), 16);
         _decodeBase64(_requiredString(recipient, 'nonce'), 12);
         if (userId == recipientUserId && deviceId == recipientDeviceId) {
+          if (recipientKeyVersion < 1) {
+            throw const MessageAuthenticationException('invalid_key_version');
+          }
           localRecipientCount++;
         }
       }
@@ -278,6 +295,16 @@ class MessageEnvelopeVerifier {
       throw const MessageAuthenticationException('invalid_envelope');
     }
     return value;
+  }
+
+  static int _positiveInteger(dynamic value) {
+    if (value is! num ||
+        !value.isFinite ||
+        value != value.toInt() ||
+        value.toInt() < 1) {
+      throw const MessageAuthenticationException('invalid_key_version');
+    }
+    return value.toInt();
   }
 
   static Uint8List _decodeBase64(String value, int expectedLength) {

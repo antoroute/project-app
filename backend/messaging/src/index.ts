@@ -15,6 +15,7 @@ import dbPlugin from './plugins/db.js';
 import enforceVersion from './middlewares/enforceVersion.js';
 import validateAppSecret from './middlewares/validateAppSecret.js';
 import socketAuth from './middlewares/socketAuth.js';
+import { registerDeviceAuth } from './middlewares/deviceAuth.js';
 import type { AppDatabase } from './plugins/db.js';
 
 // Routes 
@@ -65,6 +66,7 @@ async function build() {
 
   // DB + health
   await app.register(dbPlugin, { connectionString: config.databaseUrl });
+  registerDeviceAuth(app);
 
   // Health AVANT enforceVersion (et whiteliste dans le middleware)
   app.get('/health', async () => ({ ok: true }));

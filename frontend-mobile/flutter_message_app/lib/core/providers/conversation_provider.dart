@@ -12,6 +12,7 @@ import 'package:flutter_message_app/core/services/notification_service.dart';
 import 'package:flutter_message_app/core/services/notification_badge_service.dart';
 import 'package:flutter_message_app/core/services/global_presence_service.dart';
 import 'package:flutter_message_app/core/services/local_message_storage.dart';
+import 'package:flutter_message_app/core/services/message_key_cache.dart';
 import 'package:flutter_message_app/core/services/persistent_message_key_cache.dart';
 import 'package:flutter_message_app/core/services/performance_benchmark.dart';
 import 'package:flutter_message_app/core/services/navigation_tracker_service.dart';
@@ -248,6 +249,9 @@ class ConversationProvider extends ChangeNotifier {
     if (_webSocketService.onUserAdded == null) {
       _webSocketService.onUserAdded = _onWebSocketUserAdded;
     }
+    _webSocketService.onDeviceRevoked = _onDeviceRevoked;
+    _webSocketService.onDeviceKeyDirectoryChanged =
+        _onDeviceKeyDirectoryChanged;
     if (_webSocketService.onConversationJoined == null) {
       _webSocketService.onConversationJoined = _onWebSocketConversationJoined;
     }
@@ -265,6 +269,23 @@ class ConversationProvider extends ChangeNotifier {
     if (_webSocketService.onConversationCreated == null) {
       _webSocketService.onConversationCreated = _onWebSocketConversationCreated;
     }
+  }
+
+  void _onDeviceRevoked(String deviceId, List<String> groupIds) {
+    for (final groupId in groupIds) {
+      unawaited(_keyDirectory.invalidateGroupDirectory(groupId));
+    }
+    if (_authProvider.currentDeviceId == deviceId) {
+      _decryptedCache.clear();
+      MessageKeyCache.instance.clear();
+      PersistentMessageKeyCache.instance.clear().catchError((_) {});
+      _messages.clear();
+      _notifyListenersImmediate();
+    }
+  }
+
+  void _onDeviceKeyDirectoryChanged(String groupId, String deviceId) {
+    unawaited(_keyDirectory.invalidateGroupDirectory(groupId));
   }
 
   /// Initialise le cache de déchiffrement (préserve les messages déjà déchiffrés)
@@ -485,7 +506,7 @@ class ConversationProvider extends ChangeNotifier {
     String deviceId,
   ) async {
     // Invalider group keys
-    await _keyDirectory.invalidateDeviceKeys(groupId, deviceId);
+    await _keyDirectory.invalidateGroupDirectory(groupId);
 
     // Invalider message keys
     await PersistentMessageKeyCache.instance.invalidateKeysForDevice(

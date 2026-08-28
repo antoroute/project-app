@@ -11,13 +11,13 @@ Le script `infrastructure/postgres/init.sql` définit :
 - `device_bootstrap_grants`, `account_devices`, `device_registration_challenges`, `device_approval_challenges` : autorisation de réauthentification hachée, identité Ed25519 de compte/appareil, état de confiance, preuves de possession et décisions signées à usage unique ;
 - `groups`, `user_groups` : cercle, appartenance et rôle `admin|member` ; l'unique propriétaire reste `groups.creator_id` ;
 - `join_requests`, `join_request_votes` : demandes et votes d'entrée ;
-- `group_keys`, `group_device_keys` : clés publiques par cercle/utilisateur/appareil ;
+- `group_keys`, `group_device_keys`, `group_device_key_history` : mécanisme historique de cercle, clés publiques courantes signées et versions immuables remplacées ;
 - `conversations`, `conversation_users` : conversation et participants ;
 - `messages` : enveloppe E2EE V2 et clés de message enveloppées ;
 - `refresh_tokens` : sessions renouvelables ;
 - `notifications` : événements applicatifs utilisateur.
 
-Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. `TC-104` ajoute le premier couple SQL montant/descendant pour le rôle. `TC-105` ajoute le second : un index unique partiel sur `(group_id, user_id)` lorsque `join_requests.status = 'pending'`. Les lots B/C de `TC-106` ajoutent les troisième et quatrième couples pour le registre, la preuve et les décisions signées. Ces scripts restent à reprendre dans l'outil et la baseline qui seront choisis par `TC-201`.
+Le staging neuf a été recréé à partir du script courant et validé par `TC-004`. `TC-104` ajoute le premier couple SQL montant/descendant pour le rôle. `TC-105` ajoute le second : un index unique partiel sur `(group_id, user_id)` lorsque `join_requests.status = 'pending'`. Les lots B/C/D de `TC-106` ajoutent les troisième, quatrième et cinquième couples pour le registre, les preuves, les décisions signées, la liaison et l'historique des clés. Ces scripts restent à reprendre dans l'outil et la baseline qui seront choisis par `TC-201`.
 
 La circulation de ces données par parcours est décrite dans [`FUNCTIONAL_REFERENCE.md`](FUNCTIONAL_REFERENCE.md), et les fichiers responsables dans [`TRACEABILITY.md`](TRACEABILITY.md).
 
@@ -25,7 +25,7 @@ La circulation de ces données par parcours est décrite dans [`FUNCTIONAL_REFER
 
 - Pas encore d'outil, de registre appliqué ni de baseline globale de migrations ; les changements `TC-104`, `TC-105` et `TC-106` possèdent des scripts SQL versionnés mais sont encore appliqués manuellement.
 - Le stockage des rôles est explicite, mais le transfert de propriété et l'interface complète de gestion restent à concevoir.
-- Le rattachement, la preuve de possession et l'approbation/refus signés sont implémentés par les lots B/C de `TC-106` ; révocation globale et rotation restent à faire.
+- Le rattachement, les preuves de possession et d'accès, l'approbation/refus/révocation, la rotation et l'historique signés sont implémentés par les lots B/C/D de `TC-106`.
 - Horodatages mêlant `timestamp` et `timestamptz`.
 - Énumérations métier parfois représentées par texte libre.
 - Messages sans séquence serveur/cursor robuste pour la synchronisation.
@@ -40,6 +40,8 @@ La circulation de ces données par parcours est décrite dans [`FUNCTIONAL_REFER
 - Les identifiants de message fournis par le client sont uniques par domaine défini et rendent l'envoi idempotent.
 - Une séquence serveur monotone par conversation ou un curseur opaque stable permet la reprise.
 - Une clé révoquée ne peut plus être sélectionnée comme destinataire de nouveaux messages.
+- Une version historique ne peut plus signer ni recevoir un nouveau message,
+  mais reste disponible pour vérifier/déchiffrer l'historique qui la référence.
 - Les refresh tokens sont hachés, rotatifs, liés à une session/appareil et révoquables ; leur type diffère cryptographiquement/logiquement des access tokens.
 - Les suppressions et rétentions sont documentées dans `docs/compliance/DATA_MAP.md`.
 

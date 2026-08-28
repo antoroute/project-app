@@ -6,6 +6,7 @@ import { Type } from '@sinclair/typebox';
 export const WrappedKey = Type.Object({
   userId: Type.String({ format: 'uuid' }),
   deviceId: Type.String({ minLength: 1, maxLength: 128 }),
+  key_version: Type.Integer({ minimum: 1 }),
   wrap: Type.String({ contentEncoding: 'base64' }),
   nonce: Type.String({ contentEncoding: 'base64' }) // 12B
 });

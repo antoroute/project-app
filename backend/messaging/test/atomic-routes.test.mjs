@@ -17,6 +17,7 @@ const MEMBER = '22222222-2222-4222-8222-222222222222';
 const GROUP = '33333333-3333-4333-8333-333333333333';
 const CONVERSATION = '44444444-4444-4444-8444-444444444444';
 const REQUEST = '55555555-5555-4555-8555-555555555555';
+const DEVICE = '77777777-7777-4777-8777-777777777777';
 
 function authenticatedClaims() {
   const now = Math.floor(Date.now() / 1000);
@@ -37,6 +38,15 @@ async function atomicApp(routes, executor, aclOverrides = {}) {
   const app = Fastify({ logger: false });
   app.decorate('authenticate', async (request) => {
     request.user = authenticatedClaims();
+  });
+  app.decorateRequest('accountDevice', null);
+  app.decorate('requireActiveDevice', async (request) => {
+    request.accountDevice = {
+      deviceId: DEVICE,
+      identityKeyVersion: 1,
+      identityPublicKey: Buffer.alloc(32),
+      status: 'active',
+    };
   });
   app.decorate('services', {
     acl: {
@@ -128,7 +138,7 @@ test('une acceptation échouée rollback sans notification ni room', async (t) =
     },
     none: async () => {
       writes += 1;
-      if (writes === 3) throw new Error('status update failed');
+      if (writes === 2) throw new Error('status update failed');
     },
   };
   const { app, sequence } = await atomicApp(groupsRoutes, executor);
@@ -175,30 +185,17 @@ test('les notifications d’adhésion sont strictement postérieures au commit',
   assert.deepEqual(sequence.slice(2), ['room', 'emit', 'emit', 'presence']);
 });
 
-test('la publication ne peut pas réactiver une ligne revoked', async (t) => {
-  let upsertQuery = '';
-  const executor = {
-    oneOrNone: async (query) => {
-      upsertQuery = query;
-      return null;
-    },
-  };
+test('la révocation historique par cercle exige la décision globale signée', async (t) => {
+  const executor = {};
   const { app, sequence } = await atomicApp(keysDevicesRoutes, executor);
   t.after(() => app.close());
 
   const response = await app.inject({
-    method: 'POST',
-    url: `/api/keys/group/${GROUP}/devices`,
-    payload: {
-      deviceId: 'device-a',
-      pk_sig: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
-      pk_kem: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
-      key_version: 1,
-    },
+    method: 'DELETE',
+    url: `/api/keys/group/${GROUP}/devices/${DEVICE}`,
   });
 
-  assert.equal(response.statusCode, 403);
-  assert.deepEqual(response.json().error, 'device_revoked');
-  assert.match(upsertQuery, /WHERE group_device_keys\.status <> 'revoked'/);
-  assert.deepEqual(sequence, ['begin', 'commit']);
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(response.json().error, 'global_device_revocation_required');
+  assert.deepEqual(sequence, []);
 });

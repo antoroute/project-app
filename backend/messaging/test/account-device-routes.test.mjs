@@ -308,6 +308,18 @@ async function deviceApp(state, accountId = ACCOUNT_A) {
   app.decorate('authenticate', async (request) => {
     request.user = claims(accountId);
   });
+  app.decorateRequest('accountDevice', null);
+  app.decorate('identifyDevice', async (request) => {
+    const current = [...state.devices.values()].find(
+      (device) => device.userId === accountId,
+    );
+    request.accountDevice = {
+      deviceId: current?.deviceId ?? DEVICE_A,
+      identityKeyVersion: current?.identityKeyVersion ?? 1,
+      identityPublicKey: current?.identityPublicKey ?? Buffer.alloc(32),
+      status: current?.status ?? 'pending',
+    };
+  });
   app.decorate('db', createDatabase(state));
   await app.register(accountDeviceRoutes);
   await app.ready();

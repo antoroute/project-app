@@ -20,6 +20,8 @@ const CONVERSATION_ID = '33333333-3333-4333-8333-333333333333';
 const GROUP_ID = '44444444-4444-4444-8444-444444444444';
 const MESSAGE_ID = '55555555-5555-4555-8555-555555555555';
 const STORED_MESSAGE_ID = '66666666-6666-4666-8666-666666666666';
+const SENDER_DEVICE_ID = '88888888-8888-4888-8888-888888888888';
+const RECIPIENT_DEVICE_ID = '99999999-9999-4999-8999-999999999999';
 
 const ACCESS_KEYS = generateKeyPairSync('ed25519');
 const ACCESS_PRIVATE_KEY = ACCESS_KEYS.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -51,6 +53,15 @@ async function messageApp({ insertError = null } = {}) {
     } catch {
       await reply.code(401).send({ error: 'unauthorized' });
     }
+  });
+  app.decorateRequest('accountDevice', null);
+  app.decorate('requireActiveDevice', async (request) => {
+    request.accountDevice = {
+      deviceId: SENDER_DEVICE_ID,
+      identityKeyVersion: 1,
+      identityPublicKey: Buffer.alloc(32),
+      status: 'active',
+    };
   });
   app.decorate('services', {
     acl: {
@@ -104,8 +115,8 @@ function messagePayload(senderUserId) {
     convId: CONVERSATION_ID,
     messageId: MESSAGE_ID,
     sentAt: Math.floor(Date.now() / 1000),
-    sender: { userId: senderUserId, deviceId: 'device-a', eph_pub: 'AA==', key_version: 1 },
-    recipients: [{ userId: FORGED_USER_ID, deviceId: 'device-b', wrap: 'AA==', nonce: 'AA==' }],
+    sender: { userId: senderUserId, deviceId: SENDER_DEVICE_ID, eph_pub: 'AA==', key_version: 1 },
+    recipients: [{ userId: FORGED_USER_ID, deviceId: RECIPIENT_DEVICE_ID, key_version: 1, wrap: 'AA==', nonce: 'AA==' }],
     iv: 'AA==',
     ciphertext: 'AA==',
     sig: 'AA==',
@@ -168,8 +179,9 @@ test('uses only the authenticated subject for ACL, persistence and sender room',
   assert.equal(calls.emissions.length, 1);
   assert.equal(calls.emissions[0].excludedRoom, `user:${AUTHENTICATED_USER_ID}`);
   assert.deepEqual(calls.sequence, ['begin', 'insert', 'commit', 'emit']);
-  assert.equal(calls.acl[0][5].lock, true);
-  assert.ok(calls.acl[0][5].executor);
+  assert.equal(calls.acl[0][2], 1);
+  assert.equal(calls.acl[0][6].lock, true);
+  assert.ok(calls.acl[0][6].executor);
 });
 
 test('un rollback de persistance ne produit aucun événement Socket.IO', async (t) => {

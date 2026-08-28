@@ -71,7 +71,7 @@ class MessageCipherV2 {
           .bytes,
     );
 
-    final recipients = <Map<String, String>>[];
+    final recipients = <Map<String, dynamic>>[];
     for (final entry in recipientsDevices) {
       if (entry.status != 'active' || entry.pkKemB64.isEmpty) {
         continue;
@@ -100,6 +100,7 @@ class MessageCipherV2 {
       recipients.add({
         'userId': entry.userId,
         'deviceId': entry.deviceId,
+        'key_version': entry.keyVersion,
         'wrap': _b64(
           Uint8List.fromList(wrapBox.cipherText + wrapBox.mac.bytes),
         ),
@@ -111,6 +112,10 @@ class MessageCipherV2 {
       throw Exception('Aucun appareil destinataire actif');
     }
 
+    final senderKeyVersion = await KeyManagerFinal.instance.currentKeyVersion(
+      groupId,
+      senderDeviceId,
+    );
     final payload = <String, dynamic>{
       'v': 2,
       'alg': {
@@ -127,7 +132,7 @@ class MessageCipherV2 {
         'userId': senderUserId,
         'deviceId': senderDeviceId,
         'eph_pub': ephemeralPublicKeyB64,
-        'key_version': 1,
+        'key_version': senderKeyVersion,
       },
       'recipients': recipients,
       'iv': _b64(contentNonce),
@@ -138,6 +143,7 @@ class MessageCipherV2 {
     final signingKey = await KeyManagerFinal.instance.loadEd25519KeyPair(
       groupId,
       senderDeviceId,
+      keyVersion: senderKeyVersion,
     );
     final signature = await Ed25519().sign(
       MessageEnvelopeVerifier.canonicalBytes(payload),
@@ -194,7 +200,11 @@ class MessageCipherV2 {
               );
 
           final privateKey = await KeyManagerFinal.instance
-              .getX25519PrivateKeyBytes(groupId, myDeviceId);
+              .getX25519PrivateKeyBytes(
+                groupId,
+                myDeviceId,
+                keyVersion: _recipientKeyVersion(recipient),
+              );
           final task = DecryptPipelineTask(
             taskId: _nextTaskId('decrypt'),
             priority: priority,
@@ -242,6 +252,16 @@ class MessageCipherV2 {
         }
       },
     );
+  }
+
+  static int _recipientKeyVersion(Map<String, dynamic> recipient) {
+    final value = recipient['key_version'];
+    if (value is int && value >= 1) return value;
+    if (value is String) {
+      final parsed = int.tryParse(value);
+      if (parsed != null && parsed >= 1) return parsed;
+    }
+    throw const MessageAuthenticationException('invalid_key_version');
   }
 
   /// Alias historique. Malgré son nom, il ne saute plus la signature.

@@ -43,7 +43,11 @@ Risques : les invariants 10 à 12 restent ouverts pendant toute la Phase 1 et un
 
 ## Décision
 
-L'option A est retenue. Les signatures de preuve et d'approbation utilisent des transcriptions binaires versionnées, préfixées par des domaines distincts et fournies telles quelles par le serveur au client. Les formats de preuve de possession du lot B et d'approbation du lot C sont figés avec leurs vecteurs dans [`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md).
+L'option A est retenue. Les signatures utilisent des transcriptions binaires
+versionnées et préfixées par des domaines distincts. Les formats de preuve de
+possession du lot B, d'approbation du lot C, de preuve d'accès et de liaison des
+clés de cercle du lot D sont figés avec leurs vecteurs dans
+[`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md).
 
 Le bootstrap du premier appareil ne constitue pas une récupération. Si un appareil actif a déjà existé puis a été perdu/révoqué, seul le parcours renforcé de récupération peut créer une nouvelle identité.
 
@@ -54,3 +58,9 @@ Le bootstrap du premier appareil ne constitue pas une récupération. Si un appa
 - Aucune clé privée ni ancien secret de message ne transite par le serveur.
 - L'interface affiche clairement appareil en attente, appareil actif et appareil révoqué.
 - Une décision ultérieure MLS/V3 pourra rattacher ses credentials à cette identité ou fournir une migration explicite ; elle ne devra pas réutiliser silencieusement les formats de preuve V1.
+- Toute route Messaging métier et tout handshake Socket.IO exigent une preuve
+  Ed25519 liée au `jti` de l'access token, sans requête réseau supplémentaire.
+- Les versions de clé de cercle sont monotones ; les anciennes versions restent
+  immuables pour l'historique mais sont interdites pour tout nouvel envoi.
+- Rotation et révocation émettent un événement minimal d'invalidation après
+  commit ; le serveur reste l'autorité même si cet événement est perdu.

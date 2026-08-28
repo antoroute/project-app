@@ -18,6 +18,7 @@ type JoinDecisionResult =
 
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
+  app.addHook('preHandler', app.requireActiveDevice);
 
   async function lockGroup(
     transaction: DbExecutor,
@@ -117,25 +118,9 @@ export default async function routes(app: FastifyInstance) {
          ON CONFLICT DO NOTHING`,
         [request.user_id, groupId],
       );
-      if (
-        request.pk_sig && request.pk_kem && request.device_id &&
-        request.pk_sig.length > 0 && request.pk_kem.length > 0
-      ) {
-        await transaction.none(
-          `INSERT INTO group_device_keys(
-             group_id, user_id, device_id, pk_sig, pk_kem, key_version, status
-           )
-           VALUES($1,$2,$3,$4,$5,1,'active')
-           ON CONFLICT (group_id,user_id,device_id) DO NOTHING`,
-          [
-            groupId,
-            request.user_id,
-            request.device_id,
-            request.pk_sig,
-            request.pk_kem,
-          ],
-        );
-      }
+      // Les clés transportées par les anciennes demandes ne sont jamais
+      // activées : après l'adhésion, l'appareil publie une liaison signée via
+      // /api/keys/group/:groupId/devices.
       await transaction.none(
         `UPDATE join_requests
             SET status = 'accepted', handled_by = $1

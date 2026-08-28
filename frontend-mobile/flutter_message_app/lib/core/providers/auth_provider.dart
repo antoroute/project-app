@@ -228,7 +228,7 @@ class AuthProvider extends ChangeNotifier {
     return _deviceTrustService.fetchDevices();
   }
 
-  Future<void> decidePendingDevice({
+  Future<void> decideAccountDevice({
     required AccountDevice target,
     required DeviceApprovalDecision decision,
   }) async {
@@ -397,11 +397,56 @@ class AuthProvider extends ChangeNotifier {
         throw Exception('Échec de la reconnexion biométrique - déconnexion');
       }
     }
-    return <String, String>{
+    final headers = <String, String>{
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $_token',
       'X-Client-Version': clientVersion,
       'X-App-Secret': appSecret,
+    };
+    final accountId = userId;
+    final token = _token;
+    if (accountId == null || token == null) return headers;
+
+    final payload = JwtDecoder.decode(token);
+    final accessTokenId = payload['jti'];
+    final deviceId = await SessionDeviceService.instance.loadDeviceId(
+      accountId,
+    );
+    if (accessTokenId is! String || deviceId == null) return headers;
+
+    try {
+      final identityKeyVersion = _currentAccountDevice?.identityKeyVersion ?? 1;
+      final proof = await AccountDeviceIdentityService.instance
+          .signDeviceAccess(
+            accountId: accountId,
+            deviceId: deviceId,
+            identityKeyVersion: identityKeyVersion,
+            accessTokenId: accessTokenId,
+          );
+      headers['X-CircleHaven-Device-Id'] = deviceId;
+      headers['X-CircleHaven-Device-Key-Version'] = '$identityKeyVersion';
+      headers['X-CircleHaven-Device-Proof'] = proof;
+      return headers;
+    } on AccountDeviceIdentityException catch (error) {
+      if (error.code == 'missing_or_partial_key_material') return headers;
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> getMessagingSocketAuth() async {
+    final headers = await getAuthHeaders();
+    final token = _token;
+    final deviceId = headers['X-CircleHaven-Device-Id'];
+    final version = headers['X-CircleHaven-Device-Key-Version'];
+    final proof = headers['X-CircleHaven-Device-Proof'];
+    if (token == null || deviceId == null || version == null || proof == null) {
+      throw const DeviceTrustException('device_authorization_required');
+    }
+    return <String, dynamic>{
+      'token': token,
+      'deviceId': deviceId,
+      'deviceKeyVersion': int.parse(version),
+      'deviceProof': proof,
     };
   }
 }

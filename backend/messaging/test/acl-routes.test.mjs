@@ -18,6 +18,7 @@ const MEMBER = '22222222-2222-4222-8222-222222222222';
 const GROUP = '33333333-3333-4333-8333-333333333333';
 const CONVERSATION = '44444444-4444-4444-8444-444444444444';
 const REQUEST = '55555555-5555-4555-8555-555555555555';
+const DEVICE = '77777777-7777-4777-8777-777777777777';
 
 function authenticatedClaims() {
   const now = Math.floor(Date.now() / 1000);
@@ -38,6 +39,15 @@ async function routeApp(routes, aclOverrides = {}) {
   const app = Fastify({ logger: false });
   app.decorate('authenticate', async (request) => {
     request.user = authenticatedClaims();
+  });
+  app.decorateRequest('accountDevice', null);
+  app.decorate('requireActiveDevice', async (request) => {
+    request.accountDevice = {
+      deviceId: DEVICE,
+      identityKeyVersion: 1,
+      identityPublicKey: Buffer.alloc(32),
+      status: 'active',
+    };
   });
   app.decorate('services', {
     acl: {

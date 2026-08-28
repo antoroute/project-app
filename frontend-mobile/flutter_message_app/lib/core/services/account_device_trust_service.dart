@@ -17,7 +17,7 @@ enum DeviceTrustState {
   error,
 }
 
-enum DeviceApprovalDecision { approve, reject }
+enum DeviceApprovalDecision { approve, reject, revoke }
 
 class DeviceTrustException implements Exception {
   const DeviceTrustException(this.code, {this.statusCode});
@@ -256,7 +256,19 @@ class AccountDeviceTrustService {
       }
     }
     final identityPublicKey = await _identities.publicKeyBase64(accountId);
-    final devices = await _transport.fetchDevices();
+    List<AccountDevice> devices;
+    try {
+      devices = await _transport.fetchDevices();
+    } on DeviceTrustException catch (error) {
+      if (!explicitEnrollment ||
+          error.code != 'device_authorization_required') {
+        rethrow;
+      }
+      // Un appareil pas encore inscrit ne peut pas produire une preuve d'accès
+      // reconnue. Le challenge d'inscription décidera lui-même si le bootstrap
+      // est encore permis.
+      devices = const <AccountDevice>[];
+    }
     final current = _findCurrent(devices, deviceId);
     if (current != null) {
       if (current.identityPublicKey != identityPublicKey) {
@@ -528,7 +540,11 @@ class AccountDeviceTrustService {
       throw const DeviceTrustException('challenge_binding_mismatch');
     }
     _expectSlice(transcript, 143, _publicKeyBytes(target.identityPublicKey));
-    final expectedDecision = decision == DeviceApprovalDecision.approve ? 1 : 2;
+    final expectedDecision = switch (decision) {
+      DeviceApprovalDecision.approve => 1,
+      DeviceApprovalDecision.reject => 2,
+      DeviceApprovalDecision.revoke => 3,
+    };
     if (transcript[175] != expectedDecision) {
       throw const DeviceTrustException('challenge_binding_mismatch');
     }

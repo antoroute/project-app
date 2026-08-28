@@ -301,6 +301,21 @@ class KeyDirectoryService {
     }
   }
 
+  /// Invalide entièrement un annuaire après rotation ou révocation.
+  /// Les versions historiques doivent être rechargées avec la nouvelle vue
+  /// serveur ; retirer seulement un appareil casserait la lecture du passé.
+  Future<void> invalidateGroupDirectory(String groupId) async {
+    _cache.remove(groupId);
+    _pendingRequests.remove(groupId);
+    if (_database != null) {
+      await _database!.delete(
+        _tableName,
+        where: 'group_id = ?',
+        whereArgs: <Object?>[groupId],
+      );
+    }
+  }
+
   /// Invalide les clés pour un device spécifique
   Future<void> invalidateDeviceKeys(String groupId, String deviceId) async {
     if (_database == null) return;

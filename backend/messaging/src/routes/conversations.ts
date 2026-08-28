@@ -9,6 +9,7 @@ import { authenticatedUserId } from '../security/jwt.js';
 
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
+  app.addHook('preHandler', app.requireActiveDevice);
 
   // POST /api/conversations  { groupId, type: 'private'|'subset', memberIds: UUID[] }
   app.post('/api/conversations', {

@@ -26,8 +26,8 @@ Le schéma est logique. L'inventaire réel du LXC et du staging est conservé da
 |---|---|---|
 | Client Flutter | UI, identité d'appareil, chiffrement/déchiffrement, cache et synchronisation | Prototype mobile, desktop incomplet |
 | Auth Fastify | comptes, mots de passe, JWT, refresh tokens et réautorisation du premier appareil | Access Ed25519 et refresh HS256 séparés ; grant de bootstrap opaque et court par `TC-106` |
-| Messaging Fastify | registre d'appareils, cercles, membres, conversations, clés publiques, messages et temps réel | Preuve et approbation signée présentes ; révocation globale encore incomplète |
-| PostgreSQL | identités, appartenances, clés publiques, enveloppes chiffrées, sessions | Initialisé par script ; quatre migrations réversibles versionnées mais encore appliquées manuellement |
+| Messaging Fastify | registre d'appareils, cercles, membres, conversations, clés publiques, messages et temps réel | Preuves d'accès, liaisons de clés, rotation et révocation globale présentes |
+| PostgreSQL | identités, appartenances, clés publiques versionnées, historique, enveloppes chiffrées, sessions | Initialisé par script ; cinq migrations réversibles versionnées mais encore appliquées manuellement |
 | Redis | prévu pour présence/pub-sub | Non utilisé par l'application ; présence en mémoire du processus |
 | Nginx/proxy externe | terminaison/routage HTTP(S) | Staging loopback sans exposition publique ; TLS restreint reporté à `TC-113` |
 | Site public | acquisition, téléchargements, légal, support | à créer |
@@ -46,7 +46,9 @@ Le schéma est logique. L'inventaire réel du LXC et du staging est conservé da
 1. Le client prépare un identifiant de message unique et une enveloppe canonique versionnée.
 2. Il chiffre pour les appareils autorisés et signe tous les champs liés au contexte.
 3. Le message entre dans une outbox durable avec état explicite.
-4. Le backend authentifie le jeton d'accès, dérive l'expéditeur et vérifie transactionnellement l'appartenance à la conversation.
+4. Le backend authentifie le jeton d'accès et la preuve Ed25519 liée à son
+   `jti`, relit l'appareil actif, dérive l'expéditeur et vérifie
+   transactionnellement appartenance et versions de clés courantes.
 5. Une contrainte d'idempotence accepte une seule fois l'identifiant client.
 6. Le backend persiste l'enveloppe opaque et produit un curseur de synchronisation durable.
 7. Les destinataires vérifient version, contexte, signature et clé avant tout affichage ou notification locale.

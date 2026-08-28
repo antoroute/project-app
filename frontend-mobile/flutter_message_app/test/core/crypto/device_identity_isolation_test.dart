@@ -117,7 +117,7 @@ void main() {
       expect(store.writeCount, 0);
 
       await manager.ensureKeysFor('group-a', deviceA);
-      expect(store.writeCount, 4);
+      expect(store.writeCount, 5);
       expect(await manager.publicKeysBase64('group-a', deviceA), {
         'pk_sig': isA<String>(),
         'pk_kem': isA<String>(),
@@ -133,7 +133,7 @@ void main() {
         manager.ensureKeysFor('group-a', deviceA),
       ]);
 
-      expect(store.writeCount, 4);
+      expect(store.writeCount, 5);
       await manager.loadEd25519KeyPair('group-a', deviceA);
       await manager.loadX25519KeyPair('group-a', deviceA);
     });
@@ -193,6 +193,76 @@ void main() {
           manager.loadX25519KeyPair('group-a', deviceA),
           throwsA(_keyError('public_key_mismatch')),
         );
+      },
+    );
+
+    test(
+      'une rotation conserve les clés privées et publiques historiques',
+      () async {
+        final store = MemorySecureStringStore();
+        final manager = KeyManagerFinal.forTesting(storage: store);
+        await manager.ensureKeysFor('group-a', deviceA);
+        final versionOnePublic = await manager.publicKeysBase64(
+          'group-a',
+          deviceA,
+          keyVersion: 1,
+        );
+        final versionOnePrivate = await manager.loadEd25519KeyPair(
+          'group-a',
+          deviceA,
+          keyVersion: 1,
+        );
+
+        expect(await manager.rotateKeysFor('group-a', deviceA), 2);
+        expect(await manager.currentKeyVersion('group-a', deviceA), 2);
+        expect(
+          await manager.publicKeysBase64('group-a', deviceA, keyVersion: 1),
+          versionOnePublic,
+        );
+        expect(
+          await manager.publicKeysBase64('group-a', deviceA, keyVersion: 2),
+          isNot(versionOnePublic),
+        );
+
+        final message = utf8.encode('historique');
+        final signature = await Ed25519().sign(
+          message,
+          keyPair: versionOnePrivate,
+        );
+        expect(
+          await Ed25519().verify(
+            message,
+            signature: Signature(
+              signature.bytes,
+              publicKey: SimplePublicKey(
+                base64Decode(versionOnePublic['pk_sig']!),
+                type: KeyPairType.ed25519,
+              ),
+            ),
+          ),
+          isTrue,
+        );
+        expect(store.values, contains('v2:group-a:$deviceA:v2:x25519:seed'));
+      },
+    );
+
+    test(
+      'deux rotations concurrentes allouent deux versions successives',
+      () async {
+        final store = MemorySecureStringStore();
+        final manager = KeyManagerFinal.forTesting(storage: store);
+        await manager.ensureKeysFor('group-a', deviceA);
+
+        final versions = await Future.wait(<Future<int>>[
+          manager.rotateKeysFor('group-a', deviceA),
+          manager.rotateKeysFor('group-a', deviceA),
+        ]);
+
+        expect(versions, <int>[2, 3]);
+        expect(await manager.currentKeyVersion('group-a', deviceA), 3);
+        await manager.loadX25519KeyPair('group-a', deviceA, keyVersion: 1);
+        await manager.loadX25519KeyPair('group-a', deviceA, keyVersion: 2);
+        await manager.loadX25519KeyPair('group-a', deviceA, keyVersion: 3);
       },
     );
   });

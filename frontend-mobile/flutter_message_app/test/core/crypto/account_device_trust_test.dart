@@ -13,6 +13,7 @@ void main() {
   const accountId = '22222222-2222-4222-8222-222222222222';
   const currentDeviceId = '33333333-3333-4333-8333-333333333333';
   const pendingDeviceId = '44444444-4444-4444-8444-444444444444';
+  const groupId = '66666666-6666-4666-8666-666666666666';
 
   group('identité Ed25519 du compte/appareil', () {
     test('la création est explicite, stable et isolée par compte', () async {
@@ -56,6 +57,79 @@ void main() {
         expect(store.deleteCount, 0);
       },
     );
+
+    test('signe les liaisons canoniques d’accès et de clé de cercle', () async {
+      final identities = AccountDeviceIdentityService.forTesting(
+        storage: MemorySecureStringStore(),
+      );
+      await identities.ensureIdentity(accountId);
+      final publicKey = SimplePublicKey(
+        base64Decode(await identities.publicKeyBase64(accountId)),
+        type: KeyPairType.ed25519,
+      );
+      const accessTokenId = '77777777-7777-4777-8777-777777777777';
+      final accessTranscript = Uint8List.fromList(<int>[
+        ...ascii.encode('circlehaven/account-device-access/v1\x00'),
+        ...uuidBytes(accountId),
+        ...uuidBytes(currentDeviceId),
+        ...uint32(1),
+        ...uuidBytes(accessTokenId),
+      ]);
+      final accessSignature = await identities.signDeviceAccess(
+        accountId: accountId,
+        deviceId: currentDeviceId,
+        identityKeyVersion: 1,
+        accessTokenId: accessTokenId,
+      );
+      expect(accessTranscript, hasLength(89));
+      expect(
+        await Ed25519().verify(
+          accessTranscript,
+          signature: Signature(
+            base64Decode(accessSignature),
+            publicKey: publicKey,
+          ),
+        ),
+        isTrue,
+      );
+
+      final signaturePublicKey = base64Encode(
+        List<int>.generate(32, (index) => index),
+      );
+      final kemPublicKey = base64Encode(
+        List<int>.generate(32, (index) => 32 + index),
+      );
+      final bindingTranscript = Uint8List.fromList(<int>[
+        ...ascii.encode('circlehaven/group-device-key/v1\x00'),
+        ...uuidBytes(accountId),
+        ...uuidBytes(groupId),
+        ...uuidBytes(currentDeviceId),
+        ...uint32(1),
+        ...uint32(2),
+        ...base64Decode(signaturePublicKey),
+        ...base64Decode(kemPublicKey),
+      ]);
+      final bindingSignature = await identities.signGroupDeviceKeyBinding(
+        accountId: accountId,
+        groupId: groupId,
+        deviceId: currentDeviceId,
+        identityKeyVersion: 1,
+        keyVersion: 2,
+        signaturePublicKey: signaturePublicKey,
+        kemPublicKey: kemPublicKey,
+      );
+      expect(bindingTranscript, hasLength(152));
+      expect(
+        await Ed25519().verify(
+          bindingTranscript,
+          signature: Signature(
+            base64Decode(bindingSignature),
+            publicKey: publicKey,
+          ),
+        ),
+        isTrue,
+      );
+    });
   });
 
   group('cycle de confiance client', () {
@@ -190,6 +264,45 @@ void main() {
         expect(fixture.transport.approvalSubmissions, 0);
       },
     );
+
+    test(
+      'une révocation signe la décision 03 et révoque la cible active',
+      () async {
+        final fixture = TrustFixture(accountId, currentDeviceId);
+        await fixture.service.enrollOrRefresh(
+          accountId: accountId,
+          explicitEnrollment: true,
+          password: 'correct horse battery staple',
+        );
+        final target = fakeDevice(
+          deviceId: pendingDeviceId,
+          publicKey: base64Encode(
+            List<int>.generate(32, (index) => 32 + index),
+          ),
+          status: AccountDeviceStatus.active,
+          activated: true,
+        );
+        fixture.transport.devices.add(target);
+
+        final result = await fixture.service.decide(
+          accountId: accountId,
+          approverDeviceId: currentDeviceId,
+          target: target,
+          decision: DeviceApprovalDecision.revoke,
+        );
+
+      expect(result.state, DeviceTrustState.active);
+      expect(result.deviceId, currentDeviceId);
+        expect(fixture.transport.approvalSignatureValid, isTrue);
+        expect(fixture.transport.approvalDecisionByte, 3);
+        expect(
+          fixture.transport.devices
+              .singleWhere((device) => device.deviceId == pendingDeviceId)
+              .status,
+          AccountDeviceStatus.revoked,
+        );
+      },
+    );
   });
 }
 
@@ -229,6 +342,7 @@ class FakeDeviceTrustTransport implements DeviceTrustTransport {
   bool registrationSignatureValid = false;
   bool approvalSignatureValid = false;
   bool alterApprovalDecisionByte = false;
+  int? approvalDecisionByte;
   late Uint8List _registrationTranscript;
   late Uint8List _registrationPublicKey;
   late String _registrationDeviceId;
@@ -345,7 +459,11 @@ class FakeDeviceTrustTransport implements DeviceTrustTransport {
       ...base64Decode(_approvalTarget.identityPublicKey),
       alterApprovalDecisionByte
           ? 2
-          : (decision == DeviceApprovalDecision.approve ? 1 : 2),
+          : switch (decision) {
+            DeviceApprovalDecision.approve => 1,
+            DeviceApprovalDecision.reject => 2,
+            DeviceApprovalDecision.revoke => 3,
+          },
       ...List<int>.generate(32, (index) => 96 + index),
       ...uint64(2000000000),
     ]);
@@ -377,8 +495,12 @@ class FakeDeviceTrustTransport implements DeviceTrustTransport {
     required String signature,
   }) async {
     approvalSubmissions += 1;
+    approvalDecisionByte =
+        _approvalTranscript[_approvalTranscript.length - 32 - 8 - 1];
     final approver = devices.singleWhere(
-      (device) => device.status == AccountDeviceStatus.active,
+      (device) =>
+          device.deviceId != _approvalTarget.deviceId &&
+          device.status == AccountDeviceStatus.active,
     );
     approvalSignatureValid = await Ed25519().verify(
       _approvalTranscript,

@@ -2,7 +2,7 @@
 
 Statut : description du code existant, **pas** spécification d'un protocole approuvé
 Dernière mise à jour : 2026-08-25
-Code observé : branche `main`, changement `TC-106` lot C
+Code observé : branche `main`, changement `TC-106` lot D
 Implémentation principale : `lib/core/crypto/message_cipher_v2.dart`
 
 ## Objet
@@ -52,7 +52,11 @@ L'ancien `device_id_v1`, global à l'installation, n'est ni lu ni migré automat
 
 `AccountDeviceIdentityService` conserve séparément une graine et une clé publique Ed25519 sous `account_device_identity_v1:account:<userId>:ed25519_seed|ed25519_public`. Cette identité de confiance n'est pas une paire E2EE de cercle. Sa création est réservée à l'enrôlement explicite ; un auto-login charge le matériel existant et échoue si celui-ci est absent, partiel, mal encodé, d'une taille autre que 32 octets ou si la clé publique ne correspond pas à la graine.
 
-Les lots B/C de `TC-106` enregistrent la clé publique après preuve de possession, puis lient l'approbation ou le refus par un appareil actif à une seconde transcription signée. Les formats exacts, domaines, tailles et vecteurs sont spécifiés dans [`DEVICE_TRUST_PROTOCOL_V1.md`](DEVICE_TRUST_PROTOCOL_V1.md). La liaison serveur systématique entre ce registre de confiance et les clés E2EE de cercle relève encore du lot D.
+Les lots B/C/D de `TC-106` enregistrent la clé publique après preuve de
+possession, lient les décisions d'appareil à une seconde transcription, exigent
+une preuve d'accès liée au `jti` et font signer chaque publication de clé de
+cercle. Les formats exacts, domaines, tailles et vecteurs sont spécifiés dans
+[`DEVICE_TRUST_PROTOCOL_V1.md`](DEVICE_TRUST_PROTOCOL_V1.md).
 
 ### Paires de clés E2EE
 
@@ -70,17 +74,29 @@ v2:<groupId>:<deviceId>:x25519:seed
 v2:<groupId>:<deviceId>:x25519_pub:seed
 ```
 
+La version 1 conserve ces noms pour ne pas perdre l'historique. À partir de la
+version 2, le segment `:v<version>:` est ajouté avant le type de clé, et
+`v2:<groupId>:<deviceId>:current_key_version` sélectionne la version courante.
+Une rotation n'écrase ni ne supprime aucun seed précédent.
+
 Le suffixe `:seed` est également appliqué aux clés publiques ; il s'agit d'une convention d'implémentation, pas d'une propriété cryptographique.
 
 Les paires sont mises en cache en mémoire sous la clé `<groupId>:<deviceId>`. Le `deviceId` est désormais propre au compte. Une création n'est permise que par l'appel explicite `ensureKeysFor` lorsque les quatre valeurs sont absentes. Les méthodes de lecture, signature et déchiffrement ne génèrent rien : une valeur manquante, partielle, Base64 invalide, d'une taille autre que 32 octets ou dont la clé publique ne correspond pas au seed provoque une erreur fail-closed sans suppression ni réécriture. Deux créations concurrentes du même couple sont sérialisées.
 
 ### Publication et annuaire
 
-Le client publie les clés publiques Ed25519 et X25519 dans `group_device_keys`. Les autres clients récupèrent cet annuaire auprès du backend.
+Le client signe compte, cercle, appareil, versions et deux clés publiques avec
+son identité Ed25519 de compte avant de publier dans `group_device_keys`. Le
+backend accepte seulement la première version `1`, un rejeu identique ou la
+version immédiatement suivante. La version remplacée devient immuable dans
+`group_device_key_history`. Les autres clients récupèrent versions courantes et
+historiques dans le même annuaire.
 
 L'empreinte locale actuelle détecte surtout une altération accidentelle de la réponse mise en cache. Elle ne constitue ni une preuve d'identité, ni un journal de transparence, ni une approbation préalable de la clé. Un serveur contrôlant l'annuaire peut donc substituer une clé publique sans mécanisme de détection robuste côté utilisateur.
 
-La révocation empêche l'usage futur d'une entrée côté serveur, mais n'efface pas les secrets ou enveloppes déjà obtenus.
+La révocation globale empêche l'usage futur d'une entrée côté serveur, coupe le
+WebSocket cible et invalide l'annuaire du cercle chez les clients connectés. Elle
+n'efface pas les secrets ou enveloppes déjà obtenus.
 
 ### Clé de message
 
@@ -114,7 +130,8 @@ Aucune donnée associée authentifiée (AAD) n'est fournie à AES-GCM. Les méta
 
 ### 3. Encapsulation pour chaque appareil
 
-Pour chaque entrée destinataire `(userId, deviceId, recipientX25519PublicKey)` :
+Pour chaque entrée destinataire
+`(userId, deviceId, recipientKeyVersion, recipientX25519PublicKey)` :
 
 ```text
 sharedSecret = X25519(ephemeralPrivateKey, recipientX25519PublicKey)
@@ -124,6 +141,7 @@ wrapNonce = random(12)
 wrapped, tag = AES-256-GCM.encrypt(KEK, wrapNonce, MK)
 recipient.wrap = Base64(wrapped || tag)
 recipient.nonce = Base64(wrapNonce)
+recipient.key_version = recipientKeyVersion
 ```
 
 Une seule clé X25519 éphémère est utilisée pour toutes les encapsulations du message. La clé publique éphémère se trouve dans `sender.eph_pub`.
@@ -153,6 +171,7 @@ Une seule clé X25519 éphémère est utilisée pour toutes les encapsulations d
     {
       "userId": "...",
       "deviceId": "...",
+      "key_version": 1,
       "wrap": "base64(ciphertext || tag)",
       "nonce": "base64"
     }
@@ -185,13 +204,17 @@ sender.key_version
 pour chaque recipient, dans l'ordre de la liste :
   recipient.userId
   recipient.deviceId
+  recipient.key_version
   recipient.wrap
   recipient.nonce
 iv
 hex_lowercase(SHA-256(UTF8(payload.ciphertext)))
 ```
 
-Toutes ces valeurs sont concaténées directement. Le champ `salt` est absent des octets signés.
+Toutes ces valeurs sont concaténées directement. Pour compatibilité, les
+enveloppes V2 historiques sans `recipient.key_version` conservent exactement
+l'ancienne concaténation et sélectionnent implicitement la version `1`. Le champ
+`salt` est absent des octets signés.
 
 La signature est :
 
@@ -215,10 +238,13 @@ Pour l'appareil local :
 1. valider version, algorithmes, types, tailles Base64 et unicité des destinataires ;
 2. imposer l'égalité entre cercle/conversation attendus et enveloppe ;
 3. imposer exactement une entrée pour l'utilisateur et l'appareil locaux ;
-4. récupérer dans l'annuaire l'appareil expéditeur actif avec la même version de clé ;
+4. récupérer dans l'annuaire la version exacte de la clé expéditeur ; son état
+   peut être `active`, `superseded` ou `revoked` pour vérifier un message déjà
+   stocké, tandis que le backend interdit ces deux derniers états à l'envoi ;
 5. vérifier Ed25519 dans l'isolate cryptographique ;
 6. seulement après ce succès, consulter un éventuel cache de `MK` ;
-7. à défaut, calculer X25519/HKDF puis ouvrir `wrap` et le contenu dans l'isolate ;
+7. à défaut, charger la version privée X25519 indiquée dans le wrap, calculer
+   X25519/HKDF puis ouvrir `wrap` et le contenu dans l'isolate ;
 8. mettre `MK` en cache uniquement après ouverture réussie du tag du contenu ;
 9. remettre atomiquement le texte avec `signatureValid: true`.
 
@@ -233,7 +259,7 @@ La réactivité est préservée par l'annuaire et les clés de message en cache 
 | Élément | Emplacement | Durée observée | État de sécurité |
 |---|---|---:|---|
 | graine d'identité Ed25519 compte/appareil | `flutter_secure_storage` | enrôlement du compte sur l'installation | création explicite, chargement fail-closed ; registre, preuve et approbation présents |
-| graines privées E2EE Ed25519/X25519 | `flutter_secure_storage` | installation | stockage OS, sélection par `deviceId` propre au compte et par cercle ; liaison serveur au registre encore incomplète |
+| graines privées E2EE Ed25519/X25519 | `flutter_secure_storage` | installation | stockage OS, sélection par compte/cercle/appareil/version ; anciennes versions conservées fail-closed |
 | jetons d'accès/refresh | `flutter_secure_storage` | session/30 jours | biométrie autour du refresh à valider par plateforme |
 | clé de message en mémoire | RAM | TTL 24 h, max. 1 000 | index utilisateur/appareil/message ; clés accessibles au processus |
 | clé de message persistante | SQLite, chiffrée AES-GCM | TTL 7 jours | index utilisateur/appareil/message ; clé maître CSPRNG propre au compte |
@@ -276,7 +302,7 @@ Le backend applique l'identité JWT à l'expéditeur depuis `TC-103`, mais il ne
 - pas de post-compromise security ;
 - pas de déniabilité ou d'anonymat ;
 - pas de restauration automatique sûre de l'historique sur un nouvel appareil ;
-- pas de rotation ou migration de clé complète ;
+- la rotation V2 n'apporte ni forward secrecy ni effacement cryptographique des anciennes versions ;
 - pas de chiffrement complet de la base SQLite contenant les enveloppes et métadonnées ;
 - pas de protocole complet anti-rejeu et de synchronisation par curseur.
 
@@ -291,7 +317,11 @@ Comportement actuellement implémenté dans le parcours nominal :
 5. après activation, le client crée et publie en arrière-plan une paire E2EE distincte pour chaque cercle ;
 6. les futurs messages incluent une encapsulation pour ce nouvel appareil, tandis que les anciens messages sans encapsulation restent indéchiffrables.
 
-Cette barrière est actuellement imposée par le client Flutter. Un client modifié muni d'un access token peut encore appeler les anciennes routes de `group_device_keys` sans que toutes vérifient le registre de compte ; cette liaison autoritative, la rotation et la révocation globale sont le périmètre restant du lot D de `TC-106`. Voir aussi `TC-303` et `TC-304`.
+Cette barrière est imposée côté client et côté serveur. Un client modifié doit
+encore produire la preuve Ed25519 liée au token, être `active`, signer la liaison
+de sa clé de cercle et respecter la version monotone. Une révocation signée
+désactive toutes ses clés courantes en une transaction. Voir aussi `TC-303` et
+`TC-304` pour le remplacement V3 et ses garanties plus fortes.
 
 ## Cas particulier de la création d'un cercle
 

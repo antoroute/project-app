@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
@@ -34,8 +35,18 @@ class KeyManagerFinal {
   final SecureStringStore _storage;
 
   // Namespaced keys: <groupId>.<deviceId>.(ed25519|x25519).seed
-  String _ns(String groupId, String deviceId, String kind) =>
-      'v2:$groupId:$deviceId:$kind:seed';
+  String _ns(
+    String groupId,
+    String deviceId,
+    String kind, {
+    required int keyVersion,
+  }) =>
+      keyVersion == 1
+          ? 'v2:$groupId:$deviceId:$kind:seed'
+          : 'v2:$groupId:$deviceId:v$keyVersion:$kind:seed';
+
+  String _currentVersionKey(String groupId, String deviceId) =>
+      'v2:$groupId:$deviceId:current_key_version';
 
   // Cache des SimpleKeyPair reconstruites (persistant pendant la session)
   final Map<String, SimpleKeyPair> _ed25519Cache = <String, SimpleKeyPair>{};
@@ -44,7 +55,18 @@ class KeyManagerFinal {
   final Map<String, Future<void>> _pendingInitialization =
       <String, Future<void>>{};
 
-  String _cacheKey(String groupId, String deviceId) => '$groupId:$deviceId';
+  String _cacheKey(String groupId, String deviceId, int keyVersion) =>
+      '$groupId:$deviceId:$keyVersion';
+
+  Future<int> currentKeyVersion(String groupId, String deviceId) async {
+    final stored = await _storage.read(_currentVersionKey(groupId, deviceId));
+    if (stored == null) return 1;
+    final version = int.tryParse(stored);
+    if (version == null || version < 1) {
+      throw const KeyMaterialUnavailableException('invalid_key_version');
+    }
+    return version;
+  }
 
   /// Initialise cryptography pour les performances
   static void initialize() {
@@ -53,31 +75,81 @@ class KeyManagerFinal {
 
   /// Génère et stocke de nouvelles clés
   Future<void> ensureKeysFor(String groupId, String deviceId) async {
-    final cacheKey = _cacheKey(groupId, deviceId);
-    final existing = _pendingInitialization[cacheKey];
-    if (existing != null) return existing;
+    final operationKey = '$groupId:$deviceId';
+    await _serialized<void>(
+      operationKey,
+      () => _ensureKeysFor(groupId, deviceId),
+    );
+  }
 
-    final initialization = _ensureKeysFor(groupId, deviceId);
-    _pendingInitialization[cacheKey] = initialization;
-    try {
-      await initialization;
-    } finally {
-      if (identical(_pendingInitialization[cacheKey], initialization)) {
-        _pendingInitialization.remove(cacheKey);
+  Future<int> rotateKeysFor(String groupId, String deviceId) async {
+    final operationKey = '$groupId:$deviceId';
+    return _serialized<int>(operationKey, () async {
+      final currentVersion = await currentKeyVersion(groupId, deviceId);
+      await _loadExistingKeys(groupId, deviceId, keyVersion: currentVersion);
+      final nextVersion = currentVersion + 1;
+      final nextMaterial = await _readMaterial(
+        groupId,
+        deviceId,
+        keyVersion: nextVersion,
+      );
+      if (nextMaterial.any((value) => value != null)) {
+        throw const KeyMaterialUnavailableException(
+          'next_key_version_already_exists',
+        );
+      }
+      await _generateKeys(groupId, deviceId, keyVersion: nextVersion);
+      return nextVersion;
+    });
+  }
+
+  Future<T> _serialized<T>(
+    String operationKey,
+    Future<T> Function() operation,
+  ) async {
+    while (true) {
+      final existing = _pendingInitialization[operationKey];
+      if (existing != null) {
+        await existing;
+        continue;
+      }
+      final completer = Completer<void>();
+      _pendingInitialization[operationKey] = completer.future;
+      try {
+        return await operation();
+      } finally {
+        completer.complete();
+        if (identical(_pendingInitialization[operationKey], completer.future)) {
+          _pendingInitialization.remove(operationKey);
+        }
       }
     }
   }
 
   Future<void> _ensureKeysFor(String groupId, String deviceId) async {
-    final material = await _readMaterial(groupId, deviceId);
+    final keyVersion = await currentKeyVersion(groupId, deviceId);
+    final material = await _readMaterial(
+      groupId,
+      deviceId,
+      keyVersion: keyVersion,
+    );
     if (material.every((value) => value == null)) {
-      await _generateKeys(groupId, deviceId);
+      await _generateKeys(groupId, deviceId, keyVersion: keyVersion);
       return;
     }
-    await _loadExistingKeys(groupId, deviceId, material: material);
+    await _loadExistingKeys(
+      groupId,
+      deviceId,
+      keyVersion: keyVersion,
+      material: material,
+    );
   }
 
-  Future<void> _generateKeys(String groupId, String deviceId) async {
+  Future<void> _generateKeys(
+    String groupId,
+    String deviceId, {
+    required int keyVersion,
+  }) async {
     debugPrint(
       '🔐 Generating new keys with KeyManagerFinal (true reconstruction)',
     );
@@ -94,24 +166,25 @@ class KeyManagerFinal {
 
     // Stocker les seeds (32 octets) et les clés publiques
     await _storage.write(
-      _ns(groupId, deviceId, 'ed25519'),
+      _ns(groupId, deviceId, 'ed25519', keyVersion: keyVersion),
       base64Encode(ed25519Seed),
     );
     await _storage.write(
-      _ns(groupId, deviceId, 'ed25519_pub'),
+      _ns(groupId, deviceId, 'ed25519_pub', keyVersion: keyVersion),
       base64Encode(ed25519PublicBytes),
     );
     await _storage.write(
-      _ns(groupId, deviceId, 'x25519'),
+      _ns(groupId, deviceId, 'x25519', keyVersion: keyVersion),
       base64Encode(x25519Seed),
     );
     await _storage.write(
-      _ns(groupId, deviceId, 'x25519_pub'),
+      _ns(groupId, deviceId, 'x25519_pub', keyVersion: keyVersion),
       base64Encode(x25519PublicBytes),
     );
 
     // Mettre en cache les SimpleKeyPair générés
-    final cacheKey = _cacheKey(groupId, deviceId);
+    await _storage.write(_currentVersionKey(groupId, deviceId), '$keyVersion');
+    final cacheKey = _cacheKey(groupId, deviceId, keyVersion);
     _ed25519Cache[cacheKey] = ed25519KeyPair;
     _x25519Cache[cacheKey] = x25519KeyPair;
     _validatedKeyMaterial.add(cacheKey);
@@ -121,17 +194,23 @@ class KeyManagerFinal {
 
   /// Vérifie si les clés existent
   Future<bool> hasKeys(String groupId, String deviceId) async {
-    final material = await _readMaterial(groupId, deviceId);
+    final material = await _readMaterial(
+      groupId,
+      deviceId,
+      keyVersion: await currentKeyVersion(groupId, deviceId),
+    );
     return material.every((value) => value != null);
   }
 
   /// Retourne les clés publiques en Base64
   Future<Map<String, String>> publicKeysBase64(
     String groupId,
-    String deviceId,
-  ) async {
-    await _loadExistingKeys(groupId, deviceId);
-    final cacheKey = _cacheKey(groupId, deviceId);
+    String deviceId, {
+    int? keyVersion,
+  }) async {
+    final version = keyVersion ?? await currentKeyVersion(groupId, deviceId);
+    await _loadExistingKeys(groupId, deviceId, keyVersion: version);
+    final cacheKey = _cacheKey(groupId, deviceId, version);
     final edPublic = await _ed25519Cache[cacheKey]!.extractPublicKey();
     final xPublic = await _x25519Cache[cacheKey]!.extractPublicKey();
     return {
@@ -143,10 +222,12 @@ class KeyManagerFinal {
   /// 🎉 SOLUTION FINALE: Charge la clé Ed25519 avec reconstruction depuis le seed
   Future<SimpleKeyPair> loadEd25519KeyPair(
     String groupId,
-    String deviceId,
-  ) async {
-    final cacheKey = _cacheKey(groupId, deviceId);
-    await _loadExistingKeys(groupId, deviceId);
+    String deviceId, {
+    int? keyVersion,
+  }) async {
+    final version = keyVersion ?? await currentKeyVersion(groupId, deviceId);
+    final cacheKey = _cacheKey(groupId, deviceId, version);
+    await _loadExistingKeys(groupId, deviceId, keyVersion: version);
     return _ed25519Cache[cacheKey]!;
   }
 
@@ -154,29 +235,41 @@ class KeyManagerFinal {
   /// Utilisé pour sérialisation vers Isolate
   Future<Uint8List> getX25519PrivateKeyBytes(
     String groupId,
-    String deviceId,
-  ) async {
-    final keyPair = await loadX25519KeyPair(groupId, deviceId);
+    String deviceId, {
+    int? keyVersion,
+  }) async {
+    final keyPair = await loadX25519KeyPair(
+      groupId,
+      deviceId,
+      keyVersion: keyVersion,
+    );
     return Uint8List.fromList(await keyPair.extractPrivateKeyBytes());
   }
 
   /// 🎉 SOLUTION FINALE: Charge la clé X25519 avec reconstruction depuis le seed
   Future<SimpleKeyPair> loadX25519KeyPair(
     String groupId,
-    String deviceId,
-  ) async {
-    final cacheKey = _cacheKey(groupId, deviceId);
-    await _loadExistingKeys(groupId, deviceId);
+    String deviceId, {
+    int? keyVersion,
+  }) async {
+    final version = keyVersion ?? await currentKeyVersion(groupId, deviceId);
+    final cacheKey = _cacheKey(groupId, deviceId, version);
+    await _loadExistingKeys(groupId, deviceId, keyVersion: version);
     return _x25519Cache[cacheKey]!;
   }
 
-  Future<List<String?>> _readMaterial(String groupId, String deviceId) =>
-      Future.wait(<Future<String?>>[
-        _storage.read(_ns(groupId, deviceId, 'ed25519')),
-        _storage.read(_ns(groupId, deviceId, 'ed25519_pub')),
-        _storage.read(_ns(groupId, deviceId, 'x25519')),
-        _storage.read(_ns(groupId, deviceId, 'x25519_pub')),
-      ]);
+  Future<List<String?>> _readMaterial(
+    String groupId,
+    String deviceId, {
+    required int keyVersion,
+  }) => Future.wait(<Future<String?>>[
+    _storage.read(_ns(groupId, deviceId, 'ed25519', keyVersion: keyVersion)),
+    _storage.read(
+      _ns(groupId, deviceId, 'ed25519_pub', keyVersion: keyVersion),
+    ),
+    _storage.read(_ns(groupId, deviceId, 'x25519', keyVersion: keyVersion)),
+    _storage.read(_ns(groupId, deviceId, 'x25519_pub', keyVersion: keyVersion)),
+  ]);
 
   Uint8List _decode32(String value) {
     try {
@@ -195,12 +288,15 @@ class KeyManagerFinal {
   Future<void> _loadExistingKeys(
     String groupId,
     String deviceId, {
+    required int keyVersion,
     List<String?>? material,
   }) async {
-    final cacheKey = _cacheKey(groupId, deviceId);
+    final cacheKey = _cacheKey(groupId, deviceId, keyVersion);
     if (_validatedKeyMaterial.contains(cacheKey)) return;
 
-    final values = material ?? await _readMaterial(groupId, deviceId);
+    final values =
+        material ??
+        await _readMaterial(groupId, deviceId, keyVersion: keyVersion);
     if (values.any((value) => value == null)) {
       throw const KeyMaterialUnavailableException(
         'missing_or_partial_key_material',
@@ -257,7 +353,11 @@ class KeyManagerFinal {
   /// La migration historique n'est pas sûre sans preuve du compte propriétaire.
   Future<void> migrateFromLegacy(String groupId, String deviceId) async {
     if (await hasKeys(groupId, deviceId)) {
-      await _loadExistingKeys(groupId, deviceId);
+      await _loadExistingKeys(
+        groupId,
+        deviceId,
+        keyVersion: await currentKeyVersion(groupId, deviceId),
+      );
       return;
     }
     throw const KeyMaterialUnavailableException(

@@ -90,10 +90,12 @@ test('la création accepte uniquement un ensemble entièrement membre du cercle'
 
 test('l’envoi transactionnel verrouille et valide tous les destinataires en une requête', async () => {
   const queryCalls = [];
+  const queryParams = [];
   let oneOrNoneCalls = 0;
   const transaction = {
-    oneOrNone: async (query) => {
+    oneOrNone: async (query, params) => {
       queryCalls.push(query);
+      queryParams.push(params);
       oneOrNoneCalls += 1;
       if (oneOrNoneCalls === 1) {
         return {
@@ -107,8 +109,8 @@ test('l’envoi transactionnel verrouille et valide tous les destinataires en un
     any: async (query) => {
       queryCalls.push(query);
       return [
-        { userId: MEMBER, deviceId: 'member-a' },
-        { userId: OUTSIDER, deviceId: 'outsider-a' },
+        { userId: MEMBER, deviceId: 'member-a', keyVersion: 3 },
+        { userId: OUTSIDER, deviceId: 'outsider-a', keyVersion: 4 },
       ];
     },
   };
@@ -127,11 +129,12 @@ test('l’envoi transactionnel verrouille et valide tous les destinataires en un
   const allowed = await acl.canSend(
     OWNER,
     'owner-a',
+    7,
     GROUP,
     CONVERSATION,
     [
-      { userId: MEMBER, deviceId: 'member-a' },
-      { userId: OUTSIDER, deviceId: 'outsider-a' },
+      { userId: MEMBER, deviceId: 'member-a', key_version: 3 },
+      { userId: OUTSIDER, deviceId: 'outsider-a', key_version: 4 },
     ],
     { executor: transaction, lock: true },
   );
@@ -140,8 +143,46 @@ test('l’envoi transactionnel verrouille et valide tous les destinataires en un
   assert.equal(queryCalls.length, 3);
   assert.match(queryCalls[0], /FOR SHARE OF c, cu, g, ug/);
   assert.match(queryCalls[1], /FOR SHARE OF gdk/);
+  assert.match(queryCalls[1], /gdk\.key_version = \$4/);
+  assert.deepEqual(queryParams[1], [GROUP, OWNER, 'owner-a', 7]);
   assert.match(queryCalls[2], /FROM unnest/);
   assert.match(queryCalls[2], /FOR SHARE OF c, cu, ug, gdk/);
+});
+
+test('une version expéditeur historique ne peut plus créer de message', async () => {
+  let oneOrNoneCalls = 0;
+  let recipientQueryCalled = false;
+  const acl = initAclService({ db: {} });
+  const transaction = {
+    oneOrNone: async () => {
+      oneOrNoneCalls += 1;
+      if (oneOrNoneCalls === 1) {
+        return {
+          conversationId: CONVERSATION,
+          groupId: GROUP,
+          groupRole: 'owner',
+        };
+      }
+      return null;
+    },
+    any: async () => {
+      recipientQueryCalled = true;
+      return [];
+    },
+  };
+
+  const allowed = await acl.canSend(
+    OWNER,
+    'owner-a',
+    1,
+    GROUP,
+    CONVERSATION,
+    [{ userId: MEMBER, deviceId: 'member-a', key_version: 3 }],
+    { executor: transaction },
+  );
+
+  assert.equal(allowed, false);
+  assert.equal(recipientQueryCalled, false);
 });
 
 test('l’accusé de lecture verrouille la participation avant la mise à jour', async () => {

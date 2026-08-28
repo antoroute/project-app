@@ -15,6 +15,7 @@ import type {
 } from '../security/deviceApproval.js';
 import { decodeCanonicalBase64 } from '../security/deviceProof.js';
 import { authenticatedUserId } from '../security/jwt.js';
+import { authenticatedDevice } from '../middlewares/deviceAuth.js';
 
 const Platform = Type.Union([
   Type.Literal('android'),
@@ -26,6 +27,7 @@ const Platform = Type.Union([
 const ApprovalDecision = Type.Union([
   Type.Literal('approve'),
   Type.Literal('reject'),
+  Type.Literal('revoke'),
 ]);
 const CanonicalEd25519Signature = Type.String({
   minLength: 88,
@@ -64,7 +66,7 @@ type ApprovalChallengeOutcome =
         | 'account_missing'
         | 'approver_device_not_active'
         | 'target_device_not_found'
-        | 'target_device_not_pending'
+        | 'target_device_state_conflict'
         | 'too_many_approval_challenges';
     };
 
@@ -75,6 +77,7 @@ type ApprovalProofOutcome =
       approverDeviceId: string;
       decision: DeviceApprovalDecision;
       status: 'active' | 'revoked';
+      affectedGroupIds: string[];
     }
   | {
       kind:
@@ -85,7 +88,7 @@ type ApprovalProofOutcome =
         | 'invalid_device_approval'
         | 'approver_device_not_active'
         | 'approver_identity_changed'
-        | 'target_device_not_pending'
+        | 'target_device_state_conflict'
         | 'target_identity_changed';
     };
 
@@ -114,6 +117,7 @@ export default async function accountDeviceApprovalRoutes(
   app.post(
     '/api/devices/:targetDeviceId/approvals/challenge',
     {
+      preHandler: app.requireActiveDevice,
       schema: {
         params: Type.Object({
           targetDeviceId: Type.String({ format: 'uuid' }),
@@ -146,6 +150,9 @@ export default async function accountDeviceApprovalRoutes(
         approverDeviceId: string;
         decision: DeviceApprovalDecision;
       };
+      if (authenticatedDevice(request).deviceId !== approverDeviceId) {
+        return reply.code(403).send({ error: 'approver_device_mismatch' });
+      }
 
       const outcome = await app.db.transaction(
         async (
@@ -177,8 +184,10 @@ export default async function accountDeviceApprovalRoutes(
             [accountId, targetDeviceId],
           );
           if (!target) return { kind: 'target_device_not_found' };
-          if (target.status !== 'pending') {
-            return { kind: 'target_device_not_pending' };
+          const expectedTargetStatus =
+            decision === 'revoke' ? 'active' : 'pending';
+          if (target.status !== expectedTargetStatus) {
+            return { kind: 'target_device_state_conflict' };
           }
 
           await transaction.none(
@@ -309,8 +318,10 @@ export default async function accountDeviceApprovalRoutes(
             .send({ error: 'approver_device_not_active' });
         case 'target_device_not_found':
           return reply.code(404).send({ error: 'target_device_not_found' });
-        case 'target_device_not_pending':
-          return reply.code(409).send({ error: 'target_device_not_pending' });
+        case 'target_device_state_conflict':
+          return reply
+            .code(409)
+            .send({ error: 'target_device_state_conflict' });
         case 'too_many_approval_challenges':
           return reply
             .code(429)
@@ -322,6 +333,7 @@ export default async function accountDeviceApprovalRoutes(
   app.post(
     '/api/devices/approvals/:challengeId/decision',
     {
+      preHandler: app.requireActiveDevice,
       schema: {
         params: Type.Object({
           challengeId: Type.String({ format: 'uuid' }),
@@ -346,6 +358,7 @@ export default async function accountDeviceApprovalRoutes(
       const { signature: signatureBase64 } = request.body as {
         signature: string;
       };
+      const requestDeviceId = authenticatedDevice(request).deviceId;
       let signature: Buffer;
       try {
         signature = decodeCanonicalBase64(signatureBase64, 64);
@@ -373,6 +386,9 @@ export default async function accountDeviceApprovalRoutes(
             [challengeId, accountId],
           );
           if (!challenge) return { kind: 'approval_challenge_not_found' };
+          if (challenge.approver_device_id !== requestDeviceId) {
+            return { kind: 'approval_challenge_not_found' };
+          }
           if (challenge.consumed_at) {
             return { kind: 'approval_challenge_consumed' };
           }
@@ -433,13 +449,16 @@ export default async function accountDeviceApprovalRoutes(
               FOR UPDATE`,
             [accountId, challenge.target_device_id],
           );
-          if (!target || target.status !== 'pending') {
+          const decision = challenge.decision as DeviceApprovalDecision;
+          const expectedTargetStatus =
+            decision === 'revoke' ? 'active' : 'pending';
+          if (!target || target.status !== expectedTargetStatus) {
             await consumeChallenge(
               transaction,
               challengeId,
-              'target_not_pending',
+              'target_state_conflict',
             );
-            return { kind: 'target_device_not_pending' };
+            return { kind: 'target_device_state_conflict' };
           }
           if (
             Number(target.identity_key_version) !==
@@ -457,7 +476,6 @@ export default async function accountDeviceApprovalRoutes(
             return { kind: 'target_identity_changed' };
           }
 
-          const decision = challenge.decision as DeviceApprovalDecision;
           const status = decision === 'approve' ? 'active' : 'revoked';
           if (decision === 'approve') {
             await transaction.none(
@@ -475,6 +493,19 @@ export default async function accountDeviceApprovalRoutes(
               [accountId, challenge.target_device_id],
             );
           }
+
+          const affectedGroupRows =
+            decision === 'revoke'
+              ? await transaction.any(
+                  `UPDATE group_device_keys
+                      SET status = 'revoked', revoked_at = NOW(),
+                          updated_at = NOW()
+                    WHERE user_id = $1 AND device_id = $2
+                      AND status IN ('active', 'legacy')
+                  RETURNING group_id AS "groupId"`,
+                  [accountId, challenge.target_device_id],
+                )
+              : [];
 
           await transaction.none(
             `UPDATE device_approval_challenges
@@ -494,19 +525,48 @@ export default async function accountDeviceApprovalRoutes(
             approverDeviceId: challenge.approver_device_id as string,
             decision,
             status,
+            affectedGroupIds: affectedGroupRows.map(
+              (row: { groupId: string }) => row.groupId,
+            ),
           };
         },
         { isolationLevel: 'SERIALIZABLE' },
       );
 
       switch (outcome.kind) {
-        case 'decided':
+        case 'decided': {
+          if (outcome.decision === 'revoke') {
+            app.io?.to(`user:${accountId}`).emit('device:revoked', {
+              type: 'device:revoked',
+              deviceId: outcome.targetDeviceId,
+              groupIds: outcome.affectedGroupIds,
+            });
+            for (const groupId of outcome.affectedGroupIds) {
+              app.io
+                ?.to(`group:${groupId}`)
+                .emit('device:key-directory-changed', {
+                  type: 'device:key-directory-changed',
+                  groupId,
+                  deviceId: outcome.targetDeviceId,
+                });
+            }
+            for (const socket of app.io?.sockets.sockets.values() ?? []) {
+              const auth = (socket as any).auth;
+              if (
+                auth?.userId === accountId &&
+                auth?.deviceId === outcome.targetDeviceId
+              ) {
+                socket.disconnect(true);
+              }
+            }
+          }
           return {
             targetDeviceId: outcome.targetDeviceId,
             approverDeviceId: outcome.approverDeviceId,
             decision: outcome.decision,
             status: outcome.status,
           };
+        }
         case 'account_missing':
           return reply.code(401).send({ error: 'unauthorized' });
         case 'approval_challenge_not_found':
@@ -529,8 +589,10 @@ export default async function accountDeviceApprovalRoutes(
             .send({ error: 'approver_device_not_active' });
         case 'approver_identity_changed':
           return reply.code(409).send({ error: 'approver_identity_changed' });
-        case 'target_device_not_pending':
-          return reply.code(409).send({ error: 'target_device_not_pending' });
+        case 'target_device_state_conflict':
+          return reply
+            .code(409)
+            .send({ error: 'target_device_state_conflict' });
         case 'target_identity_changed':
           return reply.code(409).send({ error: 'target_identity_changed' });
       }

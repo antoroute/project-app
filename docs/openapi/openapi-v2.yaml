@@ -6,6 +6,9 @@ servers:
   - url: https://trust-circle.kavalek.fr
 security:
   - bearerAuth: []
+    deviceIdHeader: []
+    deviceKeyVersionHeader: []
+    deviceProofHeader: []
 components:
   securitySchemes:
     bearerAuth:
@@ -18,17 +21,32 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Refresh token uniquement, audience trust-circle-auth et typ=refresh.
+    deviceIdHeader:
+      type: apiKey
+      in: header
+      name: X-CircleHaven-Device-Id
+      description: UUID de l'appareil du compte qui produit la preuve d'accès.
+    deviceKeyVersionHeader:
+      type: apiKey
+      in: header
+      name: X-CircleHaven-Device-Key-Version
+      description: Version entière positive de la clé d'identité Ed25519 de l'appareil.
+    deviceProofHeader:
+      type: apiKey
+      in: header
+      name: X-CircleHaven-Device-Proof
+      description: Signature Ed25519 Base64 canonique de la transcription d'accès de 89 octets liée au jti de l'access token. Les trois en-têtes appareil sont obligatoires ensemble sur les routes Messaging, sauf enrôlement initial.
   schemas:
     DeviceKey:
       type: object
       required: [userId, deviceId, pk_sig, pk_kem, key_version, status]
       properties:
         userId: { type: string, format: uuid }
-        deviceId: { type: string }
+        deviceId: { type: string, format: uuid }
         pk_sig: { type: string, description: Base64(32B) }
         pk_kem: { type: string, description: Base64(32B) }
         key_version: { type: integer }
-        status: { type: string, enum: [active, revoked] }
+        status: { type: string, enum: [active, superseded, revoked] }
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time, nullable: true }
 
@@ -66,7 +84,7 @@ components:
         challengeId: { type: string, format: uuid }
         approverDeviceId: { type: string, format: uuid }
         targetDeviceId: { type: string, format: uuid }
-        decision: { type: string, enum: [approve, reject] }
+        decision: { type: string, enum: [approve, reject, revoke] }
         transcript: { type: string, description: Base64 des 216 octets exacts à signer }
         expiresAt: { type: string, format: date-time }
         algorithm: { type: string, enum: [Ed25519] }
@@ -82,16 +100,17 @@ components:
 
     RecipientWrap:
       type: object
-      required: [userId, deviceId, wrap, nonce]
+      required: [userId, deviceId, key_version, wrap, nonce]
       properties:
         userId: { type: string, format: uuid }
-        deviceId: { type: string }
+        deviceId: { type: string, format: uuid }
+        key_version: { type: integer, minimum: 1, description: Version exacte de la clé X25519 destinataire utilisée pour le wrap. }
         wrap: { type: string, description: Base64(AES-GCM wrap of mk) }
         nonce: { type: string, description: Base64(12B) }
 
     MessageV2:
       type: object
-      required: [v, alg, groupId, convId, messageId, sentAt, sender, recipients, iv, ciphertext, sig]
+      required: [v, alg, groupId, convId, messageId, sentAt, sender, recipients, iv, ciphertext, sig, salt]
       properties:
         v: { type: integer, enum: [2] }
         alg:
@@ -104,7 +123,7 @@ components:
         groupId: { type: string, format: uuid }
         convId: { type: string, format: uuid }
         messageId: { type: string, format: uuid }
-        sentAt: { type: string, format: date-time }
+        sentAt: { type: number, description: Horodatage Unix en secondes. }
         sender:
           type: object
           required: [userId, deviceId, eph_pub, key_version]
@@ -113,7 +132,7 @@ components:
               type: string
               format: uuid
               description: Doit correspondre au sujet du bearer access token ; toute divergence est refusée.
-            deviceId: { type: string }
+            deviceId: { type: string, format: uuid }
             eph_pub: { type: string, description: Base64(32B X25519) }
             key_version: { type: integer }
         recipients:
@@ -122,6 +141,7 @@ components:
         iv: { type: string, description: Base64(12B) }
         ciphertext: { type: string }
         sig: { type: string, description: Base64(64B Ed25519) }
+        salt: { type: string, description: Base64 du sel HKDF de 32 octets. }
 
     Conversation:
       type: object
@@ -159,6 +179,8 @@ paths:
   /api/devices/registrations/challenge:
     post:
       tags: [devices]
+      security:
+        - bearerAuth: []
       summary: Créer une transcription de preuve Ed25519 à usage unique
       requestBody:
         required: true
@@ -187,6 +209,8 @@ paths:
   /api/devices/registrations/{challengeId}/proof:
     post:
       tags: [devices]
+      security:
+        - bearerAuth: []
       summary: Prouver la possession de la clé privée d'identité
       parameters:
         - in: path
@@ -223,7 +247,7 @@ paths:
   /api/devices/{targetDeviceId}/approvals/challenge:
     post:
       tags: [devices]
-      summary: Créer une décision d'approbation ou de refus à signer
+      summary: Créer une approbation, un refus ou une révocation globale à signer
       parameters:
         - in: path
           name: targetDeviceId
@@ -239,7 +263,7 @@ paths:
               required: [approverDeviceId, decision]
               properties:
                 approverDeviceId: { type: string, format: uuid }
-                decision: { type: string, enum: [approve, reject] }
+                decision: { type: string, enum: [approve, reject, revoke] }
       responses:
         "201":
           description: Transcription créée pour 5 minutes
@@ -248,7 +272,7 @@ paths:
               schema: { $ref: '#/components/schemas/DeviceApprovalChallenge' }
         "403": { description: L'appareil approbateur n'est pas actif }
         "404": { description: Cible absente du compte courant }
-        "409": { description: La cible n'est plus en attente }
+        "409": { description: La cible n'est plus pending pour approve/reject ou plus active pour revoke }
         "429": { description: Limite de challenges atteinte }
 
   /api/devices/approvals/{challengeId}/decision:
@@ -281,7 +305,7 @@ paths:
                 properties:
                   targetDeviceId: { type: string, format: uuid }
                   approverDeviceId: { type: string, format: uuid }
-                  decision: { type: string, enum: [approve, reject] }
+                  decision: { type: string, enum: [approve, reject, revoke] }
                   status: { type: string, enum: [active, revoked] }
         "400": { description: Encodage de signature non canonique }
         "403": { description: Signature invalide ou approbateur inactif }
@@ -362,6 +386,8 @@ paths:
   /auth/device-bootstrap-grant:
     post:
       tags: [auth, devices]
+      security:
+        - bearerAuth: []
       summary: Réautoriser par mot de passe le bootstrap du premier appareil
       requestBody:
         required: true
@@ -512,7 +538,7 @@ paths:
         schema: { type: string, format: uuid }
     get:
       tags: [keys]
-      summary: Répertoire des clés actives du cercle, réservé aux membres
+      summary: Répertoire signé des clés courantes et historiques du cercle
       responses:
         "200":
           description: OK
@@ -526,7 +552,7 @@ paths:
   /keys/group/{groupId}/my-devices:
     get:
       tags: [keys]
-      summary: Lister ses appareils actifs et révoqués dans un cercle membre
+      summary: Lister ses versions de clés actives, remplacées et révoquées dans un cercle membre
       parameters:
         - in: path
           name: groupId
@@ -539,7 +565,7 @@ paths:
   /keys/group/{groupId}/devices:
     post:
       tags: [keys]
-      summary: Publier ses propres clés d'appareil dans un cercle membre
+      summary: Publier ou faire tourner ses propres clés versionnées et signées
       parameters:
         - in: path
           name: groupId
@@ -551,20 +577,35 @@ paths:
           application/json:
             schema:
               type: object
-              required: [deviceId, pk_sig, pk_kem, key_version]
+              additionalProperties: false
+              required: [deviceId, pk_sig, pk_kem, key_version, identityKeyVersion, bindingSignature]
               properties:
-                deviceId: { type: string }
-                pk_sig: { type: string }
-                pk_kem: { type: string }
-                key_version: { type: integer }
+                deviceId: { type: string, format: uuid }
+                pk_sig: { type: string, description: Base64 canonique de la clé Ed25519 brute de 32 octets }
+                pk_kem: { type: string, description: Base64 canonique de la clé X25519 brute de 32 octets }
+                key_version: { type: integer, minimum: 1, maximum: 4294967295 }
+                identityKeyVersion: { type: integer, minimum: 1, maximum: 4294967295 }
+                bindingSignature: { type: string, description: Signature Ed25519 Base64 canonique de la transcription de liaison de 152 octets }
       responses:
-        "201": { description: Created }
-        "403": { description: Cercle inaccessible ou appareil révoqué. }
+        "201":
+          description: Publication initiale, rejeu idempotent ou rotation séquentielle acceptée
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, keyVersion, rotated]
+                properties:
+                  ok: { type: boolean }
+                  keyVersion: { type: integer, minimum: 1 }
+                  rotated: { type: boolean }
+        "403": { description: Cercle inaccessible, liaison invalide ou appareil non actif/révoqué. }
+        "409": { description: Version obsolète, conflictuelle ou non immédiatement successive. }
 
   /keys/group/{groupId}/devices/{deviceId}:
     delete:
       tags: [keys]
-      summary: Révoquer l'un de ses propres appareils dans un cercle membre
+      deprecated: true
+      summary: Ancienne révocation par cercle neutralisée
       parameters:
         - in: path
           name: groupId
@@ -575,8 +616,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        "200": { description: Revoked }
-        "403": { description: Cercle inaccessible. }
+        "409": { description: Utiliser la décision signée revoke du registre global d'appareils. }
 
   /conversations:
     post:
@@ -647,4 +687,4 @@ paths:
                 properties:
                   id: { type: string, format: uuid }
         "403":
-          description: Expéditeur divergent du sujet authentifié ou ACL refusée.
+          description: Appareil non actif, expéditeur/version non courants, destinataire révoqué ou ACL refusée.

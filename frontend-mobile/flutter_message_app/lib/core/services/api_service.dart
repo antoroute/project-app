@@ -7,6 +7,8 @@ import 'package:flutter_message_app/core/models/message.dart';
 import 'package:flutter_message_app/core/models/message_v2.dart';
 import 'package:flutter_message_app/core/models/group_info.dart';
 import 'package:flutter_message_app/config/constants.dart';
+import 'package:flutter_message_app/core/crypto/account_device_identity_service.dart';
+import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
 
 /// Exception levée en cas de rate limit (429).
 class RateLimitException implements Exception {
@@ -270,19 +272,39 @@ class ApiService {
     required String deviceId,
     required String pkSigB64,
     required String pkKemB64,
-    int keyVersion = 1,
+    int? keyVersion,
   }) async {
     if (!_authProvider.canUseMessaging ||
         _authProvider.currentDeviceId != deviceId) {
       throw StateError('an active current account device is required');
     }
+    final accountId = _authProvider.userId;
+    final accountDevice = _authProvider.currentAccountDevice;
+    if (accountId == null || accountDevice == null) {
+      throw StateError('an authenticated account device is required');
+    }
+    final effectiveKeyVersion =
+        keyVersion ??
+        await KeyManagerFinal.instance.currentKeyVersion(groupId, deviceId);
+    final bindingSignature = await AccountDeviceIdentityService.instance
+        .signGroupDeviceKeyBinding(
+          accountId: accountId,
+          groupId: groupId,
+          deviceId: deviceId,
+          identityKeyVersion: accountDevice.identityKeyVersion,
+          keyVersion: effectiveKeyVersion,
+          signaturePublicKey: pkSigB64,
+          kemPublicKey: pkKemB64,
+        );
     final headers = await _buildHeaders();
     final uri = Uri.parse('$_baseUrl/keys/group/$groupId/devices');
     final payload = jsonEncode({
       'deviceId': deviceId,
       'pk_sig': pkSigB64,
       'pk_kem': pkKemB64,
-      'key_version': keyVersion,
+      'key_version': effectiveKeyVersion,
+      'identityKeyVersion': accountDevice.identityKeyVersion,
+      'bindingSignature': bindingSignature,
     });
     final res = await http.post(uri, headers: headers, body: payload);
     if (res.statusCode == 201 || res.statusCode == 200) return;
@@ -290,18 +312,6 @@ class ApiService {
     throw Exception(
       'Erreur ${res.statusCode} lors de la publication clé device.',
     );
-  }
-
-  Future<void> revokeGroupDevice({
-    required String groupId,
-    required String deviceId,
-  }) async {
-    final headers = await _buildHeaders();
-    final uri = Uri.parse('$_baseUrl/keys/group/$groupId/devices/$deviceId');
-    final res = await http.delete(uri, headers: headers);
-    if (res.statusCode == 200) return;
-    if (res.statusCode == 429) throw RateLimitException();
-    throw Exception('Erreur ${res.statusCode} lors de la révocation device.');
   }
 
   /// Crée une nouvelle conversation via POST /conversations.

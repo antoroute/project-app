@@ -161,26 +161,63 @@ void main() {
       },
     );
 
-    test(
-      'rejette une clé expéditeur inactive ou de mauvaise version',
-      () async {
-        final inactiveKey = GroupDeviceKeyEntry(
+    test('rejette une clé expéditeur de mauvaise version', () async {
+      final wrongVersionKey = GroupDeviceKeyEntry(
+        userId: senderKey.userId,
+        deviceId: senderKey.deviceId,
+        pkSigB64: senderKey.pkSigB64,
+        pkKemB64: senderKey.pkKemB64,
+        keyVersion: 2,
+        status: 'active',
+        fingerprintSig: '',
+        fingerprintKem: '',
+      );
+
+      await expectLater(
+        _verify(envelope, wrongVersionKey),
+        throwsA(_authenticationCode('sender_key_mismatch')),
+      );
+    });
+
+    test('accepte une clé expéditeur historique signée', () async {
+      for (final status in <String>['superseded', 'revoked']) {
+        final historicalKey = GroupDeviceKeyEntry(
           userId: senderKey.userId,
           deviceId: senderKey.deviceId,
           pkSigB64: senderKey.pkSigB64,
           pkKemB64: senderKey.pkKemB64,
-          keyVersion: 2,
-          status: 'revoked',
+          keyVersion: 1,
+          status: status,
           fingerprintSig: '',
           fingerprintKem: '',
         );
+        expect((await _verify(envelope, historicalKey)).messageId, 'message-1');
+      }
+    });
 
-        await expectLater(
-          _verify(envelope, inactiveKey),
-          throwsA(_authenticationCode('sender_key_mismatch')),
+    test(
+      'conserve la compatibilité des destinataires V2 sans version',
+      () async {
+        final legacyEnvelope = await _signedEnvelope(
+          signingKey,
+          recipientKeyVersion: null,
+        );
+
+        expect(
+          (await _verify(legacyEnvelope, senderKey)).messageId,
+          'message-1',
         );
       },
     );
+
+    test('rejette une version de clé destinataire non positive', () async {
+      (envelope['recipients'] as List<dynamic>).single['key_version'] = 0;
+
+      await expectLater(
+        _verify(envelope, senderKey),
+        throwsA(_authenticationCode('invalid_key_version')),
+      );
+    });
   });
 
   group('pipeline AEAD', () {
@@ -271,6 +308,7 @@ Future<Map<String, dynamic>> _signedEnvelope(
   SimpleKeyPair signingKey, {
   String recipientUserId = 'recipient-user',
   String recipientDeviceId = 'recipient-device',
+  int? recipientKeyVersion = 1,
 }) async {
   final payload = <String, dynamic>{
     'v': 2,
@@ -294,6 +332,7 @@ Future<Map<String, dynamic>> _signedEnvelope(
       {
         'userId': recipientUserId,
         'deviceId': recipientDeviceId,
+        if (recipientKeyVersion != null) 'key_version': recipientKeyVersion,
         'wrap': base64Encode(Uint8List(48)),
         'nonce': base64Encode(Uint8List(12)),
       },

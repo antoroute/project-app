@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
@@ -151,6 +152,95 @@ class AccountDeviceIdentityService {
     }
     final signature = await Ed25519().sign(
       transcript,
+      keyPair: await loadIdentity(accountId),
+    );
+    return base64Encode(signature.bytes);
+  }
+
+  Uint8List _uuidBytes(String value) {
+    if (!_accountIdPattern.hasMatch(value)) {
+      throw const AccountDeviceIdentityException('invalid_uuid');
+    }
+    final compact = value.replaceAll('-', '');
+    return Uint8List.fromList(<int>[
+      for (var index = 0; index < compact.length; index += 2)
+        int.parse(compact.substring(index, index + 2), radix: 16),
+    ]);
+  }
+
+  Uint8List _uint32(int value) {
+    if (value < 1 || value > 0xffffffff) {
+      throw const AccountDeviceIdentityException('invalid_key_version');
+    }
+    final bytes = ByteData(4)..setUint32(0, value, Endian.big);
+    return bytes.buffer.asUint8List();
+  }
+
+  Uint8List _canonicalKey(String value) {
+    try {
+      final bytes = base64Decode(value);
+      if (bytes.length != 32 || base64Encode(bytes) != value) {
+        throw const FormatException();
+      }
+      return bytes;
+    } on FormatException {
+      throw const AccountDeviceIdentityException('invalid_public_key');
+    }
+  }
+
+  Future<String> signDeviceAccess({
+    required String accountId,
+    required String deviceId,
+    required int identityKeyVersion,
+    required String accessTokenId,
+  }) async {
+    final transcript =
+        BytesBuilder(copy: false)
+          ..add(ascii.encode('circlehaven/account-device-access/v1\x00'))
+          ..add(_uuidBytes(accountId))
+          ..add(_uuidBytes(deviceId))
+          ..add(_uint32(identityKeyVersion))
+          ..add(_uuidBytes(accessTokenId));
+    final bytes = transcript.takeBytes();
+    if (bytes.length != 89) {
+      throw const AccountDeviceIdentityException(
+        'invalid_device_access_transcript',
+      );
+    }
+    final signature = await Ed25519().sign(
+      bytes,
+      keyPair: await loadIdentity(accountId),
+    );
+    return base64Encode(signature.bytes);
+  }
+
+  Future<String> signGroupDeviceKeyBinding({
+    required String accountId,
+    required String groupId,
+    required String deviceId,
+    required int identityKeyVersion,
+    required int keyVersion,
+    required String signaturePublicKey,
+    required String kemPublicKey,
+  }) async {
+    final transcript =
+        BytesBuilder(copy: false)
+          ..add(ascii.encode('circlehaven/group-device-key/v1\x00'))
+          ..add(_uuidBytes(accountId))
+          ..add(_uuidBytes(groupId))
+          ..add(_uuidBytes(deviceId))
+          ..add(_uint32(identityKeyVersion))
+          ..add(_uint32(keyVersion))
+          ..add(_canonicalKey(signaturePublicKey))
+          ..add(_canonicalKey(kemPublicKey));
+    final bytes = transcript.takeBytes();
+    if (bytes.length != 152) {
+      throw const AccountDeviceIdentityException(
+        'invalid_group_device_key_transcript',
+      );
+    }
+    final signature = await Ed25519().sign(
+      bytes,
       keyPair: await loadIdentity(accountId),
     );
     return base64Encode(signature.bytes);

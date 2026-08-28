@@ -8,9 +8,11 @@ import { Type } from '@sinclair/typebox';
 
 import type { DbExecutor } from '../plugins/db.js';
 import { authenticatedUserId } from '../security/jwt.js';
+import { authenticatedDevice } from '../middlewares/deviceAuth.js';
 
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
+  app.addHook('preHandler', app.requireActiveDevice);
 
   // POST /api/messages (V2 only)
   app.post('/api/messages', {
@@ -18,10 +20,14 @@ export default async function routes(app: FastifyInstance) {
   }, async (req, reply) => {
     const b = req.body as any;
     const senderUserId = authenticatedUserId(req);
+    const requestDevice = authenticatedDevice(req);
 
     // sender.userId appartient au domaine signé E2EE : une divergence ne peut
     // pas être corrigée silencieusement sans invalider l'enveloppe.
-    if (b.sender.userId !== senderUserId) {
+    if (
+      b.sender.userId !== senderUserId ||
+      b.sender.deviceId !== requestDevice.deviceId
+    ) {
       return reply.code(403).send({ error: 'forbidden' });
     }
 
@@ -31,6 +37,7 @@ export default async function routes(app: FastifyInstance) {
           const allowed = await app.services.acl.canSend(
             senderUserId,
             b.sender.deviceId,
+            b.sender.key_version,
             b.groupId,
             b.convId,
             b.recipients,

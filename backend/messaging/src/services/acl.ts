@@ -192,9 +192,14 @@ export function initAclService(app: FastifyInstance) {
   async function canSend(
     senderUserId: string,
     senderDeviceId: string,
+    senderKeyVersion: number,
     groupId: string,
     conversationId: string,
-    recipients: Array<{ userId: string; deviceId: string }>,
+    recipients: Array<{
+      userId: string;
+      deviceId: string;
+      key_version: number;
+    }>,
     options: AclQueryOptions = {},
   ): Promise<boolean> {
     const db = options.executor ?? app.db;
@@ -211,39 +216,46 @@ export function initAclService(app: FastifyInstance) {
       return false;
     }
 
-    const senderLockClause = options.lock ? 'FOR SHARE OF gdk' : '';
+    const senderLockClause = options.lock ? 'FOR SHARE OF gdk, ad' : '';
     const senderDevice = await db.oneOrNone(
       `SELECT 1
          FROM group_device_keys gdk
+         JOIN account_devices ad
+           ON ad.user_id = gdk.user_id
+          AND ad.device_id::text = gdk.device_id
+          AND ad.status = 'active'
         WHERE gdk.group_id = $1
           AND gdk.user_id = $2
           AND gdk.device_id = $3
+          AND gdk.key_version = $4
           AND gdk.status = 'active'
         ${senderLockClause}`,
-      [groupId, senderUserId, senderDeviceId],
+      [groupId, senderUserId, senderDeviceId, senderKeyVersion],
     );
     if (!senderDevice) return false;
 
     const expectedRecipients = [
       ...new Map(
         recipients.map((recipient) => [
-          `${recipient.userId}\u0000${recipient.deviceId}`,
+          `${recipient.userId}\u0000${recipient.deviceId}\u0000${recipient.key_version}`,
           recipient,
         ]),
       ).values(),
     ].sort((left, right) =>
       left.userId.localeCompare(right.userId) ||
-      left.deviceId.localeCompare(right.deviceId));
+      left.deviceId.localeCompare(right.deviceId) ||
+      left.key_version - right.key_version);
     if (expectedRecipients.length === 0) return false;
 
     const recipientLockClause = options.lock
-      ? 'FOR SHARE OF c, cu, ug, gdk'
+      ? 'FOR SHARE OF c, cu, ug, gdk, ad'
       : '';
     const rows = await db.any(
       `SELECT expected.user_id AS "userId",
-              expected.device_id AS "deviceId"
-         FROM unnest($3::uuid[], $4::text[])
-              AS expected(user_id, device_id)
+              expected.device_id AS "deviceId",
+              expected.key_version AS "keyVersion"
+         FROM unnest($3::uuid[], $4::text[], $5::int[])
+              AS expected(user_id, device_id, key_version)
          JOIN conversation_users cu
            ON cu.conversation_id = $1
           AND cu.user_id = expected.user_id
@@ -257,7 +269,12 @@ export function initAclService(app: FastifyInstance) {
            ON gdk.group_id = c.group_id
           AND gdk.user_id = expected.user_id
           AND gdk.device_id = expected.device_id
+          AND gdk.key_version = expected.key_version
           AND gdk.status = 'active'
+         JOIN account_devices ad
+           ON ad.user_id = gdk.user_id
+          AND ad.device_id::text = gdk.device_id
+          AND ad.status = 'active'
         ORDER BY expected.user_id, expected.device_id
         ${recipientLockClause}`,
       [
@@ -265,13 +282,19 @@ export function initAclService(app: FastifyInstance) {
         groupId,
         expectedRecipients.map(({ userId }) => userId),
         expectedRecipients.map(({ deviceId }) => deviceId),
+        expectedRecipients.map(({ key_version }) => key_version),
       ],
     );
     const actualRecipients = new Set(
-      rows.map((row: any) => `${row.userId}\u0000${row.deviceId}`),
+      rows.map(
+        (row: any) =>
+          `${row.userId}\u0000${row.deviceId}\u0000${row.keyVersion}`,
+      ),
     );
     return expectedRecipients.every((recipient) =>
-      actualRecipients.has(`${recipient.userId}\u0000${recipient.deviceId}`));
+      actualRecipients.has(
+        `${recipient.userId}\u0000${recipient.deviceId}\u0000${recipient.key_version}`,
+      ));
   }
 
   async function listAccessibleConversationIds(

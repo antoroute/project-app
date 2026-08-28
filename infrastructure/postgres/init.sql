@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS device_approval_challenges (
   target_device_id UUID NOT NULL,
   target_identity_key_version INT NOT NULL CHECK (target_identity_key_version >= 1),
   target_identity_public_key BYTEA NOT NULL,
-  decision TEXT NOT NULL CHECK (decision IN ('approve','reject')),
+  decision TEXT NOT NULL CHECK (decision IN ('approve','reject','revoke')),
   challenge_nonce BYTEA NOT NULL,
   transcript BYTEA NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
@@ -184,11 +184,47 @@ CREATE TABLE IF NOT EXISTS group_device_keys (
   pk_sig   BYTEA NOT NULL,        -- 32B
   pk_kem   BYTEA NOT NULL,        -- 32B
   key_version INT NOT NULL DEFAULT 1,
-  status TEXT NOT NULL DEFAULT 'active', -- active|revoked
+  identity_key_version INT,
+  binding_signature BYTEA,
+  status TEXT NOT NULL DEFAULT 'legacy'
+    CHECK (status IN ('legacy', 'active', 'revoked')),
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_seen_at TIMESTAMP,
-  PRIMARY KEY (group_id, user_id, device_id)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at TIMESTAMPTZ,
+  PRIMARY KEY (group_id, user_id, device_id),
+  CHECK (identity_key_version IS NULL OR identity_key_version >= 1),
+  CHECK (binding_signature IS NULL OR octet_length(binding_signature) = 64),
+  CHECK (
+    status <> 'active'
+    OR (
+      identity_key_version IS NOT NULL
+      AND binding_signature IS NOT NULL
+      AND octet_length(pk_sig) = 32
+      AND octet_length(pk_kem) = 32
+    )
+  ),
+  CHECK (status <> 'revoked' OR revoked_at IS NOT NULL)
 );
+
+-- Versions historiques immuables nécessaires à la vérification des anciens messages.
+CREATE TABLE IF NOT EXISTS group_device_key_history (
+  group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  key_version INT NOT NULL CHECK (key_version >= 1),
+  identity_key_version INT NOT NULL CHECK (identity_key_version >= 1),
+  pk_sig BYTEA NOT NULL CHECK (octet_length(pk_sig) = 32),
+  pk_kem BYTEA NOT NULL CHECK (octet_length(pk_kem) = 32),
+  binding_signature BYTEA NOT NULL CHECK (octet_length(binding_signature) = 64),
+  status TEXT NOT NULL CHECK (status IN ('superseded', 'revoked')),
+  activated_at TIMESTAMPTZ NOT NULL,
+  retired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (group_id, user_id, device_id, key_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_device_key_history_lookup
+  ON group_device_key_history(group_id, user_id, device_id, key_version);
 
 -- Conversations
 CREATE TABLE IF NOT EXISTS conversations (

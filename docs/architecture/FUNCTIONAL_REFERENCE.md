@@ -2,7 +2,7 @@
 
 Statut : comportement observé, non contractuel pour une release
 Dernière mise à jour : 2026-08-25
-Code observé : branche `main`, changement `TC-106` lot C
+Code observé : branche `main`, changement `TC-106` lot D
 Tâche : `TC-009`
 
 ## Objet et règles de lecture
@@ -97,7 +97,10 @@ Non implémenté : vérification d'e-mail, anti-abus d'inscription, récupérati
 3. Auth émet un access token Ed25519 de 15 minutes et un refresh token HS256 de 30 jours.
 4. Une empreinte SHA-256 du refresh token est stockée dans `refresh_tokens`.
 5. Flutter conserve access et refresh tokens dans `flutter_secure_storage`; l'access token reste aussi en mémoire.
-6. Les requêtes REST protégées envoient l'access token. Socket.IO le transmet dans `handshake.auth.token`.
+6. Les requêtes Messaging protégées envoient l'access token et une preuve
+   Ed25519 de 89 octets liée à son `jti`, à l'appareil et à sa version
+   d'identité. Socket.IO transmet le même triplet appareil/version/preuve dans
+   `handshake.auth` ; ce calcul local n'ajoute aucun appel réseau.
 
 Le contrat exact est dans [`TOKEN_CONTRACT.md`](../security/TOKEN_CONTRACT.md). Auth est le seul service capable de signer un access token ; Messaging ne reçoit que la clé publique Ed25519.
 
@@ -128,7 +131,11 @@ Les clés générées sous le nom du cercle et la table `group_keys` ne particip
 3. Messaging crée `join_requests` avec le sujet JWT, l'appareil et les clés publiques. Un verrou de cercle et un index unique partiel garantissent au plus une demande `pending` par utilisateur et cercle, y compris en concurrence.
 4. Seuls le propriétaire et les administrateurs peuvent voir puis accepter ou refuser la demande.
 5. La route de vote historique est neutralisée et le client ne l'utilise plus.
-6. À l'acceptation, l'utilisateur rejoint `user_groups`, la clé initiale est copiée dans `group_device_keys` avec le statut `active` et la demande change de statut dans la même transaction. Une décision concurrente perdante est refusée.
+6. À l'acceptation, l'utilisateur rejoint `user_groups` et la demande change de
+   statut dans la même transaction. Les clés non liées fournies par l'ancienne
+   join request ne sont plus copiées dans `group_device_keys` ; après activation
+   de son appareil, le client publie la paire signée via la route dédiée. Une
+   décision concurrente perdante est refusée.
 7. Des pings `group:member_joined` et `group:joined` demandent aux clients de rafraîchir leurs données, uniquement après commit.
 
 Depuis `TC-104`, `groups.creator_id` détermine l'unique propriétaire et `user_groups.role` distingue administrateur et membre. Seul le propriétaire peut affecter ces deux rôles ; le transfert de propriété reste hors de ce parcours.
@@ -147,7 +154,7 @@ Depuis `TC-104`, `groups.creator_id` détermine l'unique propriétaire et `user_
 
 ### Registre de confiance du compte
 
-Les lots B/C de `TC-106` ajoutent un registre distinct des clés de cercle et son parcours client :
+Les lots B/C/D de `TC-106` ajoutent un registre distinct des clés de cercle et son parcours client :
 
 1. pour un premier appareil, Auth revérifie le mot de passe et remet un grant opaque de 5 minutes dont seule l'empreinte est stockée ;
 2. le client demande un challenge authentifié avec son UUID, sa clé publique Ed25519 d'identité, sa plateforme, son nom et ce grant initial ;
@@ -156,11 +163,21 @@ Les lots B/C de `TC-106` ajoutent un registre distinct des clés de cercle et so
 5. Messaging consomme le challenge à la première tentative et vérifie Ed25519 ;
 6. le premier appareil réautorisé et prouvé devient `active`, les suivants restent `pending` ;
 7. un appareil actif affiche le nom, la plateforme et une empreinte courte de la cible, choisit approbation ou refus, puis signe une transcription distincte de 216 octets ;
-8. Messaging revalide sous verrou les deux appareils, clés et versions : l'approbation active la cible, tandis qu'un refus la révoque.
+8. Messaging revalide sous verrou les deux appareils, clés et versions :
+   l'approbation active la cible, un refus révoque une cible en attente et une
+   décision `revoke` révoque globalement une cible active.
+9. Toute utilisation métier ultérieure prouve la possession de l'identité en
+   signant compte, appareil, version et `jti` ; le serveur relit l'état courant.
 
 L'identité Ed25519 de compte/appareil est stockée séparément dans le stockage sécurisé et n'est jamais créée silencieusement lors d'un auto-login. Tant que le registre ne retourne pas `active`, l'interface bloque l'accueil, le WebSocket, les conversations et la publication de clés de cercle. L'écran `pending` interroge seulement la liste toutes les huit secondes ; ce polling n'est pas présent dans le chargement nominal des messages.
 
-Les transitions sont sérialisées en verrouillant la ligne du compte. Un autre sujet JWT ne peut pas consulter ou consommer un challenge. `GET /api/devices` ne retourne que le registre du sujet. Après activation, le client affiche les groupes immédiatement puis publie en arrière-plan une nouvelle paire propre à chaque cercle ; aucun ancien secret ou message n'est transmis. La spécification complète et les deux vecteurs sont dans [`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md).
+Les transitions sont sérialisées en verrouillant la ligne du compte. Un autre
+sujet JWT ne peut pas consulter ou consommer un challenge. `GET /api/devices`
+ne retourne que le registre du sujet. Après activation, le client affiche les
+groupes immédiatement puis publie en arrière-plan une nouvelle paire propre à
+chaque cercle ; aucun ancien secret ou message n'est transmis. La spécification
+complète et les quatre vecteurs sont dans
+[`DEVICE_TRUST_PROTOCOL_V1.md`](../security/DEVICE_TRUST_PROTOCOL_V1.md).
 
 ### Paire par cercle
 
@@ -173,19 +190,31 @@ Les seeds privés et clés publiques sont stockés via `flutter_secure_storage`.
 
 ### Annuaire et cache
 
-- Le client publie ses clés dans `POST /api/keys/group/:groupId/devices`; l'identité utilisateur vient du JWT.
-- `GET /api/keys/group/:groupId` renvoie les appareils actifs et leurs clés publiques.
-- La lecture de l'annuaire, la publication, la liste personnelle et la révocation exigent toutes l'appartenance au cercle ; un sujet ne gère que ses propres appareils.
-- Un cache mémoire puis SQLite de 30 jours évite certains appels réseau.
+- Le client signe puis publie ses clés dans `POST /api/keys/group/:groupId/devices` ; compte, cercle, appareil, versions et clés sont liés par Ed25519.
+- `GET /api/keys/group/:groupId` renvoie les versions signées courantes et historiques (`active|superseded|revoked`).
+- La lecture de l'annuaire, la publication et la liste personnelle exigent toutes
+  l'appartenance au cercle ; l'ancienne révocation par cercle est neutralisée au
+  profit d'une décision globale signée.
+- Un cache mémoire puis SQLite de 30 jours évite certains appels réseau ; sa clé primaire inclut la version.
 - Les empreintes SHA-256 stockées détectent une corruption locale d'une entrée en cache, mais il n'existe pas de journal de transparence ni de comparaison fiable contre un historique approuvé.
 
-### Révocation
+### Rotation et révocation
 
-- Un utilisateur peut mettre l'un de ses appareils à l'état `revoked` pour un cercle.
-- Messaging refuse qu'un appareil révoqué republie simplement les mêmes clés et vérifie le statut actif lors d'un envoi. Publication et révocation partagent des contrôles verrouillés ; l'upsert conditionnel ne peut jamais réactiver une ligne `revoked`, même en concurrence.
-- Les caches locaux tentent d'invalider les entrées associées.
+- La version initiale est `1`; seuls un rejeu identique ou `current + 1` sont
+  acceptés. Une rotation archive atomiquement l'ancienne version sans l'écraser.
+- Les nouveaux messages utilisent uniquement les versions actives exactes. Le
+  client conserve les seeds historiques pour vérifier et déchiffrer les anciens
+  messages qui les référencent.
+- Un appareil actif peut signer la révocation d'un autre appareil actif du même
+  compte. Messaging révoque le registre et toutes les clés courantes de la cible
+  dans la même transaction, puis coupe ses sockets.
+- `device:key-directory-changed` invalide immédiatement l'annuaire complet du
+  cercle en mémoire et dans SQLite. Le prochain besoin recharge aussi
+  l'historique ; aucun polling ni temporisation n'est ajouté.
 
-Écarts : le cloisonnement local, le registre, la preuve et l'approbation client sont réalisés. Le backend n'impose pas encore le statut du registre de compte sur toutes les publications/lectures de clés de cercle, et la révocation globale, la rotation ainsi que l'invalidation déterministe relèvent du lot D. Une révocation n'efface pas les messages ou clés déjà obtenus par l'appareil.
+Une révocation n'efface pas les messages ou clés déjà obtenus par l'appareil.
+La diffusion temps réel reste limitée à l'instance Messaging courante tant que
+le déploiement n'est pas multi-instance.
 
 ## Conversations
 
@@ -219,8 +248,8 @@ sequenceDiagram
     F->>K: appareils actifs du cercle
     F->>F: chiffre le texte et enveloppe la clé par appareil
     F->>F: signe l'enveloppe V2
-    F->>M: POST /api/messages + access token
-    M->>M: sujet JWT = sender.userId, ACL et devices actifs
+    F->>M: POST /api/messages + token + preuve appareil
+    M->>M: sujet JWT, appareil actif, versions courantes et ACL
     M->>P: enveloppe chiffrée et métadonnées
     M-->>F: id serveur / 201
     M-->>R: ping message:new
@@ -235,7 +264,9 @@ Le serveur refuse :
 - un `sender.userId` différent du sujet JWT ;
 - un expéditeur absent de la conversation ;
 - un appareil expéditeur inactif ;
-- un destinataire absent de la conversation ou dont l'appareil est inactif ;
+- une version expéditeur historique plutôt que la version active courante ;
+- un destinataire absent de la conversation, dont l'appareil est inactif ou dont
+  le wrap ne référence pas sa version active exacte ;
 - un `messageId` déjà persisté.
 
 Depuis `TC-105`, ces contrôles verrouillent dans une même transaction l'appartenance, la conversation et les clés actives jusqu'à l'insertion. Tous les couples destinataire/appareil sont validés par une requête PostgreSQL groupée plutôt que par une requête par appareil, puis `message:new` est émis après commit. Les validations de taille et d'encodage restent incomplètes (`TC-107`).

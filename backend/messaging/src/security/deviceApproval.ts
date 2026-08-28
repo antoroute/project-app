@@ -15,7 +15,7 @@ export const DEVICE_APPROVAL_MAX_PER_TARGET_WINDOW = 6;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export type DeviceApprovalDecision = 'approve' | 'reject';
+export type DeviceApprovalDecision = 'approve' | 'reject' | 'revoke';
 
 export interface DeviceApprovalTranscriptInput {
   challengeId: string;
@@ -58,6 +58,7 @@ function identityKeyBytes(value: Buffer): Buffer {
 function decisionBytes(value: DeviceApprovalDecision): Buffer {
   if (value === 'approve') return Buffer.from([1]);
   if (value === 'reject') return Buffer.from([2]);
+  if (value === 'revoke') return Buffer.from([3]);
   throw new Error('invalid_approval_decision');
 }
 

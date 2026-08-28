@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import test from 'node:test';
 
 import fastifyJwt from '@fastify/jwt';
 import Fastify from 'fastify';
 
 import socketAuth from '../dist/middlewares/socketAuth.js';
+import { createDeviceAccessTranscript } from '../dist/security/deviceAccess.js';
 import {
   JWT_ACCESS_AUDIENCE,
   JWT_ISSUER,
@@ -19,6 +20,11 @@ const ACCESS_KEYS = generateKeyPairSync('ed25519');
 const REFRESH_SECRET = 'synthetic-refresh-secret-for-jwt-tests-00000000002';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const JTI = '22222222-2222-4222-8222-222222222222';
+const DEVICE_ID = '33333333-3333-4333-8333-333333333333';
+const DEVICE_KEYS = generateKeyPairSync('ed25519');
+const DEVICE_PUBLIC_KEY = Buffer.from(
+  DEVICE_KEYS.publicKey.export({ format: 'der', type: 'spki' }),
+).subarray(-32);
 
 const ACCESS_PRIVATE_KEY = ACCESS_KEYS.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 const ACCESS_PUBLIC_KEY = ACCESS_KEYS.publicKey.export({ type: 'spki', format: 'pem' }).toString();
@@ -26,6 +32,13 @@ const ACCESS_PUBLIC_KEY = ACCESS_KEYS.publicKey.export({ type: 'spki', format: '
 async function accessApp() {
   const app = Fastify({ logger: false });
   await registerAccessJwt(app, ACCESS_PUBLIC_KEY);
+  app.decorate('db', {
+    oneOrNone: async () => ({
+      identity_public_key: DEVICE_PUBLIC_KEY,
+      identity_key_version: 1,
+      status: 'active',
+    }),
+  });
   await app.ready();
   return app;
 }
@@ -149,12 +162,31 @@ test('Socket.IO accepts access and rejects refresh tokens', async (t) => {
   const refresh = refreshIssuer.jwt.sign(payload({ typ: 'refresh' }));
   const authenticate = socketAuth(app, 'synthetic-app-secret-for-socket-test-000000000001');
 
-  async function authenticateToken(token) {
+  async function authenticateToken(token, includeDeviceProof = true) {
+    const deviceProof = sign(
+      null,
+      createDeviceAccessTranscript({
+        accountId: USER_ID,
+        deviceId: DEVICE_ID,
+        identityKeyVersion: 1,
+        accessTokenId: JTI,
+      }),
+      DEVICE_KEYS.privateKey,
+    ).toString('base64');
     const socket = {
       id: 'synthetic-socket',
       handshake: {
         address: '127.0.0.1',
-        auth: { token },
+        auth: {
+          token,
+          ...(includeDeviceProof
+            ? {
+                deviceId: DEVICE_ID,
+                deviceKeyVersion: 1,
+                deviceProof,
+              }
+            : {}),
+        },
         headers: { 'x-app-secret': 'synthetic-app-secret-for-socket-test-000000000001' },
       },
     };
@@ -164,7 +196,14 @@ test('Socket.IO accepts access and rejects refresh tokens', async (t) => {
 
   const accepted = await authenticateToken(access);
   assert.equal(accepted.error, undefined);
-  assert.deepEqual(accepted.socket.auth, { userId: USER_ID });
+  assert.deepEqual(accepted.socket.auth, {
+    userId: USER_ID,
+    deviceId: DEVICE_ID,
+    identityKeyVersion: 1,
+  });
+
+  const missingDevice = await authenticateToken(access, false);
+  assert.match(missingDevice.error.message, /device authorization required/);
 
   const rejected = await authenticateToken(refresh);
   assert.match(rejected.error.message, /invalid token/);

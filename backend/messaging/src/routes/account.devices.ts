@@ -539,6 +539,7 @@ export default async function accountDeviceRoutes(app: FastifyInstance) {
   app.get(
     '/api/devices',
     {
+      preHandler: app.identifyDevice,
       schema: {
         response: {
           200: Type.Array(
@@ -567,14 +568,16 @@ export default async function accountDeviceRoutes(app: FastifyInstance) {
     },
     async (request) => {
       const accountId = authenticatedUserId(request);
+      const current = request.accountDevice!;
       const rows = await app.db.any(
         `SELECT device_id, identity_public_key, identity_key_version,
                 platform, device_name, status, proof_verified_at,
                 activated_at, revoked_at, created_at, updated_at
            FROM account_devices
           WHERE user_id = $1
+            AND ($2::text = 'active' OR device_id = $3)
           ORDER BY created_at ASC`,
-        [accountId],
+        [accountId, current.status, current.deviceId],
       );
       return rows.map((row) => ({
         deviceId: row.device_id,

@@ -8,10 +8,10 @@ import 'package:crypto/crypto.dart' as crypto;
 import '../models/message.dart';
 
 /// Service de stockage local persistant des messages chiffrés
-/// 
+///
 /// Inspiré de Signal : stocke les messages chiffrés localement pour
 /// un accès instantané sans appel serveur.
-/// 
+///
 /// Sécurité :
 /// - Stocke uniquement les messages chiffrés (v2Data)
 /// - Base de données chiffrée avec clé depuis keystore
@@ -21,14 +21,15 @@ class LocalMessageStorage {
   static final LocalMessageStorage instance = LocalMessageStorage._internal();
 
   static const String _dbName = 'messages_encrypted.db';
-  static const int _dbVersion = 3; // Version 3 : ajout des tables de cache persistant des clés
-  
+  static const int _dbVersion =
+      4; // Version 4 : historique versionné des clés de cercle
+
   Database? _database;
   bool _isAvailable = false;
   bool _initializationAttempted = false;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   static const String _dbKeyName = 'local_db_encryption_key';
-  
+
   /// Expose la base de données pour les services de cache (accès interne uniquement)
   Database? get database => _database;
 
@@ -46,21 +47,25 @@ class LocalMessageStorage {
       // sqflite ne supporte pas le chiffrement natif comme SQLCipher
       // On pourrait chiffrer les données sensibles avant stockage si nécessaire
       await _getOrCreateEncryptionKey();
-      
+
       _database = await openDatabase(
         dbPath,
         version: _dbVersion,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
       );
-      
+
       _isAvailable = true;
       debugPrint('✅ LocalMessageStorage initialisé');
     } catch (e) {
       // Fallback gracieux : sqflite n'est pas disponible (web, plugin non installé, etc.)
       _isAvailable = false;
-      debugPrint('⚠️ LocalMessageStorage non disponible (fallback gracieux): $e');
-      debugPrint('ℹ️ L\'app fonctionnera sans stockage local - messages chargés depuis le serveur uniquement');
+      debugPrint(
+        '⚠️ LocalMessageStorage non disponible (fallback gracieux): $e',
+      );
+      debugPrint(
+        'ℹ️ L\'app fonctionnera sans stockage local - messages chargés depuis le serveur uniquement',
+      );
       // Ne pas rethrow - on continue sans stockage local
     }
   }
@@ -68,15 +73,18 @@ class LocalMessageStorage {
   /// Obtient ou crée la clé de chiffrement de la base
   Future<String> _getOrCreateEncryptionKey() async {
     String? key = await _secureStorage.read(key: _dbKeyName);
-    
+
     if (key == null) {
       // Générer une nouvelle clé aléatoire
-      final randomBytes = List<int>.generate(32, (i) => DateTime.now().millisecondsSinceEpoch % 256);
+      final randomBytes = List<int>.generate(
+        32,
+        (i) => DateTime.now().millisecondsSinceEpoch % 256,
+      );
       key = crypto.sha256.convert(randomBytes).toString();
       await _secureStorage.write(key: _dbKeyName, value: key);
       debugPrint('🔑 Nouvelle clé de chiffrement générée pour la base locale');
     }
-    
+
     return key;
   }
 
@@ -102,13 +110,13 @@ class LocalMessageStorage {
         signature_valid INTEGER DEFAULT 0
       )
     ''');
-    
+
     // Créer l'index séparément
     await db.execute('''
       CREATE INDEX idx_conversation_timestamp 
       ON encrypted_messages(conversation_id, timestamp DESC)
     ''');
-    
+
     await db.execute('''
       CREATE TABLE conversation_sync_state (
         conversation_id TEXT PRIMARY KEY,
@@ -116,7 +124,7 @@ class LocalMessageStorage {
         last_message_timestamp INTEGER
       )
     ''');
-    
+
     // Table pour message keys cache
     await db.execute('''
       CREATE TABLE message_keys_cache (
@@ -132,17 +140,17 @@ class LocalMessageStorage {
         derived_from_device TEXT
       )
     ''');
-    
+
     await db.execute('''
       CREATE INDEX idx_message_keys_group_device 
       ON message_keys_cache(group_id, device_id)
     ''');
-    
+
     await db.execute('''
       CREATE INDEX idx_message_keys_expires 
       ON message_keys_cache(expires_at)
     ''');
-    
+
     // Table pour group keys cache
     await db.execute('''
       CREATE TABLE group_keys_cache (
@@ -157,27 +165,27 @@ class LocalMessageStorage {
         status TEXT NOT NULL,
         cached_at INTEGER NOT NULL,
         expires_at INTEGER NOT NULL,
-        PRIMARY KEY (group_id, user_id, device_id)
+        PRIMARY KEY (group_id, user_id, device_id, key_version)
       )
     ''');
-    
+
     await db.execute('''
       CREATE INDEX idx_group_keys_group 
       ON group_keys_cache(group_id)
     ''');
-    
+
     await db.execute('''
       CREATE INDEX idx_group_keys_expires 
       ON group_keys_cache(expires_at)
     ''');
-    
+
     debugPrint('📦 Tables créées dans LocalMessageStorage');
   }
 
   /// Gère les mises à jour de schéma
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     debugPrint('🔄 Upgrade base de données: $oldVersion -> $newVersion');
-    
+
     // Migration vers version 2 : ajout de signature_valid
     if (oldVersion < 2) {
       try {
@@ -188,10 +196,12 @@ class LocalMessageStorage {
         debugPrint('✅ Migration v2 : colonne signature_valid ajoutée');
       } catch (e) {
         // La colonne existe peut-être déjà
-        debugPrint('⚠️ Erreur migration v2 (colonne peut-être déjà présente): $e');
+        debugPrint(
+          '⚠️ Erreur migration v2 (colonne peut-être déjà présente): $e',
+        );
       }
     }
-    
+
     // Migration vers version 3 : ajout des tables de cache persistant des clés
     if (oldVersion < 3) {
       try {
@@ -210,17 +220,17 @@ class LocalMessageStorage {
             derived_from_device TEXT
           )
         ''');
-        
+
         await db.execute('''
           CREATE INDEX IF NOT EXISTS idx_message_keys_group_device 
           ON message_keys_cache(group_id, device_id)
         ''');
-        
+
         await db.execute('''
           CREATE INDEX IF NOT EXISTS idx_message_keys_expires 
           ON message_keys_cache(expires_at)
         ''');
-        
+
         // Table pour group keys cache
         await db.execute('''
           CREATE TABLE IF NOT EXISTS group_keys_cache (
@@ -235,24 +245,62 @@ class LocalMessageStorage {
             status TEXT NOT NULL,
             cached_at INTEGER NOT NULL,
             expires_at INTEGER NOT NULL,
-            PRIMARY KEY (group_id, user_id, device_id)
+            PRIMARY KEY (group_id, user_id, device_id, key_version)
           )
         ''');
-        
+
         await db.execute('''
           CREATE INDEX IF NOT EXISTS idx_group_keys_group 
           ON group_keys_cache(group_id)
         ''');
-        
+
         await db.execute('''
           CREATE INDEX IF NOT EXISTS idx_group_keys_expires 
           ON group_keys_cache(expires_at)
         ''');
-        
+
         debugPrint('✅ Migration v3 : tables de cache ajoutées');
       } catch (e) {
         debugPrint('⚠️ Erreur migration v3: $e');
       }
+    }
+
+    if (oldVersion < 4) {
+      await db.transaction((transaction) async {
+        await transaction.execute(
+          'ALTER TABLE group_keys_cache RENAME TO group_keys_cache_v3',
+        );
+        await transaction.execute('''
+          CREATE TABLE group_keys_cache (
+            group_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            pk_kem TEXT NOT NULL,
+            pk_sig TEXT NOT NULL,
+            fingerprint_kem TEXT NOT NULL,
+            fingerprint_sig TEXT NOT NULL,
+            key_version INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            cached_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            PRIMARY KEY (group_id, user_id, device_id, key_version)
+          )
+        ''');
+        await transaction.execute('''
+          INSERT INTO group_keys_cache
+          SELECT * FROM group_keys_cache_v3
+        ''');
+        await transaction.execute('DROP TABLE group_keys_cache_v3');
+        await transaction.execute('''
+          CREATE INDEX idx_group_keys_group
+          ON group_keys_cache(group_id)
+        ''');
+        await transaction.execute('''
+          CREATE INDEX idx_group_keys_expires
+          ON group_keys_cache(expires_at)
+        ''');
+      });
+      debugPrint('✅ Migration v4 : annuaire de clés versionné');
     }
   }
 
@@ -265,30 +313,33 @@ class LocalMessageStorage {
       // Stockage local non disponible - ignorer silencieusement
       return;
     }
-    
+
     if (message.v2Data == null) {
-      debugPrint('⚠️ Tentative de sauvegarde message sans v2Data: ${message.id}');
+      debugPrint(
+        '⚠️ Tentative de sauvegarde message sans v2Data: ${message.id}',
+      );
       return;
     }
 
     try {
-      await _database!.insert(
-        'encrypted_messages',
-        {
-          'message_id': message.id,
-          'conversation_id': message.conversationId,
-          'sender_id': message.senderId,
-          'sender_device_id': message.v2Data!['sender']?['deviceId'] ?? '',
-          'v2_data': jsonEncode(message.v2Data),
-          'timestamp': message.timestamp,
-          'created_at': DateTime.now().millisecondsSinceEpoch,
-          'last_synced_at': DateTime.now().millisecondsSinceEpoch,
-          'signature_valid': message.signatureValid ? 1 : 0, // CORRECTION: Sauvegarder signatureValid
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
+      await _database!.insert('encrypted_messages', {
+        'message_id': message.id,
+        'conversation_id': message.conversationId,
+        'sender_id': message.senderId,
+        'sender_device_id': message.v2Data!['sender']?['deviceId'] ?? '',
+        'v2_data': jsonEncode(message.v2Data),
+        'timestamp': message.timestamp,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+        'last_synced_at': DateTime.now().millisecondsSinceEpoch,
+        'signature_valid':
+            message.signatureValid
+                ? 1
+                : 0, // CORRECTION: Sauvegarder signatureValid
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+      debugPrint(
+        '💾 Message sauvegardé localement: ${message.id} (signatureValid: ${message.signatureValid})',
       );
-      
-      debugPrint('💾 Message sauvegardé localement: ${message.id} (signatureValid: ${message.signatureValid})');
     } catch (e) {
       debugPrint('❌ Erreur sauvegarde message local: $e');
     }
@@ -314,7 +365,7 @@ class LocalMessageStorage {
       // 🚀 OPTIMISATION: Limite de sécurité - ne jamais charger plus de 20 messages
       // même si limit est plus grand (évite la surcharge mémoire)
       final effectiveLimit = (limit != null && limit > 20) ? 20 : (limit ?? 20);
-      
+
       // 🚀 OPTIMISATION: Utiliser l'index idx_conversation_timestamp pour performance
       // ORDER BY timestamp DESC utilise l'index pour un tri rapide
       var query = '''
@@ -323,64 +374,77 @@ class LocalMessageStorage {
         FROM encrypted_messages
         WHERE conversation_id = ?
       ''';
-      
+
       final List<dynamic> args = [conversationId];
-      
+
       if (beforeTimestamp != null) {
         query += ' AND timestamp < ?';
         args.add(beforeTimestamp);
       }
-      
+
       // 🚀 OPTIMISATION: ORDER BY timestamp DESC utilise l'index pour performance
       query += ' ORDER BY timestamp DESC';
-      
+
       // 🚀 OPTIMISATION: LIMIT appliqué AVANT le parsing JSON (économie mémoire)
       query += ' LIMIT ?';
       args.add(effectiveLimit);
-      
-      final List<Map<String, dynamic>> rows = await _database!.rawQuery(query, args);
-      
+
+      final List<Map<String, dynamic>> rows = await _database!.rawQuery(
+        query,
+        args,
+      );
+
       // 🚀 OPTIMISATION: Parser JSON en batch dans un Isolate pour éviter de bloquer l'UI
       // Si on a peu de messages, on parse directement (overhead d'Isolate trop important)
       if (rows.length <= 5) {
-      final messages = <Message>[];
-      for (final row in rows) {
-        try {
-          final v2DataJson = row['v2_data'] as String;
-          if (v2DataJson.isEmpty) {
-            debugPrint('⚠️ Message ${row['message_id']} a un v2_data vide, ignoré');
-            continue;
-          }
-          
-          final v2Data = jsonDecode(v2DataJson) as Map<String, dynamic>;
-          final signatureValid = (row['signature_valid'] as int? ?? 0) == 1;
-          
-          messages.add(Message(
-            id: row['message_id'] as String,
-            conversationId: row['conversation_id'] as String,
-            senderId: row['sender_id'] as String,
-            encrypted: null,
-            iv: null,
-            encryptedKeys: const {},
-            signatureValid: signatureValid,
-            senderPublicKey: null,
-            timestamp: row['timestamp'] as int,
-            v2Data: v2Data,
-              decryptedText: null,
-          ));
-        } catch (e) {
-          debugPrint('⚠️ Erreur parsing message local ${row['message_id']}: $e');
+        final messages = <Message>[];
+        for (final row in rows) {
+          try {
+            final v2DataJson = row['v2_data'] as String;
+            if (v2DataJson.isEmpty) {
+              debugPrint(
+                '⚠️ Message ${row['message_id']} a un v2_data vide, ignoré',
+              );
+              continue;
+            }
+
+            final v2Data = jsonDecode(v2DataJson) as Map<String, dynamic>;
+            final signatureValid = (row['signature_valid'] as int? ?? 0) == 1;
+
+            messages.add(
+              Message(
+                id: row['message_id'] as String,
+                conversationId: row['conversation_id'] as String,
+                senderId: row['sender_id'] as String,
+                encrypted: null,
+                iv: null,
+                encryptedKeys: const {},
+                signatureValid: signatureValid,
+                senderPublicKey: null,
+                timestamp: row['timestamp'] as int,
+                v2Data: v2Data,
+                decryptedText: null,
+              ),
+            );
+          } catch (e) {
+            debugPrint(
+              '⚠️ Erreur parsing message local ${row['message_id']}: $e',
+            );
           }
         }
         final reversedMessages = messages.reversed.toList();
-        debugPrint('📥 ${reversedMessages.length} messages chargés depuis le stockage local pour $conversationId (limite: $effectiveLimit)');
+        debugPrint(
+          '📥 ${reversedMessages.length} messages chargés depuis le stockage local pour $conversationId (limite: $effectiveLimit)',
+        );
         return reversedMessages;
       }
-      
+
       // Pour plus de 5 messages, utiliser compute() pour parser en Isolate
       // La fonction _parseMessagesFromRows retourne déjà les messages dans le bon ordre
       final messages = await compute(_parseMessagesFromRows, rows);
-      debugPrint('📥 ${messages.length} messages chargés depuis le stockage local pour $conversationId (limite: $effectiveLimit)');
+      debugPrint(
+        '📥 ${messages.length} messages chargés depuis le stockage local pour $conversationId (limite: $effectiveLimit)',
+      );
       return messages;
     } catch (e) {
       debugPrint('❌ Erreur chargement messages locaux: $e');
@@ -424,11 +488,11 @@ class LocalMessageStorage {
         'SELECT MAX(timestamp) as max_ts FROM encrypted_messages WHERE conversation_id = ?',
         [conversationId],
       );
-      
+
       if (result.isEmpty || result.first['max_ts'] == null) {
         return null;
       }
-      
+
       return result.first['max_ts'] as int;
     } catch (e) {
       debugPrint('❌ Erreur récupération dernier timestamp: $e');
@@ -437,7 +501,11 @@ class LocalMessageStorage {
   }
 
   /// Met à jour l'état de synchronisation d'une conversation
-  Future<void> updateSyncState(String conversationId, int lastSyncedAt, {int? lastMessageTimestamp}) async {
+  Future<void> updateSyncState(
+    String conversationId,
+    int lastSyncedAt, {
+    int? lastMessageTimestamp,
+  }) async {
     if (!_isAvailable && !_initializationAttempted) {
       await initialize();
     }
@@ -446,15 +514,11 @@ class LocalMessageStorage {
     }
 
     try {
-      await _database!.insert(
-        'conversation_sync_state',
-        {
-          'conversation_id': conversationId,
-          'last_synced_at': lastSyncedAt,
-          'last_message_timestamp': lastMessageTimestamp ?? 0,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await _database!.insert('conversation_sync_state', {
+        'conversation_id': conversationId,
+        'last_synced_at': lastSyncedAt,
+        'last_message_timestamp': lastMessageTimestamp ?? 0,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (e) {
       debugPrint('❌ Erreur mise à jour sync state: $e');
     }
@@ -474,9 +538,9 @@ class LocalMessageStorage {
         'SELECT * FROM conversation_sync_state WHERE conversation_id = ?',
         [conversationId],
       );
-      
+
       if (result.isEmpty) return null;
-      
+
       return result.first;
     } catch (e) {
       debugPrint('❌ Erreur récupération sync state: $e');
@@ -515,16 +579,18 @@ class LocalMessageStorage {
     }
 
     try {
-      final cutoffTimestamp = DateTime.now()
-          .subtract(Duration(days: daysToKeep))
-          .millisecondsSinceEpoch ~/ 1000;
-      
+      final cutoffTimestamp =
+          DateTime.now()
+              .subtract(Duration(days: daysToKeep))
+              .millisecondsSinceEpoch ~/
+          1000;
+
       final deleted = await _database!.delete(
         'encrypted_messages',
         where: 'timestamp < ?',
         whereArgs: [cutoffTimestamp],
       );
-      
+
       debugPrint('🧹 Nettoyage: $deleted messages anciens supprimés');
     } catch (e) {
       debugPrint('❌ Erreur nettoyage messages: $e');
@@ -549,27 +615,28 @@ List<Message> _parseMessagesFromRows(List<Map<String, dynamic>> rows) {
       if (v2DataJson.isEmpty) {
         continue;
       }
-      
+
       final v2Data = jsonDecode(v2DataJson) as Map<String, dynamic>;
       final signatureValid = (row['signature_valid'] as int? ?? 0) == 1;
-      
-      messages.add(Message(
-        id: row['message_id'] as String,
-        conversationId: row['conversation_id'] as String,
-        senderId: row['sender_id'] as String,
-        encrypted: null,
-        iv: null,
-        encryptedKeys: const {},
-        signatureValid: signatureValid,
-        senderPublicKey: null,
-        timestamp: row['timestamp'] as int,
-        v2Data: v2Data,
-        decryptedText: null,
-      ));
+
+      messages.add(
+        Message(
+          id: row['message_id'] as String,
+          conversationId: row['conversation_id'] as String,
+          senderId: row['sender_id'] as String,
+          encrypted: null,
+          iv: null,
+          encryptedKeys: const {},
+          signatureValid: signatureValid,
+          senderPublicKey: null,
+          timestamp: row['timestamp'] as int,
+          v2Data: v2Data,
+          decryptedText: null,
+        ),
+      );
     } catch (e) {
       // Ignorer les erreurs de parsing individuelles
     }
   }
   return messages.reversed.toList();
 }
-

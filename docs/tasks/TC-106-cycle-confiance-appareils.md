@@ -1,6 +1,6 @@
 # TC-106 — Sécuriser le cycle de confiance des appareils
 
-Statut : En cours — lots A, B et C terminés, lot D suivant
+Statut : En cours — lot D implémenté localement, validation staging en cours
 Priorité : P0 sécurité et identité cryptographique
 Décision : propriétaire pour l'architecture d'approbation, mainteneur pour l'implémentation
 Dépendances : TC-104, TC-105
@@ -177,15 +177,39 @@ Le lot A conserve les données locales historiques mais cesse de les sélectionn
 
 Les lots backend utiliseront des migrations expand/contract compatibles avec la release précédente. Aucune donnée réelle n'est supprimée automatiquement.
 
-## Risques résiduels avant le lot D
+## Critères d'acceptation du lot D
 
-Le backend continue d'accepter les publications historiques
-`group_device_keys` sans imposer partout le statut du nouveau registre. La
-barrière Flutter ferme le chemin nominal, mais un client modifié muni d'un
-access token peut encore appeler directement ces anciennes routes. La liaison
-serveur aux clés de cercle, la rotation versionnée, la révocation globale et
-l'invalidation déterministe doivent donc être fermées par le lot D avant de
-considérer les invariants 10 et 12 entièrement satisfaits.
+- [x] Chaque requête Messaging protégée lie l'access token à un appareil actif par une preuve Ed25519 locale, sans aller-retour réseau supplémentaire.
+- [x] Une publication de clé de cercle est signée par l'identité de compte/appareil et lie compte, cercle, appareil, versions, clé Ed25519 et clé X25519.
+- [x] Les rotations sont strictement monotones, idempotentes à contenu identique et conservent les versions historiques nécessaires aux anciens messages.
+- [x] Chaque enveloppe destinataire indique la version exacte de clé utilisée ; les nouveaux messages exigent les versions actives du destinataire et de l'émetteur.
+- [x] Une révocation signée est globale au compte, gagne atomiquement contre publication/rotation et bloque immédiatement HTTP, WebSocket et nouveaux messages.
+- [x] Rotation et révocation émettent une invalidation d'annuaire par cercle ; le client purge mémoire et SQLite puis recharge à la prochaine utilisation.
+- [x] La perte ou rotation d'une clé courante ne supprime pas les anciennes clés privées locales et les messages historiques restent vérifiables/déchiffrables.
+- [x] Les tests locaux couvrent concurrence, rejeu, version manquante, saut de version, clé historique et révocation.
+- [ ] Migration montante/descendante, sauvegarde/restauration, smoke réel et cohérence SQL validés sur staging.
+
+## Résultat local du lot D
+
+Le backend refuse désormais un bearer seul sur les routes Messaging et exige
+les trois en-têtes d'appareil signés sur une transcription fixe de 89 octets.
+Les clés de cercle sont publiées sur une transcription signée de 152 octets,
+versionnées dans un annuaire courant et un historique immuable. La révocation
+utilise la décision globale `revoke`, verrouille le registre et les clés dans
+une même transaction, puis invalide les annuaires et déconnecte l'appareil
+cible après commit.
+
+Le client conserve les anciennes clés privées, inclut la version destinataire
+dans chaque wrap et vérifie les signatures historiques avec la version exacte
+de l'émetteur. Les invalidations Socket.IO purgent le cercle complet afin de
+ne pas conserver un mélange de versions. Ce mécanisme n'ajoute aucun polling
+ni appel réseau sur le chemin nominal : la preuve d'accès est calculée
+localement à partir du `jti` de l'access token.
+
+Preuves locales du 2026-08-28 : build TypeScript Messaging réussi, 74 tests
+Messaging et 38 tests Flutter réussis, analyse Flutter sans erreur bloquante
+(85 informations historiques), OpenAPI parsable et `git diff --check` propre.
+La migration et le smoke staging restent les dernières preuves avant clôture.
 
 ## Décision humaine
 

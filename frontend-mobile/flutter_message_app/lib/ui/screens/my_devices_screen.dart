@@ -39,59 +39,104 @@ class _MyDevicesScreenState extends State<MyDevicesScreen> {
     final devices = group.myDevices;
     return Scaffold(
       appBar: AppBar(title: const Text('Mes appareils')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : devices.isEmpty
+      body:
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : devices.isEmpty
               ? const Center(child: Text('Aucun appareil'))
               : ListView.separated(
-                  itemCount: devices.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, i) {
-                    final d = devices[i];
-                    final status = d['status'] as String? ?? 'active';
-                    final isRevoked = status == 'revoked';
-                    return ListTile(
-                      leading: Icon(isRevoked ? Icons.devices_other : Icons.devices, 
-                                   color: isRevoked ? Colors.grey : null),
-                      title: Text(d['deviceId'] as String, 
-                                  style: TextStyle(
-                                    decoration: isRevoked ? TextDecoration.lineThrough : null,
-                                    color: isRevoked ? Colors.grey : null,
-                                  )),
-                      subtitle: Text('v${d['key_version'] ?? 1} - ${isRevoked ? 'révoqué' : 'actif'}'),
-                      trailing: isRevoked 
-                        ? const Icon(Icons.block, color: Colors.grey)
-                        : IconButton(
-                            icon: const Icon(Icons.delete_forever),
-                            tooltip: 'Révoquer',
-                            onPressed: () async {
-                              final ok = await showDialog<bool>(
-                                context: context,
-                                builder: (_) => AlertDialog(
-                                  title: const Text('Révoquer l\'appareil ?'),
-                                  content: Text('DeviceId: ${d['deviceId']}'),
-                                  actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
-                                    TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Révoquer')),
-                                  ],
-                                ),
-                              );
-                              if (ok == true) {
-                                // CORRECTION: Rafraîchir les données après révocation
-                                // revokeMyDevice appelle maintenant fetchMyDevices qui met à jour la liste
-                                // et invalide automatiquement les caches
-                                await group.revokeMyDevice(widget.groupId, d['deviceId'] as String, context: context);
-                                
-                                // Le notifyListeners() dans fetchMyDevices mettra à jour l'UI automatiquement
-                                // grâce à context.watch<GroupProvider>()
-                              }
-                            },
-                          ),
-                    );
-                  },
-                ),
+                itemCount: devices.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, i) {
+                  final d = devices[i];
+                  final status = d['status'] as String? ?? 'active';
+                  final isRevoked = status == 'revoked';
+                  final isActive = status == 'active';
+                  final deviceId = d['deviceId'] as String;
+                  final isCurrent =
+                      context.read<AuthProvider>().currentDeviceId == deviceId;
+                  final statusLabel = switch (status) {
+                    'active' => 'actif',
+                    'superseded' => 'historique',
+                    'revoked' => 'révoqué',
+                    _ => status,
+                  };
+                  return ListTile(
+                    leading: Icon(
+                      isRevoked ? Icons.devices_other : Icons.devices,
+                      color: isRevoked ? Colors.grey : null,
+                    ),
+                    title: Text(
+                      deviceId,
+                      style: TextStyle(
+                        decoration:
+                            isRevoked ? TextDecoration.lineThrough : null,
+                        color: isRevoked ? Colors.grey : null,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'v${d['key_version'] ?? 1} - $statusLabel'
+                      '${isCurrent ? ' · cet appareil' : ''}',
+                    ),
+                    trailing:
+                        !isActive || isCurrent
+                            ? Icon(
+                              isRevoked ? Icons.block : Icons.history,
+                              color: Colors.grey,
+                            )
+                            : IconButton(
+                              icon: const Icon(Icons.delete_forever),
+                              tooltip: 'Révoquer',
+                              onPressed: () async {
+                                final ok = await showDialog<bool>(
+                                  context: context,
+                                  builder:
+                                      (_) => AlertDialog(
+                                        title: const Text(
+                                          'Révoquer l\'appareil ?',
+                                        ),
+                                        content: Text(
+                                          'Cette révocation sera appliquée à tous les cercles.\n\n'
+                                          'Appareil : $deviceId',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed:
+                                                () => Navigator.pop(
+                                                  context,
+                                                  false,
+                                                ),
+                                            child: const Text('Annuler'),
+                                          ),
+                                          TextButton(
+                                            onPressed:
+                                                () => Navigator.pop(
+                                                  context,
+                                                  true,
+                                                ),
+                                            child: const Text('Révoquer'),
+                                          ),
+                                        ],
+                                      ),
+                                );
+                                if (ok == true) {
+                                  // CORRECTION: Rafraîchir les données après révocation
+                                  // revokeMyDevice appelle maintenant fetchMyDevices qui met à jour la liste
+                                  // et invalide automatiquement les caches
+                                  await group.revokeMyDevice(
+                                    widget.groupId,
+                                    deviceId,
+                                    context: context,
+                                  );
+
+                                  // Le notifyListeners() dans fetchMyDevices mettra à jour l'UI automatiquement
+                                  // grâce à context.watch<GroupProvider>()
+                                }
+                              },
+                            ),
+                  );
+                },
+              ),
     );
   }
 }
-
-
