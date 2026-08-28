@@ -1,6 +1,6 @@
 # TC-106 — Sécuriser le cycle de confiance des appareils
 
-Statut : En cours — lot D implémenté localement, validation staging en cours
+Statut : Terminée — lots A à D validés localement et sur staging
 Priorité : P0 sécurité et identité cryptographique
 Décision : propriétaire pour l'architecture d'approbation, mainteneur pour l'implémentation
 Dépendances : TC-104, TC-105
@@ -175,7 +175,15 @@ ainsi que les anciens parcours. Les quatre contrôles SQL finaux valent zéro.
 
 Le lot A conserve les données locales historiques mais cesse de les sélectionner. Il ne les supprime pas automatiquement : une future migration explicite devra prouver à quel compte elles appartiennent ou les laisser inaccessibles. Cela peut imposer une nouvelle inscription d'appareil aux utilisateurs du prototype, acceptable avant publication et préférable à un rattachement silencieux au mauvais compte.
 
-Les lots backend utiliseront des migrations expand/contract compatibles avec la release précédente. Aucune donnée réelle n'est supprimée automatiquement.
+Les lots B et C utilisent des migrations additives compatibles avec la release
+précédente. Le lot D exige une courte fenêtre d'arrêt contrôlée : l'ancienne
+route publiait des clés `active` non signées, volontairement refusées par la
+nouvelle contrainte. La montée ne supprime aucune donnée et la descente testée
+sur copie remet uniquement les anciennes clés `legacy` à leur état `active`
+initial, sans réactiver une clé réellement révoquée. Comme toute descente de
+fonctionnalité, elle retire toutefois l'historique ajouté par le lot D et les
+challenges `revoke` ; elle ne doit donc pas être appliquée sur un environnement
+utilisé sans décision explicite sur cette perte et sauvegarde préalable.
 
 ## Critères d'acceptation du lot D
 
@@ -187,9 +195,9 @@ Les lots backend utiliseront des migrations expand/contract compatibles avec la 
 - [x] Rotation et révocation émettent une invalidation d'annuaire par cercle ; le client purge mémoire et SQLite puis recharge à la prochaine utilisation.
 - [x] La perte ou rotation d'une clé courante ne supprime pas les anciennes clés privées locales et les messages historiques restent vérifiables/déchiffrables.
 - [x] Les tests locaux couvrent concurrence, rejeu, version manquante, saut de version, clé historique et révocation.
-- [ ] Migration montante/descendante, sauvegarde/restauration, smoke réel et cohérence SQL validés sur staging.
+- [x] Migration montante/descendante, sauvegarde/restauration, smoke réel et cohérence SQL validés sur staging.
 
-## Résultat local du lot D
+## Résultat du lot D
 
 Le backend refuse désormais un bearer seul sur les routes Messaging et exige
 les trois en-têtes d'appareil signés sur une transcription fixe de 89 octets.
@@ -206,10 +214,26 @@ ne pas conserver un mélange de versions. Ce mécanisme n'ajoute aucun polling
 ni appel réseau sur le chemin nominal : la preuve d'accès est calculée
 localement à partir du `jti` de l'access token.
 
-Preuves locales du 2026-08-28 : build TypeScript Messaging réussi, 74 tests
+Preuves locales du 2026-08-28 : build TypeScript Messaging réussi, 75 tests
 Messaging et 38 tests Flutter réussis, analyse Flutter sans erreur bloquante
 (85 informations historiques), OpenAPI parsable et `git diff --check` propre.
-La migration et le smoke staging restent les dernières preuves avant clôture.
+
+Preuves staging du 2026-08-28 : sauvegarde privée
+`pre-tc106-lotd-20260828T200545Z.dump`, mode `0600`, 55 653 octets et SHA-256
+`037f05683ada6b5aec700463ecbc456233e0d0f76a6afc0d68918963f6c95a9b` ;
+restauration dans `tc106_lotd_migration_test`, montée, descente exacte vers la
+baseline `29 utilisateurs / 11 clés / 2 challenges / 4 messages`, puis
+suppression de la base isolée. La migration réelle et la release finale
+`9214b0a342cbcfccde4c6ed4fab04ec115d5311b` sont déployées avec quatre
+services sains, zéro redémarrage et zéro ligne Auth/Messaging `error|fatal`.
+
+Le smoke a d'abord détecté et fait corriger l'ordre des contraintes du rollback,
+puis un écart `200`/`201` de création de conversation désormais couvert par un
+test. Le parcours final couvre preuve d'accès, isolation `pending`, décisions
+et clés signées, rejeu idempotent, rotation/historique, refus d'une version
+obsolète, course révocation/publication et blocage immédiat. Neuf contrôles SQL
+finaux valent zéro, notamment les clés actives d'appareils révoqués, les
+historiques non monotones et les bases de test résiduelles.
 
 ## Décision humaine
 

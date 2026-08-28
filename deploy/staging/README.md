@@ -55,8 +55,11 @@ bash deploy/staging/smoke-test.sh \
 
 Le smoke test lance aussi, dans le conteneur Messaging, le parcours réel de
 confiance d'appareil : réauthentification du bootstrap, preuve Ed25519,
-rejet du rejeu, second appareil `pending`, approbation/refus signés et
-isolation du registre. Il ne
+rejet du rejeu, second appareil `pending`, approbation/refus signés, isolation
+du registre, preuve d'accès liée au token, publication et rotation signées des
+clés de cercle, conservation de l'historique, refus des versions obsolètes et
+course entre publication et révocation globale. Il vérifie ensuite le blocage
+immédiat de l'appareil révoqué et la disponibilité des anciens messages. Il ne
 journalise aucun mot de passe, token, grant ou matériel privé.
 
 Ne jamais exécuter `docker compose config` sans `--quiet` dans une sortie partagée : la configuration résolue contient des secrets.
