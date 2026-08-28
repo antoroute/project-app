@@ -10,7 +10,7 @@ ALTER TABLE device_approval_challenges
     CHECK (decision IN ('approve', 'reject'));
 
 UPDATE group_device_keys
-   SET status = 'revoked', revoked_at = COALESCE(revoked_at, NOW())
+   SET status = 'active'
  WHERE status = 'legacy';
 
 ALTER TABLE group_device_keys
