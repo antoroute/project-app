@@ -427,7 +427,7 @@ const conversation = objectValue(
   await request('/api/conversations', 'POST', 201, {
     token: owner.accessToken,
     identity: firstIdentity,
-    body: { groupId, type: 'private', memberIds: [] },
+    body: { groupId, type: 'private', memberIds: [owner.userId] },
   }),
   'conversation creation',
 );
