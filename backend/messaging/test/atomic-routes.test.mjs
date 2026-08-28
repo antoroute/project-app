@@ -121,6 +121,25 @@ test('un échec des participants rollback sans événement conversation', async 
   assert.deepEqual(sequence, ['begin', 'rollback']);
 });
 
+test('une conversation créée respecte le contrat HTTP 201 après commit', async (t) => {
+  const executor = {
+    one: async () => ({ id: CONVERSATION }),
+    none: async () => undefined,
+  };
+  const { app, sequence } = await atomicApp(conversationsRoutes, executor);
+  t.after(() => app.close());
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/conversations',
+    payload: { groupId: GROUP, type: 'private', memberIds: [MEMBER] },
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(response.json(), { id: CONVERSATION });
+  assert.deepEqual(sequence, ['begin', 'commit', 'room', 'room', 'emit']);
+});
+
 test('une acceptation échouée rollback sans notification ni room', async (t) => {
   let selects = 0;
   let writes = 0;

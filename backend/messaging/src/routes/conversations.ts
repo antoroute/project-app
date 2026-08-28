@@ -73,6 +73,7 @@ export default async function routes(app: FastifyInstance) {
     });
     app.log.info({ convId: conv.id, groupId, userId }, 'Conversation created ping sent to group members (excluding creator, no sensitive data)');
 
+    reply.code(201);
     return { id: conv.id };
   });
 
