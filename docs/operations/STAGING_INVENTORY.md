@@ -1,7 +1,7 @@
 # Inventaire du staging backend
 
 Statut : opérationnel, accès local au LXC uniquement
-Dernier déploiement : 2026-08-28 (`TC-106`, lot D)
+Dernier déploiement : 2026-09-08 (`TC-107`)
 Environnement : LXC106, stack Compose `trust-circle-staging`
 
 ## Résumé
@@ -12,8 +12,8 @@ Le staging backend est une installation neuve et isolée des anciennes ressource
 
 | Élément | Valeur assainie |
 |---|---|
-| Commit source | `9214b0a342cbcfccde4c6ed4fab04ec115d5311b` |
-| Release | `/opt/trust-circle-staging/releases/9214b0a342cbcfccde4c6ed4fab04ec115d5311b` |
+| Commit source | `9ffc84f36e47aee5d86eb03f14307c93f5ef02dd` |
+| Release | `/opt/trust-circle-staging/releases/9ffc84f36e47aee5d86eb03f14307c93f5ef02dd` |
 | Pointeur actif | `/opt/trust-circle-staging/current` |
 | Fichier de secrets | `/opt/trust-circle-staging/shared/staging.env`, mode `0600` |
 | Source Compose | `deploy/staging/compose.yml` |
@@ -25,8 +25,8 @@ Le fichier de secrets n'est pas versionné et ses valeurs n'ont pas été affich
 
 | Service | Image | Preuve | État final |
 |---|---|---|---|
-| Auth | `trust-circle-staging-auth:staging-9214b0a342cb` | image ID `812a6a4385c5`, label revision complet | sain, 0 redémarrage |
-| Messaging | `trust-circle-staging-messaging:staging-9214b0a342cb` | image ID `080e5ba89050`, label revision complet | sain, 0 redémarrage |
+| Auth | `trust-circle-staging-auth:staging-9ffc84f36e47` | image ID `13b3a3484258`, label revision complet | sain, 0 redémarrage |
+| Messaging | `trust-circle-staging-messaging:staging-9ffc84f36e47` | image ID `d9983b5e320c`, label revision complet | sain, 0 redémarrage |
 | PostgreSQL | `postgres:16-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 | Gateway | `nginx:stable-alpine` résolue par digest | digest conservé dans le fichier privé | sain |
 
@@ -220,6 +220,25 @@ Les configurations précédentes sont conservées en mode `0600` sous
 `2c79c0cbb79c46cd808cec3759766c8445bda69d` restent disponibles pour
 rollback applicatif ; la descente SQL a été exercée uniquement sur la
 restauration isolée.
+
+Le redéploiement `TC-107` du 2026-09-08 a ensuite validé :
+
+1. build et déploiement des images Auth/Messaging depuis le commit immuable
+   `9ffc84f36e47aee5d86eb03f14307c93f5ef02dd`, avec labels de révision
+   correspondants ;
+2. quatre healthchecks sains, zéro redémarrage et aucune ligne Auth/Messaging
+   de niveau `error` ou `fatal` après déploiement ;
+3. maintien intégral du smoke de confiance appareil `TC-106` ;
+4. rejet `400` des propriétés inconnues, doublons de participants, pages hors
+   borne et chiffrés dépassant réellement 64 Kio après décodage Base64 ;
+5. rejet `413` des corps dépassant 16 Kio pour Auth et 256 Kio pour
+   Messaging, via la gateway réelle ;
+6. absence de migration et de changement du volume PostgreSQL.
+
+La configuration antérieure est conservée en mode `0600` sous
+`staging.env.before-9ffc84f36e47`. La release
+`9214b0a342cbcfccde4c6ed4fab04ec115d5311b` reste disponible pour rollback
+applicatif sans restauration de données.
 
 ## Limites assumées
 

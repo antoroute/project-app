@@ -1,6 +1,6 @@
 # TC-107 — Borner et valider toutes les entrées réseau
 
-Statut : En cours — implémentation et validations locales terminées, staging à valider
+Statut : Terminée — validée localement et sur staging le 2026-09-08
 Priorité : P0 sécurité et disponibilité
 Décision : mainteneur, dans le cadre des invariants existants
 Dépendances : TC-103, TC-106
@@ -83,18 +83,37 @@ des entiers non signés sur 32 bits hors zéro.
 
 ## Critères d'acceptation
 
-- [ ] Tous les objets d'entrée déclarés sont fermés aux propriétés inconnues.
-- [ ] Toute chaîne, liste et donnée binaire contrôlée possède une limite.
-- [ ] Les tailles binaires exactes sont vérifiées après décodage canonique.
-- [ ] Aucun tableau de membres, destinataires ou abonnements ne contient de
+- [x] Tous les objets d'entrée déclarés sont fermés aux propriétés inconnues.
+- [x] Toute chaîne, liste et donnée binaire contrôlée possède une limite.
+- [x] Les tailles binaires exactes sont vérifiées après décodage canonique.
+- [x] Aucun tableau de membres, destinataires ou abonnements ne contient de
       doublon ou ne dépasse sa borne.
-- [ ] Le curseur émis par le serveur est relu dans la même unité.
-- [ ] Un événement WebSocket invalide n'appelle ni ACL, ni base, ni room.
-- [ ] Les dépassements globaux répondent `413` sans fuite de contenu.
-- [ ] Flutter bloque localement les dépassements visibles et affiche une erreur
+- [x] Le curseur émis par le serveur est relu dans la même unité.
+- [x] Un événement WebSocket invalide n'appelle ni ACL, ni base, ni room.
+- [x] Les dépassements globaux répondent `413` sans fuite de contenu.
+- [x] Flutter bloque localement les dépassements visibles et affiche une erreur
       compréhensible, tout en laissant le serveur autoritaire.
-- [ ] OpenAPI décrit les mêmes contraintes que le code.
-- [ ] Tests locaux et smoke/probes staging réussissent sans régression.
+- [x] OpenAPI décrit les mêmes contraintes que le code.
+- [x] Tests locaux et smoke/probes staging réussissent sans régression.
+
+## Preuves de clôture
+
+- Commit applicatif immuable :
+  `9ffc84f36e47aee5d86eb03f14307c93f5ef02dd`.
+- Auth : build TypeScript et 23 tests réussis.
+- Messaging : build TypeScript et 81 tests réussis.
+- Flutter 3.47.1 : 38 tests réussis ; analyse sans erreur ni avertissement,
+  avec 85 informations de style historiques.
+- OpenAPI 3.1 analysé sans erreur ni clé YAML dupliquée.
+- Staging LXC106 : quatre services sains, zéro redémarrage, labels alignés sur
+  le commit et aucun log Auth/Messaging de niveau erreur ou fatal après le
+  déploiement.
+- Smoke réel : transitions TC-106 intactes, propriétés inconnues refusées,
+  limites de corps Auth/Messaging en `413`, doublons et page hors borne en
+  `400`, taille décodée du chiffré refusée au-delà de 64 Kio.
+- Aucune migration ni modification du schéma : aucune sauvegarde PostgreSQL
+  supplémentaire n'était requise. Le rollback applicatif reste la release
+  `9214b0a342cbcfccde4c6ed4fab04ec115d5311b`.
 
 ## Risques et hors périmètre
 
