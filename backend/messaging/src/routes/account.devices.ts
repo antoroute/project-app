@@ -12,6 +12,7 @@ import {
   hashBootstrapGrant,
   verifyDeviceProof,
 } from '../security/deviceProof.js';
+import { boundedDisplayName, strictObject, Uuid } from '../schemas/input.schema.js';
 
 const Platform = Type.Union([
   Type.Literal('android'),
@@ -38,10 +39,10 @@ const CanonicalEd25519Signature = Type.String({
 
 const ChallengeRequest = Type.Object(
   {
-    deviceId: Type.String({ format: 'uuid' }),
+    deviceId: Uuid,
     identityPublicKey: CanonicalEd25519PublicKey,
     platform: Platform,
-    deviceName: Type.String({ minLength: 1, maxLength: 64 }),
+    deviceName: boundedDisplayName(),
     bootstrapGrant: Type.Optional(
       Type.String({
         minLength: 43,
@@ -297,9 +298,7 @@ export default async function accountDeviceRoutes(app: FastifyInstance) {
     '/api/devices/registrations/:challengeId/proof',
     {
       schema: {
-        params: Type.Object({
-          challengeId: Type.String({ format: 'uuid' }),
-        }),
+        params: strictObject({ challengeId: Uuid }),
         body: ProofRequest,
         response: {
           201: Type.Object({

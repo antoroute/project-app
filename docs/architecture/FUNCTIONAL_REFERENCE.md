@@ -268,8 +268,15 @@ Le serveur refuse :
 - un destinataire absent de la conversation, dont l'appareil est inactif ou dont
   le wrap ne référence pas sa version active exacte ;
 - un `messageId` déjà persisté.
+- une enveloppe contenant une propriété inconnue, un Base64 non canonique ou
+  un matériel cryptographique d'une taille différente du protocole ;
+- plus de 256 couples destinataire/appareil, un couple dupliqué ou un contenu
+  chiffré dépassant 64 Kio (tag AES-GCM inclus).
 
-Depuis `TC-105`, ces contrôles verrouillent dans une même transaction l'appartenance, la conversation et les clés actives jusqu'à l'insertion. Tous les couples destinataire/appareil sont validés par une requête PostgreSQL groupée plutôt que par une requête par appareil, puis `message:new` est émis après commit. Les validations de taille et d'encodage restent incomplètes (`TC-107`).
+Depuis `TC-105`, ces contrôles verrouillent dans une même transaction l'appartenance, la conversation et les clés actives jusqu'à l'insertion. Tous les couples destinataire/appareil sont validés par une requête PostgreSQL groupée plutôt que par une requête par appareil, puis `message:new` est émis après commit.
+Depuis `TC-107`, la validation structurelle, les bornes et les doublons sont
+refusés avant l'accès métier. Le corps HTTP Messaging est plafonné à 256 Kio ;
+le corps Auth l'est à 16 Kio.
 
 ## Réception, affichage et notifications
 
@@ -318,12 +325,14 @@ Le handshake exige l'access token strict et, transitoirement, le faux `APP_SECRE
 
 | Événement | Donnée utile | Contrôle serveur |
 |---|---|---|
-| `conv:subscribe` | `convId` | ACL conversation + cercle parent |
-| `conv:subscribe:batch` | `convIds[]` | ACL partagée filtrant les conversations autorisées |
-| `conv:unsubscribe` | `convId` | sortie systématique de la room ; ACL avant toute émission de présence |
-| `typing:start` / `typing:stop` | `convId` | ACL conversation + cercle parent |
+| `conv:subscribe` | objet exact `{convId: UUID}` | validation sans SQL, puis ACL conversation + cercle parent |
+| `conv:subscribe:batch` | objet exact `{convIds: UUID[]}`, 1 à 100 valeurs uniques | validation sans SQL, puis ACL partagée filtrant les conversations autorisées |
+| `conv:unsubscribe` | objet exact `{convId: UUID}` | validation, sortie systématique de la room ; ACL avant toute émission de présence |
+| `typing:start` / `typing:stop` | objet exact `{convId: UUID}` | validation, puis ACL conversation + cercle parent |
 
 Aucun `userId` fourni par ces événements ne fait autorité ; l'acteur est celui du socket authentifié.
+Socket.IO refuse en outre tout paquet dépassant 16 Kio. Les messages chiffrés
+continuent de transiter par REST, ce plafond ne ralentit donc pas leur chargement.
 
 ### Événements émis
 
@@ -383,7 +392,9 @@ Toutes les routes métier exigent actuellement `X-Client-Version`, le faux `X-Ap
 | Messaging | `POST /api/messages` | persister une enveloppe V2 |
 | Messaging | `GET /api/conversations/:id/messages` | page de messages V2 |
 
-Le fichier OpenAPI actuel ne couvre pas encore fidèlement toutes ces routes et divergences (`TC-107` et travail API ultérieur).
+Le fichier OpenAPI décrit les bornes d'entrée introduites par `TC-107`. Sa
+couverture exhaustive de toutes les variantes de routes reste un travail API
+distinct.
 
 ## État des fonctionnalités visibles
 

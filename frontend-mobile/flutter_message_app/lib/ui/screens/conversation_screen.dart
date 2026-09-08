@@ -14,6 +14,8 @@ import '../../core/services/notification_badge_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../core/services/websocket_heartbeat_service.dart';
 import '../../core/services/network_monitor_service.dart';
+import '../../core/services/snackbar_service.dart';
+import '../../config/constants.dart';
 import '../helpers/extensions.dart';
 import '../widgets/message_bubble.dart';
 
@@ -930,6 +932,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
       debugPrint('⚠️ [ConversationScreen] Texte vide, envoi annulé');
       return;
     }
+    if (utf8.encode(plainText).length > maxMessagePlaintextBytes) {
+      SnackbarService.showError(context, 'Message trop long (maximum 64 Kio)');
+      return;
+    }
 
     // Arrêter l'indicateur de frappe avant d'envoyer
     _conversationProvider.stopTyping(widget.conversationId);
@@ -1433,6 +1439,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           ),
                           child: TextField(
                             controller: _textController,
+                            maxLength: maxMessagePlaintextBytes,
                             onChanged: _onTextChanged,
                             decoration: InputDecoration(
                               hintText: 'Tapez votre message...',

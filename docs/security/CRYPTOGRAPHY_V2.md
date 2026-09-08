@@ -128,6 +128,12 @@ payload.iv = Base64(contentNonce)
 
 Aucune donnée associée authentifiée (AAD) n'est fournie à AES-GCM. Les métadonnées ne sont liées au contenu que par la signature décrite plus bas.
 
+Le contrat V1 limite `content` à 65 520 octets UTF-8. Avec le tag GCM de
+16 octets, `ciphertext || tag` reste ainsi inférieur ou égal à 64 Kio. Le
+serveur vérifie le Base64 canonique et cette taille avant tout accès métier ;
+Flutter effectue le même contrôle avant chiffrement pour fournir une erreur
+immédiate.
+
 ### 3. Encapsulation pour chaque appareil
 
 Pour chaque entrée destinataire
@@ -145,6 +151,9 @@ recipient.key_version = recipientKeyVersion
 ```
 
 Une seule clé X25519 éphémère est utilisée pour toutes les encapsulations du message. La clé publique éphémère se trouve dans `sender.eph_pub`.
+Une enveloppe contient entre 1 et 256 couples `(userId, deviceId)` uniques.
+Chaque wrap décodé mesure exactement 48 octets (`MK` de 32 octets et tag GCM
+de 16 octets), et chaque nonce exactement 12 octets.
 
 ### 4. Structure JSON utile
 

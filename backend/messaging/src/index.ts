@@ -17,6 +17,12 @@ import validateAppSecret from './middlewares/validateAppSecret.js';
 import socketAuth from './middlewares/socketAuth.js';
 import { registerDeviceAuth } from './middlewares/deviceAuth.js';
 import type { AppDatabase } from './plugins/db.js';
+import {
+  MESSAGING_BODY_LIMIT_BYTES,
+  SOCKET_PAYLOAD_LIMIT_BYTES,
+  parseStrictConversationBatch,
+  parseStrictConversationEvent,
+} from './schemas/input.schema.js';
 
 // Routes 
 import keysDevicesRoutes from './routes/keys.devices.js';
@@ -44,7 +50,11 @@ declare module 'fastify' {
 
 async function build() {
   const config = loadConfig();
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    bodyLimit: MESSAGING_BODY_LIMIT_BYTES,
+    ajv: { customOptions: { removeAdditional: false } },
+  });
 
   // Pré-déclarer les décorateurs AVANT démarrage
   app.decorate('io', undefined as unknown as IOServer);
@@ -88,7 +98,8 @@ async function build() {
   // Attacher Socket.IO au serveur natif Fastify
   const io = new IOServer(app.server, {
     path: '/socket',
-    cors: { origin: true, credentials: true }
+    cors: { origin: true, credentials: true },
+    maxHttpBufferSize: SOCKET_PAYLOAD_LIMIT_BYTES,
   });
 
   // NE PAS re-déclarer ici : on assigne sur les décorateurs déjà posés
@@ -209,8 +220,15 @@ async function build() {
     }
 
     // Gestion des abonnements aux conversations
-    socket.on('conv:subscribe', async (data: any) => {
-      const convId = data.convId || data;
+    socket.on('conv:subscribe', async (data: unknown) => {
+      const convId = parseStrictConversationEvent(data);
+      if (!convId) {
+        socket.emit('conv:subscribe', {
+          success: false,
+          error: 'invalid_payload',
+        });
+        return;
+      }
       const roomName = `conv:${convId}`;
 
       const hasAccess = await app.services.acl.hasConversationPermission(
@@ -241,11 +259,13 @@ async function build() {
     });
     
     // ✅ NOUVEAU: Endpoint batch pour abonner plusieurs conversations en une requête
-    socket.on('conv:subscribe:batch', async (data: any) => {
-      const convIds = Array.isArray(data.convIds) ? data.convIds : [data.convId];
-      
-      if (convIds.length === 0) {
-        socket.emit('conv:subscribe:batch', { success: false, error: 'No conversation IDs provided' });
+    socket.on('conv:subscribe:batch', async (data: unknown) => {
+      const convIds = parseStrictConversationBatch(data);
+      if (!convIds) {
+        socket.emit('conv:subscribe:batch', {
+          success: false,
+          error: 'invalid_payload',
+        });
         return;
       }
       
@@ -292,8 +312,15 @@ async function build() {
       }, 'Batch subscription completed');
     });
     
-    socket.on('conv:unsubscribe', async (data: any) => {
-      const convId = data.convId || data;
+    socket.on('conv:unsubscribe', async (data: unknown) => {
+      const convId = parseStrictConversationEvent(data);
+      if (!convId) {
+        socket.emit('conv:unsubscribe', {
+          success: false,
+          error: 'invalid_payload',
+        });
+        return;
+      }
       const conversationRoom = `conv:${convId}`;
       socket.leave(conversationRoom);
 
@@ -326,8 +353,8 @@ async function build() {
     });
     
     // Gestion des indicateurs de frappe avec vérification de sécurité
-    socket.on('typing:start', async (data: any) => {
-      const convId = data.convId;
+    socket.on('typing:start', async (data: unknown) => {
+      const convId = parseStrictConversationEvent(data);
       if (convId) {
         const isInConversation =
           await app.services.acl.hasConversationPermission(
@@ -343,11 +370,11 @@ async function build() {
         } else {
           app.log.warn({ convId, userId }, 'Unauthorized typing event');
         }
-      }
+      } else socket.emit('typing:error', { error: 'invalid_payload' });
     });
     
-    socket.on('typing:stop', async (data: any) => {
-      const convId = data.convId;
+    socket.on('typing:stop', async (data: unknown) => {
+      const convId = parseStrictConversationEvent(data);
       if (convId) {
         const isInConversation =
           await app.services.acl.hasConversationPermission(
@@ -363,7 +390,7 @@ async function build() {
         } else {
           app.log.warn({ convId, userId }, 'Unauthorized typing event');
         }
-      }
+      } else socket.emit('typing:error', { error: 'invalid_payload' });
     });
 
     app.services.presence.onConnect(socket);

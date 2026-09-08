@@ -9,27 +9,23 @@ import {
 } from '../security/groupDeviceKeyBinding.js';
 import { decodeCanonicalBase64 } from '../security/deviceProof.js';
 import { authenticatedUserId } from '../security/jwt.js';
+import {
+  CanonicalBase64Bytes32,
+  CanonicalBase64Bytes64,
+  KeyVersion,
+  Uuid,
+  strictObject,
+} from '../schemas/input.schema.js';
 
-const CanonicalPublicKey = Type.String({
-  minLength: 44,
-  maxLength: 44,
-  pattern: '^[A-Za-z0-9+/]{43}=$',
-});
-const CanonicalSignature = Type.String({
-  minLength: 88,
-  maxLength: 88,
-  pattern: '^[A-Za-z0-9+/]{86}==$',
-});
-const DeviceKey = Type.Object(
+const DeviceKey = strictObject(
   {
-    deviceId: Type.String({ format: 'uuid' }),
-    pk_sig: CanonicalPublicKey,
-    pk_kem: CanonicalPublicKey,
-    key_version: Type.Integer({ minimum: 1, maximum: 0xffffffff }),
-    identityKeyVersion: Type.Integer({ minimum: 1, maximum: 0xffffffff }),
-    bindingSignature: CanonicalSignature,
+    deviceId: Uuid,
+    pk_sig: CanonicalBase64Bytes32,
+    pk_kem: CanonicalBase64Bytes32,
+    key_version: KeyVersion,
+    identityKeyVersion: KeyVersion,
+    bindingSignature: CanonicalBase64Bytes64,
   },
-  { additionalProperties: false },
 );
 
 const DirectoryEntry = Type.Object({
@@ -90,7 +86,7 @@ export default async function routes(app: FastifyInstance) {
     '/api/keys/group/:groupId',
     {
       schema: {
-        params: Type.Object({ groupId: Type.String({ format: 'uuid' }) }),
+        params: strictObject({ groupId: Uuid }),
         response: { 200: Type.Array(DirectoryEntry) },
       },
     },
@@ -114,7 +110,7 @@ export default async function routes(app: FastifyInstance) {
     '/api/keys/group/:groupId/my-devices',
     {
       schema: {
-        params: Type.Object({ groupId: Type.String({ format: 'uuid' }) }),
+        params: strictObject({ groupId: Uuid }),
         response: { 200: Type.Array(DirectoryEntry) },
       },
     },
@@ -142,7 +138,7 @@ export default async function routes(app: FastifyInstance) {
     '/api/keys/group/:groupId/devices',
     {
       schema: {
-        params: Type.Object({ groupId: Type.String({ format: 'uuid' }) }),
+        params: strictObject({ groupId: Uuid }),
         body: DeviceKey,
         response: {
           201: Type.Object({
@@ -379,10 +375,7 @@ export default async function routes(app: FastifyInstance) {
     '/api/keys/group/:groupId/devices/:deviceId',
     {
       schema: {
-        params: Type.Object({
-          groupId: Type.String({ format: 'uuid' }),
-          deviceId: Type.String({ format: 'uuid' }),
-        }),
+        params: strictObject({ groupId: Uuid, deviceId: Uuid }),
       },
     },
     async (_req, reply) =>

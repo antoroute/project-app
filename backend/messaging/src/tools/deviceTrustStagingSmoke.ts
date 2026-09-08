@@ -386,6 +386,21 @@ function messageBody(input: {
 }
 
 const owner = await createAccount('owner');
+await request('/auth/register', 'POST', 400, {
+  body: {
+    email: `tc107-extra-${randomUUID()}@example.invalid`,
+    username: 'tc107-extra',
+    password: 'TC107-valid-password',
+    unexpected: true,
+  },
+});
+await request('/auth/register', 'POST', 413, {
+  body: {
+    email: `tc107-large-${randomUUID()}@example.invalid`,
+    username: 'tc107-large',
+    password: 'a'.repeat(17 * 1024),
+  },
+});
 const firstIdentity = createIdentity();
 await bootstrapFirstDevice(owner, firstIdentity);
 
@@ -410,6 +425,17 @@ if (!Array.isArray(initialRegistry) || initialRegistry.length !== 2) {
 }
 await decideDevice(owner, firstIdentity, secondIdentity, 'approve');
 
+await request('/api/groups', 'POST', 400, {
+  token: owner.accessToken,
+  identity: firstIdentity,
+  body: { name: 'TC-107 strict object', unexpected: true },
+});
+await request('/api/groups', 'POST', 413, {
+  token: owner.accessToken,
+  identity: firstIdentity,
+  body: { name: 'a'.repeat(256 * 1024) },
+});
+
 const rejectedIdentity = createIdentity();
 await registerFollowingDevice(owner, rejectedIdentity);
 await decideDevice(owner, firstIdentity, rejectedIdentity, 'reject');
@@ -432,6 +458,21 @@ const conversation = objectValue(
   'conversation creation',
 );
 const conversationId = stringValue(conversation, 'id', 'conversation creation');
+await request('/api/conversations', 'POST', 400, {
+  token: owner.accessToken,
+  identity: firstIdentity,
+  body: {
+    groupId,
+    type: 'private',
+    memberIds: [owner.userId, owner.userId],
+  },
+});
+await request(
+  `/api/conversations/${conversationId}/messages?limit=101`,
+  'GET',
+  400,
+  { token: owner.accessToken, identity: firstIdentity },
+);
 
 const firstV1 = createCircleKeys();
 const firstV2 = createCircleKeys();
@@ -470,6 +511,21 @@ await request('/api/messages', 'POST', 201, {
     recipientIdentity: firstIdentity,
     recipientKeyVersion: 1,
   }),
+});
+const oversizedCiphertext = messageBody({
+  account: owner,
+  identity: firstIdentity,
+  groupId,
+  conversationId,
+  senderKeyVersion: 1,
+  recipientIdentity: firstIdentity,
+  recipientKeyVersion: 1,
+});
+oversizedCiphertext.ciphertext = randomBytes(65538).toString('base64');
+await request('/api/messages', 'POST', 400, {
+  token: owner.accessToken,
+  identity: firstIdentity,
+  body: oversizedCiphertext,
 });
 
 await request(`/api/keys/group/${groupId}/devices`, 'POST', 201, {
@@ -625,5 +681,5 @@ if (deniedBootstrap.error !== 'bootstrap_authorization_required') {
 }
 
 console.log(
-  'TC-106 lot D smoke passed: device PoP, pending isolation, signed decisions, signed key publication, idempotence, rotation/history, stale-version denial, concurrent global revocation and immediate message/access denial.',
+  'TC-106 lot D + TC-107 smoke passed: device trust transitions, strict objects, HTTP limits, collection bounds, cursor bounds and decoded ciphertext limit.',
 );

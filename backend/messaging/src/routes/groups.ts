@@ -7,6 +7,12 @@ import { Type } from '@sinclair/typebox';
 import type { DbExecutor } from '../plugins/db.js';
 import { authenticatedUserId } from '../security/jwt.js';
 import { groupRoleAllows } from '../services/acl.js';
+import {
+  CanonicalBase64Bytes32,
+  Uuid,
+  boundedDisplayName,
+  strictObject,
+} from '../schemas/input.schema.js';
 
 type JoinRequestResult =
   | { outcome: 'created'; requestId: string }
@@ -157,11 +163,11 @@ export default async function routes(app: FastifyInstance) {
   // POST /api/groups  { name, groupSigningPubKey, groupKEMPubKey }
   app.post('/api/groups', {
     schema: { 
-      body: Type.Object({ 
-        name: Type.String({ minLength: 3, maxLength: 64 }),
-        groupSigningPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
-        groupKEMPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' }))
-      }) 
+      body: strictObject({
+        name: boundedDisplayName(3),
+        groupSigningPubKey: Type.Optional(CanonicalBase64Bytes32),
+        groupKEMPubKey: Type.Optional(CanonicalBase64Bytes32),
+      }),
     }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
@@ -220,7 +226,7 @@ export default async function routes(app: FastifyInstance) {
   // GET /api/groups/:id : détails d'un groupe spécifique
   app.get('/api/groups/:id', {
     schema: {
-      params: Type.Object({ id: Type.String({ format: 'uuid' }) })
+      params: strictObject({ id: Uuid })
     }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
@@ -256,7 +262,7 @@ export default async function routes(app: FastifyInstance) {
   // GET /api/groups/:id/members : membres d'un groupe
   app.get('/api/groups/:id/members', {
     schema: {
-      params: Type.Object({ id: Type.String({ format: 'uuid' }) })
+      params: strictObject({ id: Uuid })
     }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
@@ -295,14 +301,14 @@ export default async function routes(app: FastifyInstance) {
   // Crée une join_request (v2) incluant les clés de l'appareil initial et du groupe
   app.post('/api/groups/:id/join', {
     schema: {
-      params: Type.Object({ id: Type.String({ format: 'uuid' }) }),
-      body: Type.Object({
-        deviceId: Type.String({ minLength: 1, maxLength: 128 }),
-        pk_sig: Type.String({ contentEncoding: 'base64' }),
-        pk_kem: Type.String({ contentEncoding: 'base64' }),
-        groupSigningPubKey: Type.String({ contentEncoding: 'base64' }),
-        groupKEMPubKey: Type.String({ contentEncoding: 'base64' })
-      })
+      params: strictObject({ id: Uuid }),
+      body: strictObject({
+        deviceId: Uuid,
+        pk_sig: CanonicalBase64Bytes32,
+        pk_kem: CanonicalBase64Bytes32,
+        groupSigningPubKey: CanonicalBase64Bytes32,
+        groupKEMPubKey: CanonicalBase64Bytes32,
+      }),
     }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
@@ -328,10 +334,7 @@ export default async function routes(app: FastifyInstance) {
   // Route legacy conservée pour compatibilité client.
   app.post('/api/groups/:id/requests/:rid/accept', {
     schema: {
-      params: Type.Object({
-        id: Type.String({ format: 'uuid' }),
-        rid: Type.String({ format: 'uuid' })
-      })
+      params: strictObject({ id: Uuid, rid: Uuid })
     }
   }, async (req, reply) => {
     const approverId = authenticatedUserId(req);
@@ -357,14 +360,14 @@ export default async function routes(app: FastifyInstance) {
   // Crée une demande de jointure avec les clés du groupe  
   app.post('/api/groups/:id/join-requests', {
     schema: {
-      params: Type.Object({ id: Type.String({ format: 'uuid' }) }),
-      body: Type.Object({
-        groupSigningPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
-        groupKEMPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
-        deviceId: Type.Optional(Type.String()),
-        deviceSigPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' })),
-        deviceKemPubKey: Type.Optional(Type.String({ contentEncoding: 'base64' }))
-      })
+      params: strictObject({ id: Uuid }),
+      body: strictObject({
+        groupSigningPubKey: Type.Optional(CanonicalBase64Bytes32),
+        groupKEMPubKey: Type.Optional(CanonicalBase64Bytes32),
+        deviceId: Type.Optional(Uuid),
+        deviceSigPubKey: Type.Optional(CanonicalBase64Bytes32),
+        deviceKemPubKey: Type.Optional(CanonicalBase64Bytes32),
+      }),
     }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
@@ -395,7 +398,7 @@ export default async function routes(app: FastifyInstance) {
   // Récupère les demandes de jointure pour les gestionnaires du cercle.
   app.get('/api/groups/:id/join-requests', {
     schema: {
-      params: Type.Object({ id: Type.String({ format: 'uuid' }) })
+      params: strictObject({ id: Uuid })
     }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
@@ -434,13 +437,8 @@ export default async function routes(app: FastifyInstance) {
   // Route héritée neutralisée : la V1 n'utilise aucun vote collectif.
   app.post('/api/groups/:id/join-requests/:reqId/vote', {
     schema: {
-      params: Type.Object({ 
-        id: Type.String({ format: 'uuid' }),
-        reqId: Type.String({ format: 'uuid' })
-      }),
-      body: Type.Object({
-        vote: Type.Boolean()
-      })
+      params: strictObject({ id: Uuid, reqId: Uuid }),
+      body: strictObject({ vote: Type.Boolean() }),
     }
   }, async (req, reply) => {
     authenticatedUserId(req);
@@ -451,13 +449,10 @@ export default async function routes(app: FastifyInstance) {
   // Route pour accepter/rejeter une demande de jointure (owner/admin).
   app.post('/api/groups/:id/join-requests/:reqId/handle', {
     schema: {
-      params: Type.Object({ 
-        id: Type.String({ format: 'uuid' }),
-        reqId: Type.String({ format: 'uuid' })
+      params: strictObject({ id: Uuid, reqId: Uuid }),
+      body: strictObject({
+        action: Type.Union([Type.Literal('accept'), Type.Literal('reject')]),
       }),
-      body: Type.Object({
-        action: Type.String({ enum: ['accept', 'reject'] })
-      })
     }
   }, async (req, reply) => {
     const approverId = authenticatedUserId(req);
@@ -485,10 +480,7 @@ export default async function routes(app: FastifyInstance) {
   // Route legacy conservée pour compatibilité client.
   app.post('/api/groups/:id/requests/:rid/reject', {
     schema: {
-      params: Type.Object({
-        id: Type.String({ format: 'uuid' }),
-        rid: Type.String({ format: 'uuid' })
-      })
+      params: strictObject({ id: Uuid, rid: Uuid })
     }
   }, async (req, reply) => {
     const approverId = authenticatedUserId(req);
@@ -511,11 +503,8 @@ export default async function routes(app: FastifyInstance) {
   // la propriété, qui reste exclusivement portée par groups.creator_id.
   app.patch('/api/groups/:id/members/:memberId/role', {
     schema: {
-      params: Type.Object({
-        id: Type.String({ format: 'uuid' }),
-        memberId: Type.String({ format: 'uuid' }),
-      }),
-      body: Type.Object({
+      params: strictObject({ id: Uuid, memberId: Uuid }),
+      body: strictObject({
         role: Type.Union([Type.Literal('admin'), Type.Literal('member')]),
       }),
     },

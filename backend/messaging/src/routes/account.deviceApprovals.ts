@@ -16,6 +16,7 @@ import type {
 import { decodeCanonicalBase64 } from '../security/deviceProof.js';
 import { authenticatedUserId } from '../security/jwt.js';
 import { authenticatedDevice } from '../middlewares/deviceAuth.js';
+import { Uuid, strictObject } from '../schemas/input.schema.js';
 
 const Platform = Type.Union([
   Type.Literal('android'),
@@ -37,7 +38,7 @@ const CanonicalEd25519Signature = Type.String({
 
 const ApprovalChallengeRequest = Type.Object(
   {
-    approverDeviceId: Type.String({ format: 'uuid' }),
+    approverDeviceId: Uuid,
     decision: ApprovalDecision,
   },
   { additionalProperties: false },
@@ -119,9 +120,7 @@ export default async function accountDeviceApprovalRoutes(
     {
       preHandler: app.requireActiveDevice,
       schema: {
-        params: Type.Object({
-          targetDeviceId: Type.String({ format: 'uuid' }),
-        }),
+        params: strictObject({ targetDeviceId: Uuid }),
         body: ApprovalChallengeRequest,
         response: {
           201: Type.Object({
@@ -335,9 +334,7 @@ export default async function accountDeviceApprovalRoutes(
     {
       preHandler: app.requireActiveDevice,
       schema: {
-        params: Type.Object({
-          challengeId: Type.String({ format: 'uuid' }),
-        }),
+        params: strictObject({ challengeId: Uuid }),
         body: ApprovalProofRequest,
         response: {
           200: Type.Object({

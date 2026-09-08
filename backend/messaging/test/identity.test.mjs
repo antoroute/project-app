@@ -22,6 +22,11 @@ const MESSAGE_ID = '55555555-5555-4555-8555-555555555555';
 const STORED_MESSAGE_ID = '66666666-6666-4666-8666-666666666666';
 const SENDER_DEVICE_ID = '88888888-8888-4888-8888-888888888888';
 const RECIPIENT_DEVICE_ID = '99999999-9999-4999-8999-999999999999';
+const KEY_32_B64 = Buffer.alloc(32).toString('base64');
+const NONCE_12_B64 = Buffer.alloc(12).toString('base64');
+const WRAP_48_B64 = Buffer.alloc(48).toString('base64');
+const SIGNATURE_64_B64 = Buffer.alloc(64).toString('base64');
+const CIPHERTEXT_16_B64 = Buffer.alloc(16).toString('base64');
 
 const ACCESS_KEYS = generateKeyPairSync('ed25519');
 const ACCESS_PRIVATE_KEY = ACCESS_KEYS.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -115,12 +120,12 @@ function messagePayload(senderUserId) {
     convId: CONVERSATION_ID,
     messageId: MESSAGE_ID,
     sentAt: Math.floor(Date.now() / 1000),
-    sender: { userId: senderUserId, deviceId: SENDER_DEVICE_ID, eph_pub: 'AA==', key_version: 1 },
-    recipients: [{ userId: FORGED_USER_ID, deviceId: RECIPIENT_DEVICE_ID, key_version: 1, wrap: 'AA==', nonce: 'AA==' }],
-    iv: 'AA==',
-    ciphertext: 'AA==',
-    sig: 'AA==',
-    salt: 'AA==',
+    sender: { userId: senderUserId, deviceId: SENDER_DEVICE_ID, eph_pub: KEY_32_B64, key_version: 1 },
+    recipients: [{ userId: FORGED_USER_ID, deviceId: RECIPIENT_DEVICE_ID, key_version: 1, wrap: WRAP_48_B64, nonce: NONCE_12_B64 }],
+    iv: NONCE_12_B64,
+    ciphertext: CIPHERTEXT_16_B64,
+    sig: SIGNATURE_64_B64,
+    salt: KEY_32_B64,
   };
 }
 

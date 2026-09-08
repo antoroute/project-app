@@ -1,7 +1,7 @@
 # Matrice de traçabilité fonctionnelle et sécurité
 
-Dernière mise à jour : 2026-08-25
-Code observé : branche `main`, changement `TC-106` lot D
+Dernière mise à jour : 2026-09-08
+Code observé : branche `main`, changement `TC-107`
 
 Cette matrice aide à retrouver rapidement le code réellement responsable d'un comportement. Elle n'atteste ni la qualité ni la sécurité d'une fonction : consulter la référence fonctionnelle, les invariants et les tâches liées avant toute modification.
 
@@ -10,7 +10,7 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 | Domaine | Entrées principales | Stockage/transport | Risques ou travail lié |
 |---|---|---|---|
 | démarrage et injection | [`main.dart`](../../frontend-mobile/flutter_message_app/lib/main.dart) | secure storage, SQLite, Socket.IO | `TC-601`, `TC-602` |
-| configuration des URL et en-têtes | [`constants.dart`](../../frontend-mobile/flutter_message_app/lib/config/constants.dart), [`api_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/api_service.dart) | HTTPS | `TC-109`, configuration release |
+| configuration des URL, en-têtes et bornes UX | [`constants.dart`](../../frontend-mobile/flutter_message_app/lib/config/constants.dart), [`api_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/api_service.dart) | HTTPS | bornes `TC-107`, `TC-109`, configuration release |
 | inscription, connexion, refresh, sortie | [`auth_provider.dart`](../../frontend-mobile/flutter_message_app/lib/core/providers/auth_provider.dart), [`biometric_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/biometric_service.dart) | secure storage, Auth API | `TC-401` à `TC-408` ; logout distant manquant |
 | identifiant et identité de compte/appareil | [`session_device_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/session_device_service.dart), [`account_device_identity_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/crypto/account_device_identity_service.dart) | secure storage, UUID, seed Ed25519 et preuves d'accès/liaison propres au compte | `TC-106` lots A-D terminés |
 | confiance et barrière d'appareil | [`account_device_trust_service.dart`](../../frontend-mobile/flutter_message_app/lib/core/services/account_device_trust_service.dart), [`auth_provider.dart`](../../frontend-mobile/flutter_message_app/lib/core/providers/auth_provider.dart), [`device_trust_gate_screen.dart`](../../frontend-mobile/flutter_message_app/lib/ui/screens/device_trust_gate_screen.dart) | Auth/Messaging API, état mémoire | `TC-106` lots C/D terminés |
@@ -46,8 +46,8 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 
 | Responsabilité | Code | Données | Tâches |
 |---|---|---|---|
-| démarrage/configuration | [`index.ts`](../../backend/auth/src/index.ts), [`config.ts`](../../backend/auth/src/config.ts) | variables d'environnement | `TC-101`, `TC-108` |
-| routes compte/session | [`auth.ts`](../../backend/auth/src/routes/auth.ts) | `users`, `refresh_tokens` | `TC-102`, `TC-401` à `TC-408` |
+| démarrage/configuration | [`index.ts`](../../backend/auth/src/index.ts), [`config.ts`](../../backend/auth/src/config.ts) | variables d'environnement, corps 16 Kio et objets stricts | `TC-101`, `TC-107`, `TC-108` |
+| routes compte/session | [`auth.ts`](../../backend/auth/src/routes/auth.ts) | entrées bornées, `users`, `refresh_tokens` | `TC-102`, `TC-107`, `TC-401` à `TC-408` |
 | réautorisation du premier appareil | [`auth.ts`](../../backend/auth/src/routes/auth.ts) | `device_bootstrap_grants`, empreinte SHA-256 | `TC-106` lot B |
 | JWT access/refresh | [`jwt.ts`](../../backend/auth/src/security/jwt.ts) | Ed25519/HS256 | `TC-102` terminé |
 | faux secret d'application | [`validateAppSecret.ts`](../../backend/auth/src/middlewares/validateAppSecret.ts) | en-tête client | `TC-109` |
@@ -58,7 +58,7 @@ Cette matrice aide à retrouver rapidement le code réellement responsable d'un 
 
 | Responsabilité | Code | Données/événements | Tâches |
 |---|---|---|---|
-| serveur HTTP et Socket.IO | [`index.ts`](../../backend/messaging/src/index.ts) | événements temps réel | `TC-108`, `TC-505`, `TC-510` |
+| serveur HTTP et Socket.IO | [`index.ts`](../../backend/messaging/src/index.ts), [`input.schema.ts`](../../backend/messaging/src/schemas/input.schema.ts) | corps HTTP 256 Kio, paquets WS 16 Kio, événements entrants stricts | `TC-107` terminé, `TC-108`, `TC-505`, `TC-510` |
 | configuration | [`config.ts`](../../backend/messaging/src/config.ts) | variables d'environnement | `TC-101`, `TC-108` |
 | validation JWT et appareil HTTP/socket | [`jwt.ts`](../../backend/messaging/src/security/jwt.ts), [`deviceAuth.ts`](../../backend/messaging/src/middlewares/deviceAuth.ts), [`deviceAccess.ts`](../../backend/messaging/src/security/deviceAccess.ts), [`socketAuth.ts`](../../backend/messaging/src/middlewares/socketAuth.ts) | JWT access public-key-only + preuve Ed25519 liée au jti | `TC-102`, `TC-106` lot D |
 | transactions PostgreSQL | [`db.ts`](../../backend/messaging/src/plugins/db.ts) | connexion réservée, commit/rollback, retry borné | `TC-105` terminé |

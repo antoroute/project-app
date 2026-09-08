@@ -9,6 +9,11 @@ import { Type } from '@sinclair/typebox';
 import type { DbExecutor } from '../plugins/db.js';
 import { authenticatedUserId } from '../security/jwt.js';
 import { authenticatedDevice } from '../middlewares/deviceAuth.js';
+import {
+  MAX_MESSAGE_CIPHERTEXT_BYTES,
+  Uuid,
+  strictObject,
+} from '../schemas/input.schema.js';
 
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
@@ -21,6 +26,18 @@ export default async function routes(app: FastifyInstance) {
     const b = req.body as any;
     const senderUserId = authenticatedUserId(req);
     const requestDevice = authenticatedDevice(req);
+    if (Buffer.from(b.ciphertext, 'base64').length > MAX_MESSAGE_CIPHERTEXT_BYTES) {
+      return reply.code(400).send({ error: 'ciphertext_too_large' });
+    }
+    const recipientIds = new Set(
+      b.recipients.map(
+        (recipient: { userId: string; deviceId: string }) =>
+          `${recipient.userId}\u0000${recipient.deviceId}`,
+      ),
+    );
+    if (recipientIds.size !== b.recipients.length) {
+      return reply.code(400).send({ error: 'duplicate_recipient' });
+    }
 
     // sender.userId appartient au domaine signé E2EE : une divergence ne peut
     // pas être corrigée silencieusement sans invalider l'enveloppe.
@@ -96,11 +113,13 @@ export default async function routes(app: FastifyInstance) {
   // GET /api/conversations/:id/messages : v2 only
   app.get('/api/conversations/:id/messages', {
     schema: {
-      params: Type.Object({ id: Type.String({ format: 'uuid' }) }),
-      querystring: Type.Object({
-        cursor: Type.Optional(Type.String()),
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 }))
-      })
+      params: strictObject({ id: Uuid }),
+      querystring: strictObject({
+        cursor: Type.Optional(
+          Type.String({ minLength: 1, maxLength: 10, pattern: '^[0-9]+$' }),
+        ),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+      }),
     }
   }, async (req, reply) => {
     const { id } = req.params as any;
@@ -120,11 +139,11 @@ export default async function routes(app: FastifyInstance) {
       let cursorDate = null;
       if (cursor) {
         try {
-          const cursorMs = Number(cursor);
-          if (isNaN(cursorMs) || cursorMs < 0) {
+          const cursorSeconds = Number(cursor);
+          if (!Number.isSafeInteger(cursorSeconds) || cursorSeconds < 0) {
             return reply.code(400).send({ error: 'invalid_cursor' });
           }
-          cursorDate = new Date(cursorMs);
+          cursorDate = new Date(cursorSeconds * 1000);
         } catch (e) {
           return reply.code(400).send({ error: 'invalid_cursor_format' });
         }

@@ -6,6 +6,11 @@ import { Type } from '@sinclair/typebox';
 
 import type { DbExecutor } from '../plugins/db.js';
 import { authenticatedUserId } from '../security/jwt.js';
+import {
+  MAX_CONVERSATION_MEMBERS,
+  Uuid,
+  strictObject,
+} from '../schemas/input.schema.js';
 
 export default async function routes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
@@ -14,10 +19,15 @@ export default async function routes(app: FastifyInstance) {
   // POST /api/conversations  { groupId, type: 'private'|'subset', memberIds: UUID[] }
   app.post('/api/conversations', {
     schema: {
-      body: Type.Object({
-        groupId: Type.String({ format: 'uuid' }),
+      body: strictObject({
+        groupId: Uuid,
         type: Type.Union([Type.Literal('private'), Type.Literal('subset')]),
-        memberIds: Type.Array(Type.String({ format: 'uuid' }), { minItems: 1 })
+        memberIds: Type.Array(Uuid, {
+          minItems: 1,
+          // Le créateur est ajouté automatiquement par la route.
+          maxItems: MAX_CONVERSATION_MEMBERS - 1,
+          uniqueItems: true,
+        }),
       })
     }
   }, async (req, reply) => {
@@ -94,7 +104,7 @@ export default async function routes(app: FastifyInstance) {
 
   // GET /api/conversations/:id : détails d'une conversation spécifique
   app.get('/api/conversations/:id', {
-    schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) }
+    schema: { params: strictObject({ id: Uuid }) }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
@@ -145,7 +155,7 @@ export default async function routes(app: FastifyInstance) {
 
   // POST /api/conversations/:id/read  -> mark as read + WS "conv:read"
   app.post('/api/conversations/:id/read', {
-    schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) }
+    schema: { params: strictObject({ id: Uuid }) }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;
@@ -172,7 +182,7 @@ export default async function routes(app: FastifyInstance) {
 
   // GET /api/conversations/:id/readers -> qui a lu (last_read_at par membre)
   app.get('/api/conversations/:id/readers', {
-    schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) }
+    schema: { params: strictObject({ id: Uuid }) }
   }, async (req, reply) => {
     const userId = authenticatedUserId(req);
     const { id: convId } = req.params as any;

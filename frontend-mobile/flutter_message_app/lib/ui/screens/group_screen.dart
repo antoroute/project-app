@@ -8,6 +8,7 @@ import 'package:flutter_message_app/core/services/snackbar_service.dart';
 import 'package:flutter_message_app/ui/screens/qr_scan_screen.dart';
 import 'package:flutter_message_app/ui/screens/group_nav_screen.dart';
 import 'package:flutter_message_app/ui/screens/home_screen.dart';
+import 'package:flutter_message_app/config/constants.dart';
 
 class GroupScreen extends StatefulWidget {
   const GroupScreen({Key? key}) : super(key: key);
@@ -38,6 +39,20 @@ class _GroupScreenState extends State<GroupScreen> {
         throw StateError('Appareil actif requis');
       }
       final groupName = _groupNameController.text.trim();
+      if (groupName.length < 3 || groupName.length > maxGroupNameCharacters) {
+        SnackbarService.showError(
+          context,
+          'Le nom du groupe doit contenir entre 3 et $maxGroupNameCharacters caractères',
+        );
+        return;
+      }
+      if (RegExp(r'[\x00-\x1F\x7F]').hasMatch(groupName)) {
+        SnackbarService.showError(
+          context,
+          'Le nom du groupe contient un caractère interdit',
+        );
+        return;
+      }
 
       // Utiliser le nom du groupe comme identifiant temporaire pour générer les clés groupe
       await KeyManagerFinal.instance.ensureKeysFor(groupName, deviceId);
@@ -79,6 +94,13 @@ class _GroupScreenState extends State<GroupScreen> {
   Future<void> _joinGroup() async {
     setState(() => _loading = true);
     final String groupId = _groupIdController.text.trim();
+    if (!RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+    ).hasMatch(groupId)) {
+      SnackbarService.showError(context, 'Identifiant de groupe invalide');
+      setState(() => _loading = false);
+      return;
+    }
     try {
       // 🚀 NOUVEAU: Générer les clés du groupe avec KeyManagerV2 (basé sur l'ID du groupe)
       final auth = context.read<AuthProvider>();
@@ -132,6 +154,7 @@ class _GroupScreenState extends State<GroupScreen> {
           children: <Widget>[
             TextField(
               controller: _groupNameController,
+              maxLength: maxGroupNameCharacters,
               decoration: const InputDecoration(labelText: 'Nom du groupe'),
             ),
             const SizedBox(height: 8),
@@ -145,6 +168,7 @@ class _GroupScreenState extends State<GroupScreen> {
                 Expanded(
                   child: TextField(
                     controller: _groupIdController,
+                    maxLength: 36,
                     decoration: const InputDecoration(
                       labelText: 'ID du groupe à rejoindre',
                     ),

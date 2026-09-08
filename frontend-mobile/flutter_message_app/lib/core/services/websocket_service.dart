@@ -541,13 +541,50 @@ class WebSocketService {
   Future<Map<String, dynamic>> subscribeConversationsBatch(
     List<String> conversationIds,
   ) async {
-    if (conversationIds.isEmpty) {
+    final requestedConversationIds = conversationIds.toSet().toList();
+    if (requestedConversationIds.isEmpty) {
       return {'success': false, 'error': 'No conversation IDs provided'};
+    }
+    if (requestedConversationIds.length > maxSocketBatchConversations) {
+      var subscribed = 0;
+      var alreadySubscribed = 0;
+      var unauthorized = 0;
+      final subscribedIds = <String>[];
+      for (
+        var offset = 0;
+        offset < requestedConversationIds.length;
+        offset += maxSocketBatchConversations
+      ) {
+        final end =
+            (offset + maxSocketBatchConversations <
+                    requestedConversationIds.length)
+                ? offset + maxSocketBatchConversations
+                : requestedConversationIds.length;
+        final result = await subscribeConversationsBatch(
+          requestedConversationIds.sublist(offset, end),
+        );
+        if (result['success'] != true) return result;
+        subscribed += result['subscribed'] as int? ?? 0;
+        alreadySubscribed += result['alreadySubscribed'] as int? ?? 0;
+        unauthorized += result['unauthorized'] as int? ?? 0;
+        subscribedIds.addAll(
+          (result['convIds'] as List<dynamic>? ?? const []).map(
+            (id) => id.toString(),
+          ),
+        );
+      }
+      return {
+        'success': true,
+        'subscribed': subscribed,
+        'alreadySubscribed': alreadySubscribed,
+        'unauthorized': unauthorized,
+        'convIds': subscribedIds,
+      };
     }
 
     // Filtrer les conversations déjà abonnées
     final newConversations =
-        conversationIds
+        requestedConversationIds
             .where((id) => !_subscribedConversations.contains(id))
             .toList();
 
@@ -556,7 +593,7 @@ class WebSocketService {
       return {
         'success': true,
         'subscribed': 0,
-        'alreadySubscribed': conversationIds.length,
+        'alreadySubscribed': requestedConversationIds.length,
         'unauthorized': 0,
         'convIds': [],
       };

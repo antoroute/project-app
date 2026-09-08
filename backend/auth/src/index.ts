@@ -12,9 +12,15 @@ import enforceVersion from './middlewares/enforceVersion.js';
 import validateAppSecret from './middlewares/validateAppSecret.js';
 import authRoutes from './routes/auth.js';
 
+const AUTH_BODY_LIMIT_BYTES = 16 * 1024;
+
 async function build() {
   const config = loadConfig();
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    bodyLimit: AUTH_BODY_LIMIT_BYTES,
+    ajv: { customOptions: { removeAdditional: false } },
+  });
 
   await app.register(fastifyHelmet, { contentSecurityPolicy: false });
   await app.register(fastifyCors, { origin: true, credentials: true });

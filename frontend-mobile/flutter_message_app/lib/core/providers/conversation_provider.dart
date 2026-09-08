@@ -21,6 +21,7 @@ import 'dart:convert';
 import 'package:flutter_message_app/core/crypto/message_cipher_v2.dart';
 import 'package:flutter_message_app/core/crypto/message_envelope_verifier.dart';
 import 'package:flutter_message_app/core/crypto/key_manager_final.dart';
+import 'package:flutter_message_app/config/constants.dart';
 
 /// Gère l'état des conversations et des messages.
 class ConversationProvider extends ChangeNotifier {
@@ -1427,8 +1428,8 @@ class ConversationProvider extends ChangeNotifier {
       (a, b) => a.timestamp < b.timestamp ? a : b,
     );
 
-    // CORRECTION: Le backend attend un timestamp en millisecondes pour new Date()
-    // Vérifier que le timestamp est valide (pas dans le futur)
+    // Le contrat API exprime les timestamps et le curseur en secondes Unix.
+    // Vérifier que le timestamp est valide (pas dans le futur).
     final timestamp = oldestMessage.timestamp;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
@@ -1446,10 +1447,8 @@ class ConversationProvider extends ChangeNotifier {
       return false;
     }
 
-    // Convertir en millisecondes pour le backend
-    final cursorMs = timestamp * 1000;
     debugPrint(
-      '🔄 Chargement messages anciens avec cursor: $cursorMs (timestamp ms)',
+      '🔄 Chargement messages anciens avec cursor: $timestamp (timestamp s)',
     );
 
     try {
@@ -1457,7 +1456,7 @@ class ConversationProvider extends ChangeNotifier {
         context,
         conversationId,
         limit: limit,
-        cursor: cursorMs.toString(),
+        cursor: timestamp.toString(),
       );
 
       debugPrint('📄 Chargement terminé - hasMore: $hasMore');
@@ -1587,6 +1586,14 @@ class ConversationProvider extends ChangeNotifier {
         throw Exception(
           'Aucun device actif trouvé pour les membres de la conversation',
         );
+      }
+      if (conversationDevices.length > maxMessageRecipients) {
+        throw Exception(
+          'Cette conversation dépasse la limite de $maxMessageRecipients appareils destinataires',
+        );
+      }
+      if (utf8.encode(plaintext).length > maxMessagePlaintextBytes) {
+        throw Exception('Message trop long (maximum 64 Kio)');
       }
 
       debugPrint(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_message_app/core/providers/auth_provider.dart';
 import 'package:flutter_message_app/core/services/snackbar_service.dart';
+import 'package:flutter_message_app/config/constants.dart';
 import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -12,11 +13,12 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final TextEditingController _usernameController        = TextEditingController();
-  final TextEditingController _emailController           = TextEditingController();
-  final TextEditingController _passwordController        = TextEditingController();
-  final TextEditingController _confirmPasswordController = TextEditingController();
-  final GlobalKey<FormState> _formKey                    = GlobalKey<FormState>();
+  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -25,8 +27,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (value == null || value.isEmpty) {
       return 'Entrez un mot de passe';
     }
-    if (value.length < 6) {
-      return 'Au moins 6 caractères';
+    if (value.length < minPasswordCharacters) {
+      return 'Au moins $minPasswordCharacters caractères';
+    }
+    if (value.length > maxPasswordCharacters) {
+      return 'Maximum $maxPasswordCharacters caractères';
     }
     if (!RegExp(r'[A-Z]').hasMatch(value)) {
       return 'Au moins une majuscule';
@@ -41,18 +46,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
-      final authProvider =
-          Provider.of<AuthProvider>(context, listen: false);
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
       // Inscription
       await authProvider.register(
         _emailController.text.trim(),
-        _passwordController.text.trim(),
+        _passwordController.text,
         _usernameController.text.trim(),
       );
       // Auto-login
       await authProvider.login(
         _emailController.text.trim(),
-        _passwordController.text.trim(),
+        _passwordController.text,
       );
       if (!mounted) return;
       Navigator.popUntil(context, (route) => route.isFirst);
@@ -61,10 +65,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'Compte créé et connecté avec succès',
       );
     } catch (e) {
-      SnackbarService.showError(
-        context,
-        'Erreur d\'inscription : $e',
-      );
+      SnackbarService.showError(context, 'Erreur d\'inscription : $e');
     } finally {
       setState(() => _isLoading = false);
     }
@@ -91,102 +92,114 @@ class _RegisterScreenState extends State<RegisterScreen> {
             key: _formKey,
             child: Column(
               children: <Widget>[
-              TextFormField(
-                controller: _usernameController,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                decoration:
-                    const InputDecoration(labelText: 'Nom d\'utilisateur'),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Entrez un nom d\'utilisateur';
-                  }
-                  if (value.length < 3) {
-                    return 'Au moins 3 caractères';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _emailController,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                decoration: const InputDecoration(labelText: 'Email'),
-                keyboardType: TextInputType.emailAddress,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Entrez votre email';
-                  }
-                  if (!value.contains('@')) {
-                    return 'Email invalide';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _passwordController,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                decoration: InputDecoration(
-                  labelText: 'Mot de passe',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
+                TextFormField(
+                  controller: _usernameController,
+                  maxLength: maxUsernameCharacters,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  decoration: const InputDecoration(
+                    labelText: 'Nom d\'utilisateur',
                   ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Entrez un nom d\'utilisateur';
+                    }
+                    if (value.length < 3) {
+                      return 'Au moins 3 caractères';
+                    }
+                    if (value.trim() != value ||
+                        RegExp(r'[\x00-\x1F\x7F]').hasMatch(value)) {
+                      return 'Espaces en bordure ou caractères de contrôle interdits';
+                    }
+                    return null;
+                  },
                 ),
-                obscureText: _obscurePassword,
-                validator: _validatePassword,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _confirmPasswordController,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                decoration: InputDecoration(
-                  labelText: 'Confirmer le mot de passe',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _emailController,
+                  maxLength: maxEmailCharacters,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  decoration: const InputDecoration(labelText: 'Email'),
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Entrez votre email';
+                    }
+                    if (!value.contains('@')) {
+                      return 'Email invalide';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _passwordController,
+                  maxLength: maxPasswordCharacters,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  decoration: InputDecoration(
+                    labelText: 'Mot de passe',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility
+                            : Icons.visibility_off,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
                     ),
-                    onPressed: () {
-                      setState(() {
-                        _obscureConfirmPassword = !_obscureConfirmPassword;
-                      });
-                    },
                   ),
+                  obscureText: _obscurePassword,
+                  validator: _validatePassword,
                 ),
-                obscureText: _obscureConfirmPassword,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Confirmez le mot de passe';
-                  }
-                  if (value != _passwordController.text) {
-                    return 'Les mots de passe ne correspondent pas';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 20),
-              _isLoading
-                  ? const CircularProgressIndicator()
-                  : ElevatedButton(
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _confirmPasswordController,
+                  maxLength: maxPasswordCharacters,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  decoration: InputDecoration(
+                    labelText: 'Confirmer le mot de passe',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureConfirmPassword
+                            ? Icons.visibility
+                            : Icons.visibility_off,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscureConfirmPassword = !_obscureConfirmPassword;
+                        });
+                      },
+                    ),
+                  ),
+                  obscureText: _obscureConfirmPassword,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Confirmez le mot de passe';
+                    }
+                    if (value != _passwordController.text) {
+                      return 'Les mots de passe ne correspondent pas';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _isLoading
+                    ? const CircularProgressIndicator()
+                    : ElevatedButton(
                       onPressed: _register,
                       child: const Text('Créer un compte'),
                     ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const LoginScreen()),
-                  );
-                },
-                child: const Text('Déjà inscrit ? Se connecter'),
-              ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    );
+                  },
+                  child: const Text('Déjà inscrit ? Se connecter'),
+                ),
               ],
             ),
           ),

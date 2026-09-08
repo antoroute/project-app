@@ -10,16 +10,27 @@ import {
   verifyRefreshToken,
 } from '../security/jwt.js';
 
-const RegisterBody = Type.Object({
-  email: Type.String({ format: 'email' }),
-  username: Type.String({ minLength: 3, maxLength: 64 }),
-  password: Type.String({ minLength: 8 })
+const Email = Type.String({
+  format: 'email',
+  minLength: 3,
+  maxLength: 254,
+});
+const Password = Type.String({ minLength: 8, maxLength: 1024 });
+const Username = Type.String({
+  minLength: 3,
+  maxLength: 64,
+  pattern: '^(?!\\s)(?!.*\\s$)[^\\u0000-\\u001F\\u007F]+$',
 });
 
-const LoginBody = Type.Object({
-  email: Type.String({ format: 'email' }),
-  password: Type.String({ minLength: 8 })
-});
+const RegisterBody = Type.Object(
+  { email: Email, username: Username, password: Password },
+  { additionalProperties: false },
+);
+
+const LoginBody = Type.Object(
+  { email: Email, password: Password },
+  { additionalProperties: false },
+);
 
 const DeviceBootstrapGrantBody = Type.Object(
   { password: Type.String({ minLength: 8, maxLength: 1024 }) },
